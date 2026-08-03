@@ -69,8 +69,11 @@ try {
     cwd: testProject,
     encoding: "utf8"
   })
-  if (!versionOutput.includes("0.1.0-alpha.1")) {
-    throw new Error(`Expected clint --version to contain '0.1.0-alpha.1', received: ${versionOutput}`)
+  const expectedVersion = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "package.json"), "utf8")
+  ).version
+  if (!versionOutput.includes(expectedVersion)) {
+    throw new Error(`Expected clint --version to contain '${expectedVersion}', received: ${versionOutput}`)
   }
 
   // 5. Test binary execution: --print-config

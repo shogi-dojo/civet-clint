@@ -5,6 +5,35 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.2] - 2026-08-03
+
+Maintenance release. This is the first release published by the automated
+GitHub Actions pipeline using npm Trusted Publishing (OIDC); `0.1.0-alpha.1` was
+published manually to claim the package name. No library or CLI behavior has
+changed from `0.1.0-alpha.1`.
+
+### Changed
+
+- **Release automation**: the publish workflow now authenticates solely via
+  Trusted Publishing (OIDC); no npm token is stored as a repository or
+  environment secret.
+- **README**: the release-status note no longer hardcodes a version number, so it
+  does not go stale on each release.
+
+### Fixed
+
+- **Smoke test under `npm publish --dry-run`**: `npm_config_dry_run` leaked from
+  the parent publish into the nested `npm pack`/`npm install` calls, so the
+  packaged-install smoke test failed on the exact command used to rehearse a
+  release. The flag is now cleared for those child processes.
+- **Publish workflow tag guard**: the tag/version equality check was skipped for
+  any non-tag ref, so a `workflow_dispatch` run could publish unverified code.
+  Non-tag refs and malformed tag names are now rejected.
+- **Version assertions no longer hardcoded**: the CLI tests and the packaged
+  smoke test asserted the literal string `0.1.0-alpha.1`, so `release:check`
+  failed on every version bump — the release process broke its own gate. They now
+  derive the expected version from `package.json`.
+
 ## [0.1.0-alpha.1] - 2026-08-03
 
 First public alpha release of `civet-clint`, the compiler-backed style checker and autofixer for Civet codebases.

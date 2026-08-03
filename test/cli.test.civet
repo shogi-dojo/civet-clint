@@ -9,9 +9,12 @@ describe "CLI Suite", ->
     manifest := JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"))
     expect(manifest.name).toBe("civet-clint")
     expect(manifest.bin).toEqual({ clint: "./bin/civet-clint.js" })
-    expect(manifest.version).toBe("0.1.0-alpha.1")
+    // Asserting the shape rather than a literal keeps release bumps from
+    // breaking this test while still catching a malformed version field.
+    expect(manifest.version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/)
 
   it "prints version with --version", async ->
+    manifest := JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"))
     originalLog := console.log
     captured: string[] := []
     console.log = (...args) -> captured.push(args.join(" "))
@@ -21,7 +24,8 @@ describe "CLI Suite", ->
     finally
       console.log = originalLog
     expect(code).toBe(0)
-    expect(captured.join("\n")).toContain("0.1.0-alpha.1")
+    // The CLI must report the manifest version, not a hardcoded constant.
+    expect(captured.join("\n")).toContain(manifest.version)
 
   it "parses command line arguments correctly", ->
     opts := parseCliArgs(["--write", "--config", "./custom.json", "--format=json", "src", "test/file.civet"])

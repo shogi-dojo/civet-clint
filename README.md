@@ -8,7 +8,7 @@
 
 Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Every autofix edit is compiled and re-verified: changes are applied only when the compiled JavaScript/TypeScript output is byte-for-byte identical to the original output. This provides a behavior-preservation safety guard against accidental semantic breakage.
 
-> **Release Status:** Alpha (`0.1.0-alpha.1` on npm's `next` dist-tag). The tool targets `@danielx/civet` 0.11.15.
+> **Release Status:** Alpha, published under npm's `next` dist-tag. The tool targets `@danielx/civet` 0.11.15.
 
 ---
 
