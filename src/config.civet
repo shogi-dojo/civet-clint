@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ClintConfig, CompileDial, CompileOptions, ResolvedConfig, RuleLevel, SkippedRule } from "./types.civet"
-import { allRules } from "./rules/index.civet"
+import type { ClintConfig, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleLevel, SkippedRule } from "./types.civet"
+import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 
 const TOP_LEVEL_COMPILE_OPTIONS = new Set([
   "filename"
@@ -141,11 +141,15 @@ export function loadCivetOptions(civetConfigPath?: string, cwd: string = process
 // when any key in `meta.capabilities.requires` is falsy on the dial. Skipped rules
 // are reported by `clint --print-config` and never executed, so they never emit an
 // autofix whose replacement is invalid under the active dial.
-export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial): SkippedRule[]
+export function computeSkippedRules(
+  rules: Record<string, RuleLevel>,
+  dial: CompileDial,
+  registry: RuleRegistry = defaultRuleRegistry
+): SkippedRule[]
   skipped: SkippedRule[] := []
   for ruleId of Object.keys(rules)
     continue if rules[ruleId] is "off"
-    rule := allRules[ruleId]
+    rule := registry.get(ruleId)
     continue unless rule
     requires := rule.meta.capabilities?.requires
     requiresAny := rule.meta.capabilities?.requiresAny
@@ -161,7 +165,56 @@ export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: Comp
       })
   skipped
 
-export function loadConfig(explicitConfigPath?: string, cwd: string = process.cwd()): ResolvedConfig
+export function globToRegex(glob: string): RegExp
+  normalized := glob.replace(/\\/g, "/")
+  var re = ""
+  var i = 0
+  while i < normalized.length
+    c := normalized[i]
+    if c is "*"
+      if normalized[i + 1] is "*"
+        if normalized[i + 2] is "/"
+          re += "(?:.*/)?"
+          i += 3
+          continue
+        else
+          re += ".*"
+          i += 2
+          continue
+      else
+        re += "[^/]*"
+        i++
+        continue
+    else if c is "?"
+      re += "[^/]"
+      i++
+    else if "./+^$()|{}[]".includes(c)
+      re += "\\" + c
+      i++
+    else
+      re += c
+      i++
+  new RegExp("^" + re + "$")
+
+export function matchesFilePattern(filePath: string, pattern: string, configBaseDir: string = process.cwd()): boolean
+  cleanPattern := pattern.replace(/\\/g, "/").replace(/^\.\//, "")
+  cleanPath := filePath.replace(/\\/g, "/")
+  cleanBase := configBaseDir.replace(/\\/g, "/")
+
+  relPath := path.relative(cleanBase, cleanPath).replace(/\\/g, "/")
+  basename := path.basename(cleanPath)
+
+  regex := globToRegex(cleanPattern)
+  if cleanPattern.includes("/")
+    regex.test(relPath) or regex.test(cleanPath)
+  else
+    regex.test(basename) or regex.test(relPath)
+
+export function loadConfig(
+  explicitConfigPath?: string,
+  cwd: string = process.cwd(),
+  registry: RuleRegistry = defaultRuleRegistry
+): ResolvedConfig
   var configPath: string | undefined = undefined
   var userConfig: ClintConfig = {}
 
@@ -191,6 +244,26 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
     level := mergedRules[ruleId]
     unless level is "off" or level is "warn" or level is "error"
       throw new Error(`Invalid level for rule "${ruleId}": expected off, warn, or error`)
+    if (level is "warn" or level is "error") and not registry.has(ruleId)
+      throw new Error(`Unknown rule ID: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+
+  if userConfig.overrides?
+    unless Array.isArray(userConfig.overrides)
+      throw new Error("Configuration overrides must be an array")
+    for override of userConfig.overrides
+      unless override? and typeof override is "object"
+        throw new Error("Each override must be an object")
+      unless override.files? and (typeof override.files is "string" or (Array.isArray(override.files) and override.files.every((f) => typeof f is "string" and f.length > 0)))
+        throw new Error("Each override must have a 'files' string or array of strings")
+      if override.preset? and not PRESETS[override.preset]
+        throw new Error(`Unknown preset in override: "${override.preset}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
+      if override.rules?
+        for ruleId of Object.keys(override.rules)
+          level := override.rules[ruleId]
+          unless level is "off" or level is "warn" or level is "error"
+            throw new Error(`Invalid level for override rule "${ruleId}": expected off, warn, or error`)
+          if (level is "warn" or level is "error") and not registry.has(ruleId)
+            throw new Error(`Unknown rule ID in override: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
 
   configBase := configPath ? path.dirname(configPath) : cwd
   explicitCivetConfigPath := userConfig.civetConfig
@@ -200,7 +273,7 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
   civetOptions := { ...presetDef.civetOptions, ...userDial }
   compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
 
-  skippedRules := computeSkippedRules(mergedRules, civetOptions)
+  skippedRules := computeSkippedRules(mergedRules, civetOptions, registry)
 
   {
     preset: presetName
@@ -210,4 +283,74 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
     compileOptions
     configPath
     skippedRules
+    overrides: userConfig.overrides
+    matchingOverrides: []
+  }
+
+export function resolveConfigForFile(
+  baseConfig: ResolvedConfig,
+  filePath: string,
+  cwd: string = process.cwd(),
+  registry: RuleRegistry = defaultRuleRegistry
+): ResolvedConfig
+  configBase := baseConfig.configPath ? path.dirname(baseConfig.configPath) : cwd
+  overrides := baseConfig.overrides or []
+
+  var effectivePreset = baseConfig.preset
+  var effectiveCivetConfigPath = baseConfig.civetConfigPath
+  var effectiveCivetOptions: CompileDial = { ...baseConfig.civetOptions }
+  var effectiveCompileOptions: CompileOptions = { ...baseConfig.compileOptions }
+  var effectiveRules: Record<string, RuleLevel> = { ...baseConfig.rules }
+  matchingOverrides: string[] := []
+
+  for override of overrides
+    patterns := Array.isArray(override.files) ? override.files : [override.files]
+    matched := patterns.some (pattern) -> matchesFilePattern(filePath, pattern, configBase)
+    continue unless matched
+
+    matchingOverrides.push(patterns.join(", "))
+
+    if override.preset
+      presetDef := PRESETS[override.preset]
+      unless presetDef
+        throw new Error(`Unknown preset in override: "${override.preset}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
+      effectivePreset = override.preset
+      effectiveRules = { ...presetDef.rules, ...effectiveRules }
+      effectiveCivetOptions = { ...presetDef.civetOptions, ...effectiveCivetOptions }
+      effectiveCompileOptions = { ...presetDef.compileOptions, ...effectiveCompileOptions }
+
+    if override.civetConfig
+      explicitCivetPath := path.resolve(configBase, override.civetConfig)
+      { dial, compileOptions, resolvedPath } := loadCivetConfig(explicitCivetPath, configBase)
+      effectiveCivetConfigPath = resolvedPath
+      effectiveCivetOptions = { ...effectiveCivetOptions, ...dial }
+      effectiveCompileOptions = { ...effectiveCompileOptions, ...compileOptions }
+
+    if override.civetOptions
+      effectiveCivetOptions = { ...effectiveCivetOptions, ...override.civetOptions }
+
+    if override.compileOptions
+      effectiveCompileOptions = { ...effectiveCompileOptions, ...override.compileOptions }
+
+    if override.rules
+      for ruleId of Object.keys(override.rules)
+        level := override.rules[ruleId]
+        unless level is "off" or level is "warn" or level is "error"
+          throw new Error(`Invalid level for override rule "${ruleId}": expected off, warn, or error`)
+        if (level is "warn" or level is "error") and not registry.has(ruleId)
+          throw new Error(`Unknown rule ID in override: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+        effectiveRules[ruleId] = level
+
+  skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
+
+  {
+    preset: effectivePreset
+    rules: effectiveRules
+    civetConfigPath: effectiveCivetConfigPath
+    civetOptions: effectiveCivetOptions
+    compileOptions: effectiveCompileOptions
+    configPath: baseConfig.configPath
+    skippedRules
+    overrides: baseConfig.overrides
+    matchingOverrides
   }

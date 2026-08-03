@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource, lintFile } from "../src/engine.civet"
-import { applyEdits, createLineColumnIndex, detectLineEnding, atomicWriteFile } from "../src/utils.civet"
+import { applyEdits, createLineColumnIndex, atomicWriteFile } from "../src/utils.civet"
 import { loadConfig } from "../src/config.civet"
-import { allRules } from "../src/rules/index.civet"
+import { defaultRuleRegistry, RuleRegistry } from "../src/registry.civet"
 import type { Rule } from "../src/types.civet"
 
 describe "Engine & Utils", ->
@@ -47,7 +47,6 @@ describe "Engine & Utils", ->
     expect(res.isEquivalencePreserved).toBe(false)
 
   it "rejects fixes that produce non-equivalent compiler output", ->
-    // Register a dummy mock rule that intentionally produces broken/different output
     dummyRule: Rule := {
       id: "test/bad-rule"
       meta: {
@@ -67,14 +66,14 @@ describe "Engine & Utils", ->
             }
           })
     }
-    allRules["test/bad-rule"] = dummyRule
+    registry := defaultRuleRegistry.clone()
+    registry.register(dummyRule)
 
     res := lintSource("x := 1", {
+      registry
       rules: { "test/bad-rule": "error" }
       fix: true
     })
-
-    delete allRules["test/bad-rule"]
 
     expect(res.isEquivalencePreserved).toBe(false)
     expect(res.appliedFixesCount).toBe(0)
@@ -96,14 +95,14 @@ describe "Engine & Utils", ->
           fix: { start: 0, end: 1, replacement: ")" }
         })
     }
-    allRules["test/broken-rule"] = dummyRule
+    registry := defaultRuleRegistry.clone()
+    registry.register(dummyRule)
 
     res := lintSource("x := 1", {
+      registry
       rules: { "test/broken-rule": "error" }
       fix: true
     })
-
-    delete allRules["test/broken-rule"]
 
     expect(res.isEquivalencePreserved).toBe(false)
     failure := res.diagnostics.find (d) -> d.ruleId is "compiler-equivalence-failed"
@@ -125,14 +124,14 @@ describe "Engine & Utils", ->
           fix: { start: pos, end: pos + 1, replacement: "2" }
         })
     }
-    allRules["test/bad-batch"] = dummyRule
+    registry := defaultRuleRegistry.clone()
+    registry.register(dummyRule)
 
     res := lintSource("a === b\nx := 1", {
+      registry
       rules: { "test/bad-batch": "error" }
       fix: true
     })
-
-    delete allRules["test/bad-batch"]
 
     expect(res.fixedSource).toBe("a is b\nx := 1")
     expect(res.appliedFixesCount).toBe(1)
@@ -162,14 +161,14 @@ describe "Engine & Utils", ->
           }
         })
     }
-    allRules["test/crlf-rule"] = dummyRule
+    registry := defaultRuleRegistry.clone()
+    registry.register(dummyRule)
 
     await lintFile(testFile, {
+      registry
       rules: { "test/crlf-rule": "error" }
       fix: true
     })
-
-    delete allRules["test/crlf-rule"]
 
     written := await fs.readFile(testFile, "utf8")
     expect(written.includes("\r\n")).toBe(true)

@@ -118,6 +118,18 @@ export interface Rule {
   meta: RuleMeta;
   check(context: RuleContext): void;
 }
+export interface Plugin {
+  name: string;
+  rules?: Rule[] | Record<string, Rule>;
+}
+export interface ConfigOverride {
+  files: string | string[];
+  preset?: string;
+  civetConfig?: string;
+  rules?: Record<string, RuleLevel>;
+  civetOptions?: CompileDial;
+  compileOptions?: CompileOptions;
+}
 export interface LintResult {
   filePath: string;
   source: string;
@@ -133,6 +145,7 @@ export interface ClintConfig {
   preset?: string;
   civetConfig?: string;
   rules?: Record<string, 'off' | 'warn' | 'error'>;
+  overrides?: ConfigOverride[];
 }
 export interface SkippedRule {
   ruleId: string;
@@ -146,10 +159,25 @@ export interface ResolvedConfig {
   compileOptions: CompileOptions;
   configPath?: string;
   skippedRules: SkippedRule[];
+  overrides?: ConfigOverride[];
+  matchingOverrides?: string[];
 }
+export class RuleRegistry {
+  constructor(initialRules?: Rule[] | Record<string, Rule>);
+  register(rule: Rule): this;
+  registerPlugin(plugin: Plugin): this;
+  get(id: string): Rule | undefined;
+  has(id: string): boolean;
+  getRules(): Record<string, Rule>;
+  getRuleList(): Rule[];
+  clone(): RuleRegistry;
+}
+export function createDefaultRuleRegistry(): RuleRegistry;
+export const defaultRuleRegistry: RuleRegistry;
 export interface LintOptions {
   filename?: string;
   config?: ResolvedConfig;
+  registry?: RuleRegistry;
   civetOptions?: Record<string, any>;
   compileOptions?: Record<string, any>;
   fix?: boolean;
@@ -183,8 +211,11 @@ export function findConfigFile(cwd?: string): string | undefined;
 export function findCivetConfigFile(cwd?: string): string | undefined;
 export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial: CompileDial; compileOptions: CompileOptions; resolvedPath?: string };
 export function loadCivetOptions(civetConfigPath?: string, cwd?: string): CompileDial;
-export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial): SkippedRule[];
-export function loadConfig(explicitConfigPath?: string, cwd?: string): ResolvedConfig;
+export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial, registry?: RuleRegistry): SkippedRule[];
+export function loadConfig(explicitConfigPath?: string, cwd?: string, registry?: RuleRegistry): ResolvedConfig;
+export function resolveConfigForFile(baseConfig: ResolvedConfig, filePath: string, cwd?: string, registry?: RuleRegistry): ResolvedConfig;
+export function globToRegex(glob: string): RegExp;
+export function matchesFilePattern(filePath: string, pattern: string, configBaseDir?: string): boolean;
 export function parseRawAst(source: string, options: RawAstOptions): CompileResult;
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;

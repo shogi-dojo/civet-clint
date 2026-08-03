@@ -1,8 +1,9 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { loadConfig } from "./config.civet"
+import { loadConfig, resolveConfigForFile } from "./config.civet"
 import { pipelineOptions, controlledOptionKeys } from "./compiler.civet"
 import { lintFile } from "./engine.civet"
+import { defaultRuleRegistry } from "./registry.civet"
 import type { LintResult, ResolvedConfig } from "./types.civet"
 
 const IGNORED_DIRS = new Set([
@@ -187,7 +188,7 @@ Options:
 
   var config: ResolvedConfig
   try
-    config = loadConfig(options.config, process.cwd())
+    config = loadConfig(options.config, process.cwd(), defaultRuleRegistry)
   catch err: any
     console.error(`Configuration error: ${err.message or err}`)
     return 2
@@ -196,19 +197,39 @@ Options:
     // Report the options the adapter will actually pass to the compiler, not the
     // raw file contents: Clint strips execution-mode keys such as `sync` and `ast`,
     // and printing them as active would misreport the resolved configuration.
-    ignored := controlledOptionKeys(config.compileOptions)
-    payload := {
-      preset: config.preset
-      configPath: config.configPath
-      civetConfigPath: config.civetConfigPath
-      civetOptions: config.civetOptions
-      compileOptions: pipelineOptions(config.compileOptions)
-      ignoredCompileOptions: ignored
-      rules: config.rules
-      skippedRules: config.skippedRules
-    }
-    console.log(JSON.stringify(payload, null, 2))
-    return 0
+    if options.targets.length > 0
+      targetFile := options.targets[0]
+      fileConfig := resolveConfigForFile(config, targetFile, process.cwd(), defaultRuleRegistry)
+      ignored := controlledOptionKeys(fileConfig.compileOptions)
+      payload := {
+        file: targetFile
+        preset: fileConfig.preset
+        configPath: fileConfig.configPath
+        civetConfigPath: fileConfig.civetConfigPath
+        civetOptions: fileConfig.civetOptions
+        compileOptions: pipelineOptions(fileConfig.compileOptions)
+        ignoredCompileOptions: ignored
+        rules: fileConfig.rules
+        skippedRules: fileConfig.skippedRules
+        matchingOverrides: fileConfig.matchingOverrides or []
+      }
+      console.log(JSON.stringify(payload, null, 2))
+      return 0
+    else
+      ignored := controlledOptionKeys(config.compileOptions)
+      payload := {
+        preset: config.preset
+        configPath: config.configPath
+        civetConfigPath: config.civetConfigPath
+        civetOptions: config.civetOptions
+        compileOptions: pipelineOptions(config.compileOptions)
+        ignoredCompileOptions: ignored
+        rules: config.rules
+        skippedRules: config.skippedRules
+        matchingOverrides: []
+      }
+      console.log(JSON.stringify(payload, null, 2))
+      return 0
 
   var files: string[]
   try

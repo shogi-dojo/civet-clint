@@ -4,8 +4,8 @@
 
 ## Candidate integration
 
-- Move the rule engine and CLI under a dedicated Civet integration package, alongside the existing ESLint integration.
-- Keep style presets outside the compiler core. The rewrite engine should accept the project's resolved parse options and opt-in rules.
+- Move the rule engine, `RuleRegistry`, and CLI under a dedicated Civet integration package, alongside the existing ESLint integration.
+- Keep style presets and plugins outside the compiler core. The rewrite engine accepts the project's resolved parse options, modular registries, and opt-in rules.
 - Reuse the standalone behavior fixtures as integration tests, including byte-identical emitted-output checks.
 
 ## Supported configuration boundary
@@ -19,12 +19,13 @@ Supported in Civet 0.11.15:
 
 - Presets: `default` (the neutral default, empty dial, only dial-independent rules) and `coffee-react` (`coffeeIsnt` + `react`, explicitly selected by Coffee/React consumers).
 - Rule capabilities: a rule declares `meta.capabilities.requires` and/or `requiresAny` (e.g. `style/prefer-jsx-shorthand` requires `react`; `style/no-is-not` runs with either `coffeeIsnt` or `coffeeNot`). Rules whose requirements are unsatisfied by the resolved dial are **skipped** — reported by `clint --print-config` and never executed — so an autofix whose replacement is invalid under the active dial is never even proposed.
-- `clint --print-config` prints the resolved preset, compiler options, rules, and skipped/incompatible rules.
+- Modular `RuleRegistry` and `Plugin` interfaces for clean rule registration, duplicate checking, and isolated testing.
+- Per-file configuration overrides via the `overrides` array with glob patterns, allowing different subdirectories or file types to use distinct presets, dials, and rules.
+- `clint --print-config [file]` prints the resolved preset, compiler options, rules, matching overrides, and skipped/incompatible rules for the workspace or a specific file.
 
 Not yet supported (do not claim arbitrary compiler-version or compiler-configuration support):
 
 - Pinning is to Civet `0.11.15` exactly. A different Civet version may change dial keys or the raw-AST shape.
-- Configuration is resolved once for the workspace, not per file.
 - Clint does not yet prove that *every* enabled rule is valid under the dial beyond the declared `requires` capabilities; the compiler-equivalence guard remains the final safety net.
 
 ## Compatibility blocker

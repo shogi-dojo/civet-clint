@@ -1,4 +1,9 @@
 import type { Rule } from "../types.civet"
+import {
+  RuleRegistry,
+  createDefaultRuleRegistry,
+  defaultRuleRegistry
+} from "../registry.civet"
 import { preferWordOperatorsRule } from "./prefer-word-operators.civet"
 import { preferConciseArrowRule } from "./prefer-concise-arrow.civet"
 import { preferJsxShorthandRule } from "./prefer-jsx-shorthand.civet"
@@ -6,20 +11,16 @@ import { noNullEqualityRule } from "./no-null-equality.civet"
 import { noIsNotRule } from "./no-is-not.civet"
 import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
 
-export const allRules: Record<string, Rule> = {
-  [preferWordOperatorsRule.id]: preferWordOperatorsRule
-  [preferConciseArrowRule.id]: preferConciseArrowRule
-  [preferJsxShorthandRule.id]: preferJsxShorthandRule
-  [noNullEqualityRule.id]: noNullEqualityRule
-  [noIsNotRule.id]: noIsNotRule
-  [noMixedInterpolationRule.id]: noMixedInterpolationRule
-}
+export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
 export {
-  preferWordOperatorsRule
-  preferConciseArrowRule
-  preferJsxShorthandRule
-  noNullEqualityRule
-  noIsNotRule
+  RuleRegistry,
+  createDefaultRuleRegistry,
+  defaultRuleRegistry,
+  preferWordOperatorsRule,
+  preferConciseArrowRule,
+  preferJsxShorthandRule,
+  noNullEqualityRule,
+  noIsNotRule,
   noMixedInterpolationRule
 }

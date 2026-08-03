@@ -1,0 +1,265 @@
+import { describe, it, expect } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import {
+  RuleRegistry,
+  createDefaultRuleRegistry,
+  defaultRuleRegistry
+} from "../src/registry.civet"
+import {
+  loadConfig,
+  resolveConfigForFile,
+  matchesFilePattern,
+  computeSkippedRules
+} from "../src/config.civet"
+import { lintSource, lintFile } from "../src/engine.civet"
+import { runCli } from "../src/cli.civet"
+import type { Plugin, Rule, ResolvedConfig } from "../src/types.civet"
+
+describe "RuleRegistry & Plugins", ->
+  it "registers and retrieves rules", ->
+    registry := new RuleRegistry()
+    rule: Rule := {
+      id: "custom/foo"
+      meta: { description: "foo", fixable: false, defaultSeverity: "warn" }
+      check: () -> {}
+    }
+    registry.register(rule)
+    expect(registry.has("custom/foo")).toBe(true)
+    expect(registry.get("custom/foo")).toBe(rule)
+    expect(registry.getRules()["custom/foo"]).toBe(rule)
+    expect(registry.getRuleList()).toEqual([rule])
+
+  it "throws a descriptive error on duplicate rule registration", ->
+    registry := new RuleRegistry()
+    rule: Rule := {
+      id: "custom/dup"
+      meta: { description: "dup", fixable: false, defaultSeverity: "warn" }
+      check: () -> {}
+    }
+    registry.register(rule)
+    expect(=> registry.register(rule)).toThrow(/Duplicate rule registration: rule "custom\/dup" is already registered/)
+
+  it "throws error on invalid rule", ->
+    registry := new RuleRegistry()
+    expect(=> (registry as any).register(null)).toThrow(/Invalid rule/)
+    expect(=> (registry as any).register({ id: "" })).toThrow(/Invalid rule/)
+
+  it "registers plugins with array or record of rules", ->
+    registry := new RuleRegistry()
+    r1: Rule := { id: "p/r1", meta: { description: "1", fixable: false, defaultSeverity: "warn" }, check: () -> {} }
+    r2: Rule := { id: "p/r2", meta: { description: "2", fixable: false, defaultSeverity: "warn" }, check: () -> {} }
+
+    pluginArray: Plugin := {
+      name: "array-plugin"
+      rules: [r1]
+    }
+    registry.registerPlugin(pluginArray)
+    expect(registry.has("p/r1")).toBe(true)
+
+    pluginRecord: Plugin := {
+      name: "record-plugin"
+      rules: { "p/r2": r2 }
+    }
+    registry.registerPlugin(pluginRecord)
+    expect(registry.has("p/r2")).toBe(true)
+
+  it "clones registry independently", ->
+    orig := new RuleRegistry()
+    r: Rule := { id: "c/r", meta: { description: "c", fixable: false, defaultSeverity: "warn" }, check: () -> {} }
+    orig.register(r)
+
+    cloned := orig.clone()
+    expect(cloned.has("c/r")).toBe(true)
+
+    r2: Rule := { id: "c/r2", meta: { description: "c2", fixable: false, defaultSeverity: "warn" }, check: () -> {} }
+    cloned.register(r2)
+    expect(cloned.has("c/r2")).toBe(true)
+    expect(orig.has("c/r2")).toBe(false)
+
+  it "throws a clear configuration error for unknown enabled rule IDs", ->
+    registry := createDefaultRuleRegistry()
+    expect(=> loadConfig(undefined, process.cwd(), registry)).not.toThrow()
+
+    dummyConfig: ResolvedConfig := {
+      preset: "default"
+      rules: { "nonexistent/rule": "error" }
+      civetOptions: {}
+      compileOptions: {}
+      skippedRules: []
+    }
+
+    expect(=> lintSource("x := 1", { config: dummyConfig, registry })).toThrow(/Unknown rule ID: "nonexistent\/rule"/)
+
+describe "Glob matching & File Pattern Resolution", ->
+  it "matches exact basenames and wildcard patterns", ->
+    expect(matchesFilePattern("/root/src/foo.test.civet", "*.test.civet", "/root")).toBe(true)
+    expect(matchesFilePattern("/root/src/foo.civet", "*.test.civet", "/root")).toBe(false)
+    expect(matchesFilePattern("/root/src/coffee/util.civet", "src/coffee/**/*.civet", "/root")).toBe(true)
+    expect(matchesFilePattern("/root/src/ts/util.civet", "src/coffee/**/*.civet", "/root")).toBe(false)
+    expect(matchesFilePattern("/root/test/a.civet", "test/**", "/root")).toBe(true)
+
+describe "Configuration Overrides", ->
+  it "applies per-file rule and dial overrides matching globs", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-overrides-"))
+    configPath := path.join(tmpDir, "civet-clint.config.json")
+
+    await fs.writeFile(configPath, JSON.stringify({
+      preset: "default"
+      rules: {
+        "style/prefer-word-operators": "error"
+      }
+      overrides: [
+        {
+          files: ["src/coffee/**/*.civet"]
+          preset: "coffee-react"
+          rules: {
+            "style/no-is-not": "error"
+          }
+        }
+        {
+          files: ["test/**/*.civet"]
+          rules: {
+            "style/prefer-word-operators": "off"
+          }
+        }
+      ]
+    }))
+
+    baseConfig := loadConfig("civet-clint.config.json", tmpDir)
+    expect(baseConfig.preset).toBe("default")
+    expect(baseConfig.rules["style/prefer-word-operators"]).toBe("error")
+
+    // File in src/coffee/
+    coffeeFile := path.join(tmpDir, "src/coffee/legacy.civet")
+    coffeeConfig := resolveConfigForFile(baseConfig, coffeeFile, tmpDir)
+    expect(coffeeConfig.preset).toBe("coffee-react")
+    expect(coffeeConfig.civetOptions.coffeeIsnt).toBe(true)
+    expect(coffeeConfig.rules["style/no-is-not"]).toBe("error")
+    expect(coffeeConfig.matchingOverrides).toEqual(["src/coffee/**/*.civet"])
+
+    // File in test/
+    testFile := path.join(tmpDir, "test/app.test.civet")
+    testConfig := resolveConfigForFile(baseConfig, testFile, tmpDir)
+    expect(testConfig.rules["style/prefer-word-operators"]).toBe("off")
+    expect(testConfig.matchingOverrides).toEqual(["test/**/*.civet"])
+
+    // Neutral file outside overrides
+    rootFile := path.join(tmpDir, "src/app.civet")
+    rootConfig := resolveConfigForFile(baseConfig, rootFile, tmpDir)
+    expect(rootConfig.preset).toBe("default")
+    expect(rootConfig.rules["style/prefer-word-operators"]).toBe("error")
+    expect(rootConfig.matchingOverrides).toEqual([])
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "lints and autofixes distinct dials in multi-package structure", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-multi-dial-"))
+    await fs.mkdir(path.join(tmpDir, "packages/vanilla"), { recursive: true })
+    await fs.mkdir(path.join(tmpDir, "packages/coffee"), { recursive: true })
+
+    await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+      preset: "default"
+      overrides: [
+        {
+          files: ["packages/coffee/**"]
+          civetOptions: { coffeeEq: true, coffeeIsnt: true }
+          rules: { "style/no-is-not": "warn" }
+        }
+      ]
+    }))
+
+    vanillaFile := path.join(tmpDir, "packages/vanilla/main.civet")
+    coffeeFile := path.join(tmpDir, "packages/coffee/main.civet")
+
+    // In vanilla Civet, == is not rewritten without coffeeEq
+    await fs.writeFile(vanillaFile, "x := a == b\n", "utf8")
+    // In coffee Civet, == is rewritten to is under coffeeEq
+    await fs.writeFile(coffeeFile, "x := a == b\n", "utf8")
+
+    config := loadConfig("civet-clint.config.json", tmpDir)
+
+    resVanilla := await lintFile(vanillaFile, { config, fix: true })
+    expect(resVanilla.fixedSource).toBeUndefined() // Untouched because vanilla == is preserved
+
+    resCoffee := await lintFile(coffeeFile, { config, fix: true })
+    expect(resCoffee.fixedSource).toBe("x := a is b\n")
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+describe "CLI --print-config with target file", ->
+  it "prints effective file-specific configuration when target is supplied", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-print-"))
+    await fs.mkdir(path.join(tmpDir, "src/components"), { recursive: true })
+    configFile := path.join(tmpDir, "civet-clint.config.json")
+    targetFile := path.join(tmpDir, "src/components/Button.civet")
+
+    await fs.writeFile(configFile, JSON.stringify({
+      preset: "default"
+      overrides: [
+        {
+          files: ["src/components/**"]
+          civetOptions: { react: true }
+          rules: { "style/prefer-jsx-shorthand": "error" }
+        }
+      ]
+    }))
+    await fs.writeFile(targetFile, "export Button := () => <div>Hello</div>\n")
+
+    var logged = ""
+    origLog := console.log
+    console.log = (msg: string) -> logged += msg + "\n"
+
+    try
+      exitCode := await runCli(["--config", configFile, "--print-config", targetFile])
+      expect(exitCode).toBe(0)
+      parsed := JSON.parse(logged)
+      expect(parsed.file).toBe(targetFile)
+      expect(parsed.civetOptions.react).toBe(true)
+      expect(parsed.rules["style/prefer-jsx-shorthand"]).toBe("error")
+      expect(parsed.skippedRules).toEqual([])
+      expect(parsed.matchingOverrides).toEqual(["src/components/**"])
+    finally
+      console.log = origLog
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "applies overrides in lintFile for a config with no configPath", async ->
+    // A programmatic config carries no `configPath`, so override globs resolve
+    // against the workspace. Resolving them against the linted file's own
+    // directory would silently drop the override and disagree with
+    // `--print-config`.
+    // macOS reports /private/var for a /var tmpdir, so resolve symlinks up front:
+    // `process.chdir` + `process.cwd()` would otherwise disagree with `tmpDir`.
+    tmpDir := await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-nopath-")))
+    legacyDir := path.join(tmpDir, "src", "legacy")
+    await fs.mkdir(legacyDir, { recursive: true })
+    targetFile := path.join(legacyDir, "old.civet")
+    await fs.writeFile(targetFile, "r := a !== b\n")
+
+    config: ResolvedConfig := {
+      preset: "coffee-react"
+      rules: { "style/prefer-word-operators": "error" }
+      civetOptions: { coffeeIsnt: true, react: true }
+      compileOptions: {}
+      skippedRules: []
+      overrides: [
+        {
+          files: "src/legacy/**/*.civet"
+          rules: { "style/prefer-word-operators": "off" }
+        }
+      ]
+    }
+
+    originalCwd := process.cwd()
+    try
+      process.chdir(tmpDir)
+      res := await lintFile(targetFile, { config })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+      // `--print-config` must agree with what the engine actually applied.
+      fileConfig := resolveConfigForFile(config, targetFile, process.cwd())
+      expect(fileConfig.rules["style/prefer-word-operators"]).toBe("off")
+    finally
+      process.chdir(originalCwd)
+      await fs.rm(tmpDir, { recursive: true, force: true })

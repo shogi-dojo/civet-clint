@@ -66,10 +66,23 @@ export interface Rule
   meta: RuleMeta
   check: (context: RuleContext) => void
 
+export interface Plugin
+  name: string
+  rules?: Rule[] | Record<string, Rule>
+
+export interface ConfigOverride
+  files: string | string[]
+  preset?: string
+  civetConfig?: string
+  rules?: Record<string, RuleLevel>
+  civetOptions?: CompileDial
+  compileOptions?: CompileOptions
+
 export interface ClintConfig
   preset?: string
   civetConfig?: string
   rules?: Record<string, RuleLevel>
+  overrides?: ConfigOverride[]
 
 export interface SkippedRule
   ruleId: string
@@ -87,6 +100,8 @@ export interface ResolvedConfig
   // Rules that were enabled but cannot run under the resolved dial. Surfaced by
   // `clint --print-config` and never executed, so they never report invalid autofixes.
   skippedRules: SkippedRule[]
+  overrides?: ConfigOverride[]
+  matchingOverrides?: string[]
 
 export interface LintResult
   filePath: string
