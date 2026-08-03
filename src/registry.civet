@@ -1,0 +1,73 @@
+import type { Plugin, Rule } from "./types.civet"
+import { preferWordOperatorsRule } from "./rules/prefer-word-operators.civet"
+import { preferConciseArrowRule } from "./rules/prefer-concise-arrow.civet"
+import { preferJsxShorthandRule } from "./rules/prefer-jsx-shorthand.civet"
+import { noNullEqualityRule } from "./rules/no-null-equality.civet"
+import { noIsNotRule } from "./rules/no-is-not.civet"
+import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
+
+export class RuleRegistry
+  private rules: Map<string, Rule>
+
+  constructor(initialRules?: Rule[] | Record<string, Rule>)
+    this.rules = new Map()
+    if initialRules
+      if Array.isArray(initialRules)
+        for rule of initialRules
+          this.register(rule)
+      else
+        for key of Object.keys(initialRules)
+          this.register(initialRules[key])
+
+  register(rule: Rule): this
+    unless rule? and typeof rule is "object" and typeof rule.id is "string" and rule.id.length > 0
+      throw new Error("Invalid rule: rule must be an object with a non-empty string 'id'")
+    if this.rules.has(rule.id)
+      throw new Error(`Duplicate rule registration: rule "${rule.id}" is already registered`)
+    this.rules.set(rule.id, rule)
+    this
+
+  registerPlugin(plugin: Plugin): this
+    unless plugin? and typeof plugin is "object" and typeof plugin.name is "string" and plugin.name.length > 0
+      throw new Error("Invalid plugin: plugin must be an object with a non-empty string 'name'")
+    if plugin.rules
+      if Array.isArray(plugin.rules)
+        for rule of plugin.rules
+          this.register(rule)
+      else
+        for key of Object.keys(plugin.rules)
+          this.register(plugin.rules[key])
+    this
+
+  get(id: string): Rule | undefined
+    this.rules.get(id)
+
+  has(id: string): boolean
+    this.rules.has(id)
+
+  getRules(): Record<string, Rule>
+    res: Record<string, Rule> := {}
+    for [id, rule] of this.rules.entries()
+      res[id] = rule
+    res
+
+  getRuleList(): Rule[]
+    Array.from(this.rules.values())
+
+  clone(): RuleRegistry
+    cloned := new RuleRegistry()
+    for rule of this.rules.values()
+      cloned.register(rule)
+    cloned
+
+export function createDefaultRuleRegistry(): RuleRegistry
+  registry := new RuleRegistry()
+  registry.register(preferWordOperatorsRule)
+  registry.register(preferConciseArrowRule)
+  registry.register(preferJsxShorthandRule)
+  registry.register(noNullEqualityRule)
+  registry.register(noIsNotRule)
+  registry.register(noMixedInterpolationRule)
+  registry
+
+export const defaultRuleRegistry: RuleRegistry = createDefaultRuleRegistry()

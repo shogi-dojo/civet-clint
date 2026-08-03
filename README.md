@@ -16,9 +16,11 @@ Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` c
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are discarded without blocking safe batches from other rules.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via tempfiles, avoiding partial writes, corruption, and preserving line endings (`\n` vs `\r\n`).
 - 🎯 **Coffee React Style Rules**: Idiomatic rules designed for modern Civet codebases using CoffeeScript and React syntax styles.
+- 🧩 **Rule Registry & Plugin Architecture**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
+- 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
 - 🧭 **Configuration-Aware**: A compiler/config adapter consumes the project's full `civet.json` (dial + top-level `CompileOptions`). Rules declare the dial keys they require; incompatible rules are skipped and surfaced via `clint --print-config` rather than emitting invalid autofixes.
-- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `--print-config` for inspecting the resolved configuration.
+- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
 ---
 
@@ -54,6 +56,12 @@ clint --write --config ./civet-clint.config.json
 
 # Output diagnostics in JSON for CI/CD pipelines
 clint --check --format json
+
+# Print resolved workspace configuration
+clint --print-config
+
+# Print effective resolved configuration for a specific file (including overrides)
+clint --print-config src/components/Button.civet
 ```
 
 ### CLI Flags
@@ -62,7 +70,7 @@ clint --check --format json
 |---|---|
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
-| `--print-config` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. |
+| `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
 | `-c`, `--config <path>` | Path to a `civet-clint.config.json` configuration file. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
 | `-v`, `--version` | Print `clint` version and exit. |
@@ -85,7 +93,21 @@ Create a `civet-clint.config.json` file in your repository root:
     "style/no-null-equality": "warn",
     "style/no-is-not": "warn",
     "style/no-mixed-interpolation": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["test/**/*.civet", "**/*.test.civet"],
+      "rules": {
+        "style/prefer-word-operators": "off"
+      }
+    },
+    {
+      "files": ["src/legacy/**/*.civet"],
+      "civetOptions": {
+        "coffeeEq": true
+      }
+    }
+  ]
 }
 ```
 
@@ -107,6 +129,26 @@ Configured specifically for idiomatic Civet + React codebases. Existing integrat
 - `style/no-is-not`: `"warn"` (diagnostic, requires `coffeeIsnt` or `coffeeNot`)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Civet compiler options: `{ "coffeeIsnt": true, "react": true }`
+
+### Per-file Configuration Overrides
+
+The `overrides` array allows configuring rules, presets, compiler options, or separate `civet.json` configurations for subsets of files matching glob patterns. Overrides apply in declaration order on top of the base configuration.
+
+```json
+{
+  "overrides": [
+    {
+      "files": "src/components/**/*.civet",
+      "civetOptions": { "react": true },
+      "rules": {
+        "style/prefer-jsx-shorthand": "error"
+      }
+    }
+  ]
+}
+```
+
+Inspect effective configurations with `clint --print-config path/to/file.civet`.
 
 ### Configuration-aware rule skipping
 
@@ -161,16 +203,36 @@ Flags the two silent interpolation traps: `${...}` inside double-quoted strings 
 
 ---
 
-## Programmatic API
+## Programmatic API & Plugins
 
-You can also use `civet-clint` as a library:
+`civet-clint` exports a modular API with support for custom rules and plugins:
 
 ```typescript
-import { lintSource, lintFile, loadConfig } from 'civet-clint';
+import {
+  lintSource,
+  lintFile,
+  loadConfig,
+  resolveConfigForFile,
+  RuleRegistry,
+  createDefaultRuleRegistry
+} from 'civet-clint';
+
+// Custom rule and isolated registry
+const registry = createDefaultRuleRegistry();
+registry.register({
+  id: 'custom/no-debugger',
+  meta: { description: 'Disallow debugger', fixable: false, defaultSeverity: 'error' },
+  check(context) {
+    if (context.source.includes('debugger')) {
+      context.report({ ruleId: 'custom/no-debugger', message: 'Avoid debugger statements' });
+    }
+  }
+});
 
 const config = loadConfig();
 const result = lintSource('fn := () => a === b', {
   config,
+  registry,
   fix: true
 });
 
@@ -186,7 +248,7 @@ console.log(result.fixedSource);            // "fn := => a is b"
 flowchart TD
     A[Source File] --> B[Parse Raw AST]
     A --> C[Baseline Compile]
-    B --> D[Execute Rules]
+    B --> D[Execute Rules via RuleRegistry]
     D --> E[Collect Non-overlapping TextEdits]
     E --> F[Apply Candidate Edits]
     F --> G[Compile Candidate]

@@ -1,13 +1,15 @@
 import fs from "node:fs/promises"
+import path from "node:path"
 import { parseRawAst, compileForOutput } from "./compiler.civet"
 import type { CompileDial, CompileOptions, Diagnostic, Fix, LintResult, ResolvedConfig, RuleContext, RuleLevel, Severity } from "./types.civet"
 import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, collectCommentRanges, intersectsRange } from "./utils.civet"
-import { loadConfig, computeSkippedRules } from "./config.civet"
-import { allRules } from "./rules/index.civet"
+import { loadConfig, computeSkippedRules, resolveConfigForFile } from "./config.civet"
+import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 
 export interface LintOptions
   filename?: string
   config?: ResolvedConfig
+  registry?: RuleRegistry
   civetOptions?: Record<string, any>
   // Top-level CompileOptions outside parseOptions. Threaded through the adapter so the
   // baseline and candidate compiles run under the same emitted-output pipeline.
@@ -25,19 +27,25 @@ export function compileSource(source: string, civetOptions: Record<string, any> 
     throw new Error(res.error)
 
 export function lintSource(source: string, options: LintOptions = {}): LintResult
+  registry := options.registry or defaultRuleRegistry
   filename := options.filename or "input.civet"
   resolvedConfig: ResolvedConfig := (options.config as ResolvedConfig)?.rules
     ? (options.config as ResolvedConfig)
-    : loadConfig(undefined, process.cwd())
+    : loadConfig(undefined, process.cwd(), registry)
 
   mergedRules := { ...resolvedConfig.rules, ...(options.rules or {}) }
   civetOptions: CompileDial := { ...resolvedConfig.civetOptions, ...(options.civetOptions or {}) }
   compileOptions: CompileOptions := { ...resolvedConfig.compileOptions, ...(options.compileOptions or {}) }
 
+  for ruleId of Object.keys(mergedRules)
+    level := mergedRules[ruleId]
+    if (level is "warn" or level is "error") and not registry.has(ruleId)
+      throw new Error(`Unknown rule ID: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+
   // Rules skipped by the resolved dial are never executed. Recompute against the
   // merged rules and dial so per-call `civetOptions`/`rules` overrides are honored —
   // an autofix whose replacement is invalid under the active dial is never proposed.
-  skippedIds := new Set(computeSkippedRules(mergedRules, civetOptions).map (s) -> s.ruleId)
+  skippedIds := new Set(computeSkippedRules(mergedRules, civetOptions, registry).map (s) -> s.ruleId)
 
   getLineColumn := createLineColumnIndex(source)
   var diagnostics: Diagnostic[] = []
@@ -144,7 +152,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     // Skip rules declared incompatible with the active dial. This runs before any
     // check so an invalid autofix is never even proposed.
     continue if skippedIds.has(ruleId)
-    rule := allRules[ruleId]
+    rule := registry.get(ruleId)
     if rule
       try
         rule.check(context)
@@ -255,7 +263,16 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
 
 export async function lintFile(filePath: string, options: LintOptions = {}): Promise<LintResult>
   content := await fs.readFile(filePath, "utf8")
-  res := lintSource(content, { ...options, filename: filePath })
+  registry := options.registry or defaultRuleRegistry
+  baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
+  fileConfig := resolveConfigForFile(baseConfig, filePath, path.dirname(filePath), registry)
+
+  res := lintSource(content, {
+    ...options
+    config: fileConfig
+    filename: filePath
+    registry
+  })
 
   if options.fix and res.fixedSource and res.fixedSource isnt content
     // Preserve line endings
