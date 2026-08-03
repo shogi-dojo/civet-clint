@@ -113,14 +113,16 @@ export const preferTerseImportsRule: Rule = {
         // `import` is only optional when the declaration binds names. A
         // side-effect import must keep it, or the statement changes meaning.
         if hasBindings and not seen.has(kwPos)
-          // Drop the keyword plus exactly the whitespace separating it from
-          // the bindings, so `import  { a }` collapses cleanly to `{ a }`.
-          var end = kwPos + 6
-          while end < source.length and (source[end] is " " or source[end] is "\t")
-            end++
-          // Refuse when a comment sits between the keyword and the bindings;
-          // removing the span would take the comment with it.
-          if end > kwPos + 6 or source[end] is "{" or source[end] is "*"
+          // Only a single space may separate `import` from the bindings.
+          //
+          // Civet echoes the original inter-token whitespace into its output, but
+          // when it re-inserts the keyword for a terse import it emits exactly one
+          // space. So `import   { a }` (three spaces) has no byte-identical terse
+          // form: removing the run changes the emitted spacing, and keeping part
+          // of it turns the remainder into indentation. Such declarations are
+          // skipped rather than rewritten into an edit the gate would reject.
+          end := kwPos + 7
+          if source[kwPos + 6] is " " and source[end] isnt " " and source[end] isnt "\t"
             seen.add kwPos
             ctx.report({
               ruleId: "style/prefer-terse-imports"
