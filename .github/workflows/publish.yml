@@ -70,10 +70,7 @@ jobs:
           echo "tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
           echo "Publishing version $PKG_VERSION under dist-tag '$DIST_TAG'"
 
-      # Publishes via npm Trusted Publishing (OIDC) when configured for this
-      # repo/workflow; NODE_AUTH_TOKEN is the fallback for a granular access
-      # token. Provenance is attested from the id-token: write permission.
+      # Auth comes from npm Trusted Publishing (OIDC) via the id-token: write
+      # permission, which also attests provenance. No npm token is stored.
       - name: Publish package to npm
         run: npm publish --access public --tag ${{ steps.dist-tag.outputs.tag }} --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

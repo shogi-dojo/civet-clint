@@ -42,8 +42,9 @@ Publishing is automated via GitHub Actions in [`.github/workflows/publish.yml`](
   - Manual `workflow_dispatch` **against a `v<version>` tag ref**. Dispatching
     from a branch fails the version-verification step by design.
 - **Security & Permissions**:
-  - Uses npm Granular Access Tokens or GitHub Actions OIDC Trusted Publishing (`id-token: write`).
-  - Protected `npm` deployment environment.
+  - Authenticates via npm Trusted Publishing (OIDC, `id-token: write`). No npm
+    token is stored as a repository or environment secret.
+  - Protected `npm` deployment environment, restricted to `v*` tags.
   - Read-only repository access (`contents: read`).
 - **Validation Gates**:
   - Refuses to run from any non-tag ref, and requires the `v<version>` tag format.
@@ -95,10 +96,20 @@ Publishing is automated via GitHub Actions in [`.github/workflows/publish.yml`](
 
 ## 5. First-Time Setup for Maintainers
 
-Before triggering the first release, the package owner must:
-1. Initialize package namespace on npm (`npm publish --access public --tag next` for initial creation, or create empty package placeholder).
-2. Configure npm Trusted Publishing (OIDC) under `civet-clint` settings on npmjs.com linking to `shogi-dojo/civet-clint` workflow `.github/workflows/publish.yml`.
-3. In the GitHub repository settings, create the protected `npm` environment if required.
+This setup is already complete and is recorded here for reference:
+
+1. `0.1.0-alpha.1` was published manually to claim the package name. npm requires
+   a package to exist before Trusted Publishing can be configured for it, so this
+   bootstrap step cannot be automated.
+2. Trusted Publishing (OIDC) is configured under `civet-clint` settings on
+   npmjs.com, linked to `shogi-dojo/civet-clint`, workflow `publish.yml`,
+   environment `npm`, with only `npm publish` allowed.
+3. The protected `npm` environment exists in GitHub repository settings and is
+   restricted to `v*` tags.
+
+Because npm points `latest` at the first version published to a new package, the
+`latest` tag was removed after the bootstrap publish: `latest` must not resolve to
+a prerelease. It will be set when the first stable version ships.
 
 ---
 
