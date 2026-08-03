@@ -265,7 +265,11 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   content := await fs.readFile(filePath, "utf8")
   registry := options.registry or defaultRuleRegistry
   baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
-  fileConfig := resolveConfigForFile(baseConfig, filePath, path.dirname(filePath), registry)
+  // Override globs are written relative to the config file, or to the workspace when
+  // the config carries no path (programmatic use). Resolving them against the linted
+  // file's own directory silently drops every multi-segment pattern, and disagrees
+  // with `--print-config`, which resolves against the workspace.
+  fileConfig := resolveConfigForFile(baseConfig, filePath, process.cwd(), registry)
 
   res := lintSource(content, {
     ...options

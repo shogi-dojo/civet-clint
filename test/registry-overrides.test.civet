@@ -223,3 +223,43 @@ describe "CLI --print-config with target file", ->
     finally
       console.log = origLog
       await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "applies overrides in lintFile for a config with no configPath", async ->
+    // A programmatic config carries no `configPath`, so override globs resolve
+    // against the workspace. Resolving them against the linted file's own
+    // directory would silently drop the override and disagree with
+    // `--print-config`.
+    // macOS reports /private/var for a /var tmpdir, so resolve symlinks up front:
+    // `process.chdir` + `process.cwd()` would otherwise disagree with `tmpDir`.
+    tmpDir := await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-nopath-")))
+    legacyDir := path.join(tmpDir, "src", "legacy")
+    await fs.mkdir(legacyDir, { recursive: true })
+    targetFile := path.join(legacyDir, "old.civet")
+    await fs.writeFile(targetFile, "r := a !== b\n")
+
+    config: ResolvedConfig := {
+      preset: "coffee-react"
+      rules: { "style/prefer-word-operators": "error" }
+      civetOptions: { coffeeIsnt: true, react: true }
+      compileOptions: {}
+      skippedRules: []
+      overrides: [
+        {
+          files: "src/legacy/**/*.civet"
+          rules: { "style/prefer-word-operators": "off" }
+        }
+      ]
+    }
+
+    originalCwd := process.cwd()
+    try
+      process.chdir(tmpDir)
+      res := await lintFile(targetFile, { config })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+      // `--print-config` must agree with what the engine actually applied.
+      fileConfig := resolveConfigForFile(config, targetFile, process.cwd())
+      expect(fileConfig.rules["style/prefer-word-operators"]).toBe("off")
+    finally
+      process.chdir(originalCwd)
+      await fs.rm(tmpDir, { recursive: true, force: true })
