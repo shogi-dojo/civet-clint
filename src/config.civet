@@ -1,5 +1,84 @@
-export function loadConfig(configPath?: string)
+import fs from "node:fs"
+import path from "node:path"
+import type { ClintConfig, ResolvedConfig, RuleLevel } from "./types.civet"
+
+export const PRESETS: Record<string, Record<string, RuleLevel>> = {
+  "coffee-react": {
+    "style/prefer-word-operators": "error"
+    "style/prefer-concise-arrow": "error"
+    "style/prefer-jsx-shorthand": "error"
+    "style/no-null-equality": "warn"
+    "style/no-is-not": "warn"
+    "style/no-mixed-interpolation": "warn"
+  }
+}
+
+export function findConfigFile(cwd: string = process.cwd()): string | undefined
+  candidates := [
+    "civet-clint.config.json"
+    ".civet-clintrc.json"
+    ".civet-clint.json"
+  ]
+  for candidate of candidates
+    p := path.resolve(cwd, candidate)
+    if fs.existsSync(p)
+      return p
+  undefined
+
+export function findCivetConfigFile(cwd: string = process.cwd()): string | undefined
+  candidates := [
+    "civet.json"
+    "civetconfig.json"
+    ".civetconfig.json"
+  ]
+  for candidate of candidates
+    p := path.resolve(cwd, candidate)
+    if fs.existsSync(p)
+      return p
+  undefined
+
+export function loadCivetOptions(civetConfigPath?: string, cwd: string = process.cwd()): Record<string, any>
+  resolvedPath := civetConfigPath ? path.resolve(cwd, civetConfigPath) : findCivetConfigFile(cwd)
+  if resolvedPath and fs.existsSync(resolvedPath)
+    try
+      raw := fs.readFileSync(resolvedPath, "utf8")
+      return JSON.parse(raw)
+    catch err
+      throw new Error(`Failed to parse Civet config file at ${resolvedPath}: ${(err as Error).message}`)
+  {}
+
+export function loadConfig(explicitConfigPath?: string, cwd: string = process.cwd()): ResolvedConfig
+  var configPath: string | undefined = undefined
+  var userConfig: ClintConfig = {}
+
+  if explicitConfigPath
+    resolvedExplicit := path.resolve(cwd, explicitConfigPath)
+    if not fs.existsSync(resolvedExplicit)
+      throw new Error(`Configuration file not found: ${resolvedExplicit}`)
+    configPath = resolvedExplicit
+  else
+    configPath = findConfigFile(cwd)
+
+  if configPath
+    try
+      raw := fs.readFileSync(configPath, "utf8")
+      userConfig = JSON.parse(raw)
+    catch err
+      throw new Error(`Failed to parse config file at ${configPath}: ${(err as Error).message}`)
+
+  presetName := userConfig.preset or "coffee-react"
+  presetRules := PRESETS[presetName]
+  if not presetRules
+    throw new Error(`Unknown preset: "${presetName}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
+
+  mergedRules: Record<string, RuleLevel> := { ...presetRules, ...(userConfig.rules or {}) }
+
+  civetOptions := loadCivetOptions(userConfig.civetConfig, cwd)
+
   {
-    preset: "coffee-react"
-    rules: {}
+    preset: presetName
+    rules: mergedRules
+    civetConfigPath: userConfig.civetConfig
+    civetOptions
+    configPath
   }

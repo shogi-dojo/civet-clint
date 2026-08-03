@@ -1,0 +1,134 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { lintSource, lintFile } from "../src/engine.civet"
+import { applyEdits, createLineColumnIndex, detectLineEnding, atomicWriteFile } from "../src/utils.civet"
+import { loadConfig } from "../src/config.civet"
+import { allRules } from "../src/rules/index.civet"
+import type { Rule } from "../src/types.civet"
+
+describe "Engine & Utils", ->
+  it "calculates line and column numbers accurately", ->
+    source := "first line\nsecond line\r\nthird line"
+    getIndex := createLineColumnIndex(source)
+    expect(getIndex(0)).toEqual({ line: 1, column: 1 })
+    expect(getIndex(6)).toEqual({ line: 1, column: 7 })
+    expect(getIndex(11)).toEqual({ line: 2, column: 1 })
+    expect(getIndex(24)).toEqual({ line: 3, column: 1 })
+
+  it "applies non-overlapping edits in reverse order", ->
+    source := "foo bar baz"
+    edits := [
+      { start: 0, end: 3, replacement: "hello" }
+      { start: 8, end: 11, replacement: "world" }
+    ]
+    { output, appliedEdits, conflicts } := applyEdits(source, edits)
+    expect(output).toBe("hello bar world")
+    expect(appliedEdits.length).toBe(2)
+    expect(conflicts.length).toBe(0)
+
+  it "handles overlapping edits gracefully by discarding conflicts", ->
+    source := "abcdef"
+    edits := [
+      { start: 1, end: 4, replacement: "X" }
+      { start: 2, end: 5, replacement: "Y" }
+    ]
+    { output, appliedEdits, conflicts } := applyEdits(source, edits)
+    expect(appliedEdits.length).toBe(1)
+    expect(conflicts.length).toBe(1)
+    expect(output).toBe("aXef")
+
+  it "handles parse errors cleanly as error diagnostics", ->
+    source := "const x = ;;; invalid civet {{{"
+    res := lintSource(source)
+    expect(res.diagnostics.length).toBeGreaterThan(0)
+    expect(res.errorCount).toBe(1)
+    expect(res.isEquivalencePreserved).toBe(false)
+
+  it "rejects fixes that produce non-equivalent compiler output", ->
+    // Register a dummy mock rule that intentionally produces broken/different output
+    dummyRule: Rule := {
+      id: "test/bad-rule"
+      meta: {
+        description: "Bad rule"
+        fixable: true
+        defaultSeverity: "error"
+      }
+      check: (ctx) ->
+        if ctx.source.includes("x := 1")
+          ctx.report({
+            ruleId: "test/bad-rule"
+            message: "Bad edit"
+            fix: {
+              start: 5
+              end: 6
+              replacement: "2" // changes emitted output from 1 to 2
+            }
+          })
+    }
+    allRules["test/bad-rule"] = dummyRule
+
+    res := lintSource("x := 1", {
+      rules: { "test/bad-rule": "error" }
+      fix: true
+    })
+
+    delete allRules["test/bad-rule"]
+
+    expect(res.isEquivalencePreserved).toBe(false)
+    expect(res.appliedFixesCount).toBe(0)
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.diagnostics.some (d) -> d.ruleId.startsWith("compiler-equivalence")).toBe(true)
+
+  it "preserves CRLF line endings on write", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-test-"))
+    testFile := path.join(tmpDir, "test.civet")
+    await fs.writeFile(testFile, "a := 1\r\nb := 2\r\n", "utf8")
+
+    dummyRule: Rule := {
+      id: "test/crlf-rule"
+      meta: {
+        description: "CRLF rule"
+        fixable: true
+        defaultSeverity: "error"
+      }
+      check: (ctx) ->
+        ctx.report({
+          ruleId: "test/crlf-rule"
+          message: "Replace a"
+          fix: {
+            start: 0
+            end: 1
+            replacement: "a"
+          }
+        })
+    }
+    allRules["test/crlf-rule"] = dummyRule
+
+    await lintFile(testFile, {
+      rules: { "test/crlf-rule": "error" }
+      fix: true
+    })
+
+    delete allRules["test/crlf-rule"]
+
+    written := await fs.readFile(testFile, "utf8")
+    expect(written.includes("\r\n")).toBe(true)
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "writes files atomically without corruption", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-atomic-"))
+    testFile := path.join(tmpDir, "atomic.civet")
+    await fs.writeFile(testFile, "original content", "utf8")
+
+    await atomicWriteFile(testFile, "new atomic content")
+    readBack := await fs.readFile(testFile, "utf8")
+    expect(readBack).toBe("new atomic content")
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "loads configuration and allows explicit rules to override preset", ->
+    config := loadConfig()
+    expect(config.preset).toBe("coffee-react")
+    expect(config.rules["style/prefer-word-operators"]).toBe("error")

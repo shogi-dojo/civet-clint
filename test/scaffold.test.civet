@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
-import { checkSource } from "../src/engine.civet"
+import { lintSource } from "../src/engine.civet"
 
 describe "scaffold", ->
   it "initializes engine", ->
-    result := checkSource("x := 1")
+    result := lintSource("x := 1")
     expect(result.diagnostics).toEqual([])

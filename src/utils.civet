@@ -1,0 +1,87 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+import type { Fix } from "./types.civet"
+
+export function createLineColumnIndex(source: string)
+  lineStarts: number[] := [0]
+  for let i = 0; i < source.length; i++
+    if source[i] is "\n"
+      lineStarts.push(i + 1)
+
+  (pos: number) ->
+    if pos < 0
+      return { line: 1, column: 1 }
+    var low = 0
+    var high = lineStarts.length - 1
+    while low <= high
+      mid := Math.floor((low + high) / 2)
+      if lineStarts[mid] <= pos
+        low = mid + 1
+      else
+        high = mid - 1
+    lineIndex := high
+    line := lineIndex + 1
+    column := pos - lineStarts[lineIndex] + 1
+    { line, column }
+
+export function walkAst(ast: any, visitor: (node: any, parent: any) => void)
+  visited := new Set<any>()
+
+  traverse := (node: any, parent: any) ->
+    return unless node? and typeof node is "object"
+    return if visited.has(node)
+    visited.add(node)
+
+    visitor(node, parent)
+
+    if Array.isArray(node)
+      for child of node
+        traverse(child, parent)
+    else
+      for key of Object.keys(node)
+        continue if key is "parent"
+        traverse(node[key], node)
+
+  traverse(ast, null)
+
+export function applyEdits(source: string, edits: Fix[]): { output: string, appliedEdits: Fix[], conflicts: Fix[] }
+  return { output: source, appliedEdits: [], conflicts: [] } if edits.length is 0
+
+  sorted := [...edits].sort (a, b) -> a.start - b.start
+
+  validEdits: Fix[] := []
+  conflicts: Fix[] := []
+  var lastEnd = -1
+
+  for edit of sorted
+    if edit.start < lastEnd
+      conflicts.push(edit)
+    else
+      validEdits.push(edit)
+      lastEnd = edit.end
+
+  var result = source
+  for let i = validEdits.length - 1; i >= 0; i--
+    edit := validEdits[i]
+    prefix := result.slice(0, edit.start)
+    suffix := result.slice(edit.end)
+    result = prefix + edit.replacement + suffix
+
+  {
+    output: result
+    appliedEdits: validEdits
+    conflicts
+  }
+
+export function detectLineEnding(source: string): string
+  if source.includes("\r\n")
+    "\r\n"
+  else
+    "\n"
+
+export async function atomicWriteFile(filePath: string, content: string): Promise<void>
+  dir := path.dirname(filePath)
+  base := path.basename(filePath)
+  tmpPath := path.join(dir, `.${base}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`)
+  await fs.writeFile(tmpPath, content, "utf8")
+  await fs.rename(tmpPath, filePath)
