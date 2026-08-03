@@ -1,0 +1,151 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+// Module specifiers that are provably safe to unquote. Civet's terse import form
+// parses the specifier as a bare token, so anything containing whitespace or
+// characters that terminate the token must keep its quotes. This allowlist is
+// deliberately narrow: an unrecognized specifier keeps its quotes rather than
+// risking a silently different import target.
+//
+// Verified against the pinned compiler: relative paths, bare package names,
+// scoped packages, `node:` protocol paths, dots, dashes, underscores, digits,
+// and path separators all round-trip to byte-identical output when unquoted.
+const SAFE_SPECIFIER = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._:/-]+$/
+
+// Only double-quoted specifiers may be unquoted.
+//
+// Civet preserves the original quote character in its emitted output, but the
+// terse unquoted form always emits double quotes. So dropping the quotes from
+// `'./foo'` changes the compiled bytes from `'./foo'` to `"./foo"` and the
+// compiler-equivalence gate rejects the edit. Because that gate validates each
+// rule's fixes as one batch per file, a single single-quoted import would
+// discard every terse-import fix in that file. Single-quoted imports therefore
+// keep their quotes and only lose the optional `import` keyword, which is
+// byte-identical on its own.
+function unquote(raw: string): string | undefined
+  return undefined unless raw.length >= 2
+  first := raw[0]
+  last := raw[raw.length - 1]
+  return undefined unless first is '"' and last is '"'
+  inner := raw.slice(1, raw.length - 1)
+  // A specifier carrying an escape sequence is not the same string once the
+  // quotes are removed, so leave it alone.
+  return undefined if inner.includes("\\")
+  inner
+
+function isSafeToUnquote(spec: string): boolean
+  return false unless spec.length > 0
+  SAFE_SPECIFIER.test spec
+
+// Finds the direct children of an ImportDeclaration that carry source positions
+// we care about: the leading `import` keyword and the module specifier literal.
+function collectParts(node: any)
+  var importKeyword: any = undefined
+  var specifier: any = undefined
+  var hasBindings = false
+
+  visit := (value: any) ->
+    return unless value? and typeof value is "object"
+    if Array.isArray value
+      for item of value
+        visit item
+      return
+
+    switch value.type
+      when "Keyword"
+        if value.token is "import" and value.$loc and not importKeyword?
+          importKeyword = value
+      when "Declaration"
+        // Presence of a Declaration means this import binds names, which is
+        // what makes the `import` keyword optional. Side-effect imports have none.
+        hasBindings = true
+      when "ModuleSpecifier"
+        visit value.children ?? value
+        return
+      when "StringLiteral"
+        if value.$loc and not specifier?
+          specifier = value
+        return
+
+    for key of Object.keys value
+      continue if key is "parent" or key is "$loc"
+      visit value[key]
+
+  visit node
+  { importKeyword, specifier, hasBindings }
+
+export const preferTerseImportsRule: Rule = {
+  id: "style/prefer-terse-imports"
+  meta: {
+    description: "Prefer terse imports: omit the optional 'import' keyword and unquote safe module paths"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    seen := new Set<number>()
+
+    walkAst ctx.ast, (node) ->
+      return unless node? and typeof node is "object"
+      return unless node.type is "ImportDeclaration"
+
+      { importKeyword, specifier, hasBindings } := collectParts node
+
+      // An already-unquoted specifier has no positioned StringLiteral child, so
+      // `specifier` is absent. That is not a reason to skip the declaration: the
+      // keyword removal and the unquoting are independent edits, and a partially
+      // terse import still needs its keyword dropped.
+      var specPos = -1
+      var specLen = 0
+      var rawSpec = ""
+      var specUsable = false
+      if specifier?
+        specPos = specifier.$loc.pos
+        specLen = specifier.$loc.length
+        rawSpec = source.slice specPos, specPos + specLen
+        // Only touch a specifier whose recorded span still matches the source.
+        specUsable = rawSpec is specifier.token
+
+      // Import attributes/assertions (`with { type: "json" }`) follow the
+      // specifier. Removing the keyword there is not covered by the fixtures
+      // that back this rule, so leave the whole declaration untouched.
+      if specUsable
+        trailing := source.slice specPos + specLen, specPos + specLen + 240
+        return if /^\s*(?:with|assert)\b/.test trailing
+
+      if importKeyword?
+        kwPos := importKeyword.$loc.pos
+        return unless source.slice(kwPos, kwPos + 6) is "import"
+
+        // `import` is only optional when the declaration binds names. A
+        // side-effect import must keep it, or the statement changes meaning.
+        if hasBindings and not seen.has(kwPos)
+          // Only a single space may separate `import` from the bindings.
+          //
+          // Civet echoes the original inter-token whitespace into its output, but
+          // when it re-inserts the keyword for a terse import it emits exactly one
+          // space. So `import   { a }` (three spaces) has no byte-identical terse
+          // form: removing the run changes the emitted spacing, and keeping part
+          // of it turns the remainder into indentation. Such declarations are
+          // skipped rather than rewritten into an edit the gate would reject.
+          end := kwPos + 7
+          if source[kwPos + 6] is " " and source[end] isnt " " and source[end] isnt "\t"
+            seen.add kwPos
+            ctx.report({
+              ruleId: "style/prefer-terse-imports"
+              message: "Omit the optional 'import' keyword"
+              pos: kwPos
+              fix: { start: kwPos, end, replacement: "" }
+            })
+
+      return unless specUsable
+      inner := unquote rawSpec
+      if inner? and isSafeToUnquote(inner) and not seen.has(specPos)
+        seen.add specPos
+        ctx.report({
+          ruleId: "style/prefer-terse-imports"
+          message: `Unquote the module path '${inner}'`
+          pos: specPos
+          fix: { start: specPos, end: specPos + specLen, replacement: inner }
+        })
+}

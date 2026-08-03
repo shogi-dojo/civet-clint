@@ -1,0 +1,158 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-terse-imports"
+
+function fix(source: string, civetOptions: Record<string, any> = {})
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions })
+
+// The safety contract for every rewrite: emitted output must not change.
+function expectEquivalent(source: string, civetOptions: Record<string, any> = {})
+  res := fix(source, civetOptions)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, civetOptions)).toBe(compileSource(source, civetOptions))
+  fixed
+
+describe "style/prefer-terse-imports", ->
+  describe "binding imports drop the keyword and quotes", ->
+    it "rewrites a named import", ->
+      expect(expectEquivalent('import { t } from "../i18n"\n'))
+        .toBe("{ t } from ../i18n\n")
+
+    it "rewrites a default import", ->
+      expect(expectEquivalent('import Foo from "./foo"\n'))
+        .toBe("Foo from ./foo\n")
+
+    it "rewrites a combined default and named import", ->
+      expect(expectEquivalent('import Foo, { bar } from "./foo"\n'))
+        .toBe("Foo, { bar } from ./foo\n")
+
+    it "rewrites an aliased named import", ->
+      expect(expectEquivalent('import { a as b } from "./m"\n'))
+        .toBe("{ a as b } from ./m\n")
+
+    it "rewrites a namespace import", ->
+      expect(expectEquivalent('import * as ns from "./mod"\n'))
+        .toBe("* as ns from ./mod\n")
+
+    it "rewrites a type-only import", ->
+      expect(expectEquivalent('import type { User } from "./types"\n'))
+        .toBe("type { User } from ./types\n")
+
+    it "rewrites a scoped package specifier", ->
+      expect(expectEquivalent('import x from "@scope/pkg"\n'))
+        .toBe("x from @scope/pkg\n")
+
+    it "rewrites a node: protocol specifier", ->
+      expect(expectEquivalent('import fs from "node:fs"\n'))
+        .toBe("fs from node:fs\n")
+
+    it "rewrites a multiline named import", ->
+      source := 'import {\n  a,\n  b\n} from "./m"\n'
+      expect(expectEquivalent(source)).toBe("{\n  a,\n  b\n} from ./m\n")
+
+    it "skips a keyword followed by irregular whitespace", ->
+      // Civet emits exactly one space when it re-inserts the keyword, so an
+      // import written with several spaces has no byte-identical terse form.
+      // The quotes are still safe to drop on their own.
+      source := 'import   { a } from "./m"\n'
+      expect(expectEquivalent(source)).toBe("import   { a } from ./m\n")
+
+  describe "side-effect imports keep the keyword", ->
+    it "retains 'import' and only unquotes the path", ->
+      // Dropping `import` here would change the statement's meaning entirely.
+      expect(expectEquivalent('import "./style.scss"\n'))
+        .toBe("import ./style.scss\n")
+
+  describe "single-quoted specifiers keep their quotes", ->
+    it "drops the keyword but preserves single quotes", ->
+      // Civet echoes the original quote character, but the terse unquoted form
+      // always emits double quotes, so unquoting here would change the output
+      // bytes and the equivalence gate would reject the whole file's batch.
+      expect(expectEquivalent("import { t } from '../i18n'\n"))
+        .toBe("{ t } from '../i18n'\n")
+
+  describe "unsupported shapes are left untouched", ->
+    it "skips import attributes", ->
+      source := 'import d from "./d.json" with { type: "json" }\n'
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+    it "skips dynamic import()", ->
+      source := 'x := await import("./m")\n'
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+    it "skips import.meta", ->
+      source := "u := import.meta.url\n"
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+    it "skips a specifier containing an escape sequence", ->
+      source := 'x from "./a\\u0062c"\n'
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+  describe "partially terse imports", ->
+    // Found while validating against a real codebase: a source that already
+    // dropped its quotes has no positioned StringLiteral in the AST, and an
+    // earlier version skipped the whole declaration, leaving `import` behind.
+    it "removes the keyword when the path is already unquoted", ->
+      expect(expectEquivalent("import { A } from ./constants\n"))
+        .toBe("{ A } from ./constants\n")
+
+    it "removes the keyword from an unquoted default import", ->
+      expect(expectEquivalent("import Foo from ./foo\n"))
+        .toBe("Foo from ./foo\n")
+
+    it "keeps the keyword on an unquoted side-effect import", ->
+      source := "import ./style.scss\n"
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+  describe "robustness", ->
+    it "is idempotent", ->
+      once := expectEquivalent('import { t } from "../i18n"\n')
+      twice := fix(once).fixedSource ?? once
+      expect(twice).toBe(once)
+
+    it "leaves already-terse imports unchanged", ->
+      source := "{ t } from ../i18n\n"
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+    it "preserves CRLF line endings", ->
+      source := 'import { t } from "../i18n"\r\nimport Foo from "./foo"\r\n'
+      fixed := fix(source).fixedSource ?? source
+      expect(fixed).toBe("{ t } from ../i18n\r\nFoo from ./foo\r\n")
+
+    it "does not rewrite import-like text inside a string", ->
+      source := 'x := \'import { a } from "./b"\'\n'
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
+    it "rewrites every import in a multi-import file", ->
+      source := 'import { t } from "../i18n"\nimport Foo from "./foo"\nimport "./s.scss"\n'
+      expect(expectEquivalent(source))
+        .toBe("{ t } from ../i18n\nFoo from ./foo\nimport ./s.scss\n")
+
+    it "still rewrites safe imports when an unsupported one is present", ->
+      // A questionable declaration must not suppress the safe ones around it.
+      source := 'import { t } from "../i18n"\nimport d from "./d.json" with { type: "json" }\n'
+      fixed := expectEquivalent(source)
+      expect(fixed).toContain("{ t } from ../i18n")
+      expect(fixed).toContain('import d from "./d.json" with { type: "json" }')
+
+  describe "under the coffee-react dial", ->
+    dial := { autoLet: true, coffeeIsnt: true, coffeeRange: true, react: true }
+
+    it "rewrites imports with the Coffee/React dial enabled", ->
+      expect(expectEquivalent('import { useState } from "react"\n', dial))
+        .toBe("{ useState } from react\n")
+
+    it "composes with other fixable rules without breaking equivalence", ->
+      source := 'import { t } from "../i18n"\nx = a === b\n'
+      res := lintSource(source, {
+        rules: { [RULE]: "error", "style/prefer-word-operators": "error" }
+        fix: true
+        civetOptions: dial
+      })
+      fixed := res.fixedSource ?? source
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(fixed).toContain("{ t } from ../i18n")
+      expect(fixed).toContain("a is b")
+      expect(compileSource(fixed, dial)).toBe(compileSource(source, dial))

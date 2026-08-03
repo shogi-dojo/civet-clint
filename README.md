@@ -128,15 +128,16 @@ Tailored for idiomatic Civet + React codebases (such as the Ranked style guide):
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/prefer-bare-assignment`: `"error"` (fixable, requires `autoLet`)
+- `style/prefer-terse-imports`: `"error"` (fixable)
 - `style/no-trailing-semicolons`: `"error"` (diagnostic)
-- `style/prefer-existential-check`: `"error"` (diagnostic)
-- `style/prefer-jsx-attr-shorthand`: `"error"` (diagnostic, requires `react`)
-- `style/prefer-ampersand-shorthand`: `"error"` (diagnostic)
-- `style/no-single-param-arrow-without-parens`: `"error"` (diagnostic)
+- `style/prefer-existential-check`: `"warn"` (diagnostic)
+- `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
+- `style/prefer-ampersand-shorthand`: `"warn"` (diagnostic)
+- `style/no-single-param-arrow-without-parens`: `"warn"` (diagnostic)
 - `style/prefer-named-export-default`: `"warn"` (diagnostic)
-- `style/no-thin-arrow`: `"error"` (diagnostic)
+- `style/no-thin-arrow`: `"warn"` (diagnostic)
 - `style/no-pipe-operator`: `"error"` (diagnostic)
-- `style/prefer-range-operator`: `"error"` (diagnostic, requires `coffeeRange`)
+- `style/prefer-range-operator`: `"warn"` (diagnostic, requires `coffeeRange`)
 - `style/no-null-equality`: `"warn"` (diagnostic)
 - `style/no-is-not`: `"warn"` (diagnostic)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
@@ -179,6 +180,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
 | [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. | `react` |
 | [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
+| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). | — |
 
 ### Diagnostic Rules
 
@@ -196,6 +198,20 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/no-null-equality`](src/rules/no-null-equality.civet) | Disallow direct comparisons with `null`. | — |
 | [`style/no-is-not`](src/rules/no-is-not.civet) | Disallow `is not` in favor of `isnt`. | `coffeeIsnt` or `coffeeNot` |
 | [`style/no-mixed-interpolation`](src/rules/no-mixed-interpolation.civet) | Disallow mixing `${...}` and `#{...}` within the same file. | — |
+
+### Style-Guide Coverage
+
+Clint automates the *mechanical* conventions of a Civet style guide — the ones with
+a deterministic, compiler-verifiable rewrite. Several conventions are deliberately
+out of scope; their absence is a design boundary, not a missing feature.
+
+| Convention | Status | Notes |
+|---|---|---|
+| Word operators, existential checks, terse declarations/exports, terse imports, JSX shorthands, arrow style, range loops | **Automated** | See the rule tables above. |
+| Side-effect import ordering | Not automated | Reordering imports can change evaluation order, so it is not compiler-equivalent. |
+| Single-quoted module paths | Partially automated | The `import` keyword is dropped, but quotes are kept: Civet echoes the original quote character while the terse form emits double quotes, so unquoting would change the compiled output. |
+| Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |
+| Comment quality, naming, file/layer organization, architectural policy (i18n via `t()`, no `fetch` in components) | Not automated | Qualitative judgments with no mechanical rewrite. Enforce in review. |
 
 ---
 
