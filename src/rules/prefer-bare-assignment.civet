@@ -1,0 +1,61 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+
+function isConstCase(name: string): boolean
+  /^[A-Z][A-Z0-9_]*$/.test(name) and name.length > 1
+
+export const preferBareAssignmentRule: Rule = {
+  id: "style/prefer-bare-assignment"
+  meta: {
+    description: "Prefer bare '=' for let bindings and ':=' for CONST_CASE declarations under autoLet"
+    fixable: true
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["autoLet"]
+    }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    re := /(?:^|[\n;])([ \t]*)(export[ \t]+)?(const|let|var)[ \t]+([a-zA-Z_$][a-zA-Z0-9_$]*)[ \t]*(=)/g
+    var match: RegExpExecArray | null = null
+
+    while (match = re.exec(source)) !== null
+      matchedLeader := match[2] or match[3]
+      idxLeader := match[0].indexOf(matchedLeader)
+      exportKw := match[2] or ""
+      declKw := match[3]
+      ident := match[4]
+
+      pos := match.index + idxLeader
+      matchEnd := match.index + match[0].length
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      if isConstCase(ident)
+        replacement := `${exportKw}${ident} :=`
+        ctx.report({
+          ruleId: "style/prefer-bare-assignment"
+          message: `Use '${exportKw}${ident} :=' instead of '${exportKw}${declKw} ${ident} ='`
+          pos
+          fix: {
+            start: pos
+            end: matchEnd
+            replacement
+          }
+        })
+      else
+        replacement := `${exportKw}${ident} =`
+        ctx.report({
+          ruleId: "style/prefer-bare-assignment"
+          message: `Use '${exportKw}${ident} =' instead of '${exportKw}${declKw} ${ident} ='`
+          pos
+          fix: {
+            start: pos
+            end: matchEnd
+            replacement
+          }
+        })
+}

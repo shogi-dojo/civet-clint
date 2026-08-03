@@ -1,0 +1,28 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, intersectsRange, walkAst } from "../utils.civet"
+
+export const preferNamedExportDefaultRule: Rule = {
+  id: "style/prefer-named-export-default"
+  meta: {
+    description: "Prefer named 'export default Name = ...' over anonymous 'export default ...'"
+    fixable: false
+    defaultSeverity: "warning"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+
+    // Check for anonymous default export pattern: `export default (` or `export default =>` or `export default function(`
+    re := /export\s+default\s+(?:(?:\((?:[^)]*)\)\s*=>)|(?:=>)|(?:function\s*\())/g
+    var match: RegExpExecArray | null = null
+
+    while (match = re.exec(source)) !== null
+      pos := match.index
+      continue if intersectsRange(commentRanges, pos, pos + match[0].length)
+
+      ctx.report({
+        ruleId: "style/prefer-named-export-default"
+        message: "Prefer named default export 'export default Name = (...) =>' to preserve component display name"
+        pos
+      })
+}

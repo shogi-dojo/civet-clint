@@ -1,0 +1,223 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+
+describe "Style Guide Rules Coverage", ->
+  describe "style/no-trailing-semicolons", ->
+    it "reports diagnostics on trailing semicolons at line ends", ->
+      source := "x = 1;\ny = 2;\n"
+      res := lintSource(source, {
+        rules: { "style/no-trailing-semicolons": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
+      expect(diags.length).toBe(2)
+      expect(diags[0].message).toContain("Unnecessary trailing semicolon")
+      expect(diags[1].message).toContain("Unnecessary trailing semicolon")
+
+    it "reports trailing semicolon before comment", ->
+      source := "x = 1; # comment\n"
+      res := lintSource(source, {
+        rules: { "style/no-trailing-semicolons": "error" }
+        civetOptions: { autoLet: true, coffeeComment: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
+      expect(diags.length).toBe(1)
+
+    it "preserves semicolons inside strings and multi-statement lines", ->
+      source := 'str = "hello; world";\na = 1; b = 2\n'
+      res := lintSource(source, {
+        rules: { "style/no-trailing-semicolons": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
+      // Only the trailing semicolon at line 1 should be flagged
+      expect(diags.length).toBe(1)
+
+  describe "style/prefer-bare-assignment", ->
+    it "converts let to bare assignment under autoLet", ->
+      source := "let x = 1\nlet y = 2\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-bare-assignment": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-bare-assignment"
+      expect(diags.length).toBe(2)
+
+      resFixed := lintSource(source, {
+        rules: { "style/prefer-bare-assignment": "error" }
+        civetOptions: { autoLet: true }
+        fix: true
+      })
+      expect(resFixed.fixedSource).toBe("x = 1\ny = 2\n")
+      expect(resFixed.isEquivalencePreserved).toBe(true)
+
+    it "converts CONST_CASE constants to ':=' declarations", ->
+      source := 'const TOTAL_STEPS = 3\nexport const WIND_ORDER = ["E", "S"]\n'
+      res := lintSource(source, {
+        rules: { "style/prefer-bare-assignment": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-bare-assignment"
+      expect(diags.length).toBe(2)
+
+      resFixed := lintSource(source, {
+        rules: { "style/prefer-bare-assignment": "error" }
+        civetOptions: { autoLet: true }
+        fix: true
+      })
+      expect(resFixed.fixedSource).toBe('TOTAL_STEPS := 3\nexport WIND_ORDER := ["E", "S"]\n')
+      expect(resFixed.isEquivalencePreserved).toBe(true)
+
+    it "is skipped when autoLet is off", ->
+      source := "let x = 1\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-bare-assignment": "error" }
+        civetOptions: {}
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-bare-assignment"
+      expect(diags.length).toBe(0)
+
+  describe "style/prefer-existential-check", ->
+    it "flags inequality null checks with suggestion x?", ->
+      source := "valid := x != null\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true, coffeeEq: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("x?")
+
+    it "flags equality null checks with suggestion not x?", ->
+      source := "invalid := x == null\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true, coffeeEq: true, coffeeNot: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("not x?")
+
+  describe "style/prefer-jsx-attr-shorthand", ->
+    it "flags onClick={onClick} and disabled={true}", ->
+      source := "<button onClick={onClick} disabled={true}>Click</button>\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: { react: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
+      expect(diags.length).toBe(2)
+      expect(diags.some((d) -> d.message.includes("{onClick}"))).toBe(true)
+      expect(diags.some((d) -> d.message.includes("disabled"))).toBe(true)
+
+    it "is skipped when react is not enabled", ->
+      source := "<button onClick={onClick}>Click</button>\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: {}
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
+      expect(diags.length).toBe(0)
+
+  describe "style/prefer-ampersand-shorthand", ->
+    it "flags prop access callbacks and suggests & shorthand", ->
+      source := "ids = users.map((u) => u.id)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain(".map &.id")
+
+    it "flags method call callbacks and suggests & shorthand", ->
+      source := "trimmed = lines.map((l) => l.trim())\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain(".map &.trim()")
+
+  describe "style/no-single-param-arrow-without-parens", ->
+    it "flags unparenthesized single parameter arrow", ->
+      source := "f = x => x + 1\n"
+      res := lintSource(source, {
+        rules: { "style/no-single-param-arrow-without-parens": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-single-param-arrow-without-parens"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("Arrow parameter 'x' must have parentheses")
+
+    it "does not flag async => or parenthesized arrows", ->
+      source := "f = async => 42\ng = (x) => x + 1\n"
+      res := lintSource(source, {
+        rules: { "style/no-single-param-arrow-without-parens": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-single-param-arrow-without-parens"
+      expect(diags.length).toBe(0)
+
+  describe "style/prefer-named-export-default", ->
+    it "flags anonymous export default arrow", ->
+      source := "export default (props) => 42\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-named-export-default": "warn" }
+        civetOptions: {}
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-named-export-default"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("Prefer named default export")
+
+    it "accepts named export default", ->
+      source := "export default MyComp = (props) => 42\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-named-export-default": "warn" }
+        civetOptions: {}
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-named-export-default"
+      expect(diags.length).toBe(0)
+
+  describe "style/no-thin-arrow", ->
+    it "flags thin arrow usage", ->
+      source := "f = (x) -> x + 1\n"
+      res := lintSource(source, {
+        rules: { "style/no-thin-arrow": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-thin-arrow"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("Use fat arrow '=>' instead of thin arrow '->'")
+
+  describe "style/no-pipe-operator", ->
+    it "flags pipe operator usage", ->
+      source := "res = val |> process\n"
+      res := lintSource(source, {
+        rules: { "style/no-pipe-operator": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-pipe-operator"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("Disallowed pipe operator '|>'")
+
+  describe "style/prefer-range-operator", ->
+    it "flags Array.from length and suggests range map", ->
+      source := "items = Array.from({ length: 5 }, (_, i) => i * 2)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-range-operator": "error" }
+        civetOptions: { autoLet: true, coffeeRange: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-range-operator"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("[0...5].map")
+
+    it "is skipped when coffeeRange is disabled", ->
+      source := "items = Array.from({ length: 5 }, (_, i) => i * 2)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-range-operator": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-range-operator"
+      expect(diags.length).toBe(0)

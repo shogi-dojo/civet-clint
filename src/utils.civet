@@ -51,6 +51,14 @@ export function collectCommentRanges(ast: any): { start: number, end: number }[]
     ranges.push({ start: node.$loc.pos, end: node.$loc.pos + node.$loc.length })
   ranges.sort (a, b) -> a.start - b.start
 
+export function collectStringRanges(ast: any): { start: number, end: number }[]
+  ranges: { start: number, end: number }[] := []
+  walkAst ast, (node) ->
+    return unless node? and typeof node is "object"
+    if (node.type is "StringLiteral" or node.type is "TemplateLiteral") and node.$loc
+      ranges.push({ start: node.$loc.pos, end: node.$loc.pos + (node.$loc.length or 0) })
+  ranges.sort (a, b) -> a.start - b.start
+
 export function intersectsRange(ranges: { start: number, end: number }[], start: number, end: number): boolean
   // A zero-width insertion is only inside a comment when strictly within it.
   for range of ranges

@@ -1,0 +1,38 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+
+export const preferAmpersandShorthandRule: Rule = {
+  id: "style/prefer-ampersand-shorthand"
+  meta: {
+    description: "Prefer '&' block shorthand for single-parameter property/method access callbacks"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    re := /\.(map|filter|find|findIndex|some|every)\s*(?:\(\s*(?:\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*=>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z0-9_$.()]+)\s*\)|(?:\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*=>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z0-9_$.()]+))/g
+    var match: RegExpExecArray | null = null
+
+    while (match = re.exec(source)) !== null
+      method := match[1]
+      param := match[2] or match[3] or match[6] or match[7]
+      receiver := match[4] or match[8]
+      access := match[5] or match[9]
+
+      continue unless param and receiver and access
+      continue unless param is receiver
+
+      pos := match.index
+      matchEnd := match.index + match[0].length
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      ctx.report({
+        ruleId: "style/prefer-ampersand-shorthand"
+        message: `Use '&' shorthand '.${method} &.${access}' instead of verbose callback`
+        pos
+      })
+}

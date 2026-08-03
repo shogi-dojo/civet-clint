@@ -1,0 +1,35 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+
+export const preferExistentialCheckRule: Rule = {
+  id: "style/prefer-existential-check"
+  meta: {
+    description: "Prefer existential postfix (x? / not x?) over null equality checks"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    re := /([a-zA-Z_$][a-zA-Z0-9_$.?]*)\s*(!==|!=|===|==|isnt|is)\s*null\b/g
+    var match: RegExpExecArray | null = null
+
+    while (match = re.exec(source)) !== null
+      ident := match[1]
+      op := match[2]
+
+      pos := match.index
+      matchEnd := match.index + match[0].length
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      isInequality := op is "!=" or op is "!==" or op is "isnt"
+      replacement := isInequality ? `${ident}?` : `not ${ident}?`
+      ctx.report({
+        ruleId: "style/prefer-existential-check"
+        message: `Use existential postfix '${replacement}' instead of '${match[0]}'`
+        pos
+      })
+}

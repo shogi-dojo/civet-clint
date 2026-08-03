@@ -1,0 +1,41 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, intersectsRange, walkAst } from "../utils.civet"
+
+function collectStringRanges(ast: any): { start: number, end: number }[]
+  ranges: { start: number, end: number }[] := []
+  walkAst ast, (node) ->
+    return unless node? and typeof node is "object"
+    if (node.type is "StringLiteral" or node.type is "TemplateLiteral" or node.type is "Literal") and node.$loc
+      ranges.push({
+        start: node.$loc.pos
+        end: node.$loc.pos + (node.$loc.length or 0)
+      })
+  ranges
+
+export const noPipeOperatorRule: Rule = {
+  id: "style/no-pipe-operator"
+  meta: {
+    description: "Disallow pipe operator (|>); keep ordinary method chains instead"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    var i = 0
+    while i < source.length - 1
+      if source[i] is "|" and source[i + 1] is ">"
+        pos := i
+        if not intersectsRange(ignoredRanges, pos, pos + 2)
+          ctx.report({
+            ruleId: "style/no-pipe-operator"
+            message: "Disallowed pipe operator '|>'; use regular method calls or function applications instead"
+            pos
+          })
+        i += 2
+      else
+        i += 1
+}

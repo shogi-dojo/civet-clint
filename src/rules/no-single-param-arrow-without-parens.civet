@@ -1,0 +1,38 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, intersectsRange } from "../utils.civet"
+
+const RESERVED_MODIFIERS = new Set<string>([
+  "async"
+  "export"
+  "default"
+  "return"
+  "yield"
+])
+
+export const noSingleParamArrowWithoutParensRule: Rule = {
+  id: "style/no-single-param-arrow-without-parens"
+  meta: {
+    description: "Disallow unparenthesized single parameter arrows (n => ...) which parse as function calls"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+
+    re := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g
+    var match: RegExpExecArray | null = null
+
+    while (match = re.exec(source)) !== null
+      ident := match[1]
+      continue if RESERVED_MODIFIERS.has(ident)
+
+      identPos := match.index + match[0].indexOf(ident)
+      continue if intersectsRange(commentRanges, identPos, identPos + ident.length)
+
+      ctx.report({
+        ruleId: "style/no-single-param-arrow-without-parens"
+        message: `Arrow parameter '${ident}' must have parentheses '(${ident}) =>'; bare '${ident} =>' parses as call '${ident}(() =>)' in Civet`
+        pos: identPos
+      })
+}

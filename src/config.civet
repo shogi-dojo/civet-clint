@@ -37,6 +37,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-word-operators": "error"
       "style/prefer-concise-arrow": "error"
       "style/no-mixed-interpolation": "warn"
+      "style/no-trailing-semicolons": "error"
     }
     civetOptions: {}
     compileOptions: {}
@@ -49,9 +50,21 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/no-null-equality": "warn"
       "style/no-is-not": "warn"
       "style/no-mixed-interpolation": "warn"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-bare-assignment": "error"
+      "style/prefer-existential-check": "error"
+      "style/prefer-jsx-attr-shorthand": "error"
+      "style/prefer-ampersand-shorthand": "error"
+      "style/no-single-param-arrow-without-parens": "error"
+      "style/prefer-named-export-default": "warn"
+      "style/no-thin-arrow": "error"
+      "style/no-pipe-operator": "error"
+      "style/prefer-range-operator": "error"
     }
     civetOptions: {
+      autoLet: true
       coffeeIsnt: true
+      coffeeRange: true
       react: true
     }
     compileOptions: {}

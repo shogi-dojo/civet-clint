@@ -5,6 +5,16 @@ import { preferJsxShorthandRule } from "./rules/prefer-jsx-shorthand.civet"
 import { noNullEqualityRule } from "./rules/no-null-equality.civet"
 import { noIsNotRule } from "./rules/no-is-not.civet"
 import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
+import { noTrailingSemicolonsRule } from "./rules/no-trailing-semicolons.civet"
+import { preferBareAssignmentRule } from "./rules/prefer-bare-assignment.civet"
+import { preferExistentialCheckRule } from "./rules/prefer-existential-check.civet"
+import { preferJsxAttrShorthandRule } from "./rules/prefer-jsx-attr-shorthand.civet"
+import { preferAmpersandShorthandRule } from "./rules/prefer-ampersand-shorthand.civet"
+import { noSingleParamArrowWithoutParensRule } from "./rules/no-single-param-arrow-without-parens.civet"
+import { preferNamedExportDefaultRule } from "./rules/prefer-named-export-default.civet"
+import { noThinArrowRule } from "./rules/no-thin-arrow.civet"
+import { noPipeOperatorRule } from "./rules/no-pipe-operator.civet"
+import { preferRangeOperatorRule } from "./rules/prefer-range-operator.civet"
 
 export class RuleRegistry
   private rules: Map<string, Rule>
@@ -68,6 +78,16 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(noNullEqualityRule)
   registry.register(noIsNotRule)
   registry.register(noMixedInterpolationRule)
+  registry.register(noTrailingSemicolonsRule)
+  registry.register(preferBareAssignmentRule)
+  registry.register(preferExistentialCheckRule)
+  registry.register(preferJsxAttrShorthandRule)
+  registry.register(preferAmpersandShorthandRule)
+  registry.register(noSingleParamArrowWithoutParensRule)
+  registry.register(preferNamedExportDefaultRule)
+  registry.register(noThinArrowRule)
+  registry.register(noPipeOperatorRule)
+  registry.register(preferRangeOperatorRule)
   registry
 
 export const defaultRuleRegistry: RuleRegistry = createDefaultRuleRegistry()

@@ -1,0 +1,52 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+
+export const preferJsxAttrShorthandRule: Rule = {
+  id: "style/prefer-jsx-attr-shorthand"
+  meta: {
+    description: "Prefer JSX attribute shorthand (attr={attr} -> {attr}, prop={true} -> prop)"
+    fixable: false
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["react"]
+    }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    // 1. prop={true} -> prop
+    reTrue := /(?<=\s)([a-zA-Z_$][a-zA-Z0-9_-]*)=\{true\}/g
+    var match: RegExpExecArray | null = null
+
+    while (match = reTrue.exec(source)) !== null
+      attrName := match[1]
+      pos := match.index
+      matchEnd := match.index + match[0].length
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      ctx.report({
+        ruleId: "style/prefer-jsx-attr-shorthand"
+        message: `Use boolean prop shorthand '${attrName}' instead of '${attrName}={true}'`
+        pos
+      })
+
+    // 2. prop={prop} -> {prop}
+    reIdent := /(?<=\s)([a-zA-Z_$][a-zA-Z0-9_]*)=\{([a-zA-Z_$][a-zA-Z0-9_]*)\}/g
+    while (match = reIdent.exec(source)) !== null
+      attrName := match[1]
+      valIdent := match[2]
+      continue unless attrName is valIdent
+
+      pos := match.index
+      matchEnd := match.index + match[0].length
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      ctx.report({
+        ruleId: "style/prefer-jsx-attr-shorthand"
+        message: `Use JSX attribute shorthand '{${attrName}}' instead of '${attrName}={${valIdent}}'`
+        pos
+      })
+}
