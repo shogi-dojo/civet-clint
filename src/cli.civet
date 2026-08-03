@@ -182,8 +182,13 @@ Options:
     return 0
 
   if options.version
-    // Read package.json version
-    console.log("clint v0.1.0")
+    try
+      pkgUrl := new URL("../package.json", import.meta.url)
+      rawPkg := await fs.readFile(pkgUrl, "utf8")
+      manifest := JSON.parse(rawPkg)
+      console.log(`clint v${manifest.version}`)
+    catch
+      console.log("clint v0.1.0-alpha.1")
     return 0
 
   var config: ResolvedConfig

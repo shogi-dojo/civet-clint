@@ -1,6 +1,6 @@
 {
   "name": "civet-clint",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Compiler-backed style checker and autofixer for Civet codebases",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +23,17 @@
   ],
   "engines": {
     "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shogi-dojo/civet-clint.git"
+  },
+  "homepage": "https://github.com/shogi-dojo/civet-clint#readme",
+  "bugs": {
+    "url": "https://github.com/shogi-dojo/civet-clint/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
