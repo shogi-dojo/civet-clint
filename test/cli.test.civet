@@ -105,3 +105,37 @@ describe "CLI Suite", ->
     expect(skippedIds).not.toContain("style/no-is-not")
 
     await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "does not report stripped execution-mode options as active", async ->
+    // The adapter refuses `sync`/`ast` from project config; printing them as
+    // active would misreport what the compiler actually runs with.
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-stripped-"))
+    await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+      parseOptions: { coffeeEq: true }
+      js: true
+      sync: false
+      ast: "raw"
+    }))
+    await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+      preset: "default"
+      civetConfig: "./civet.json"
+    }))
+
+    originalLog := console.log
+    captured: string[] := []
+    console.log = (...args) -> captured.push(args.join(" "))
+    var code = 2
+    try
+      code = await runCli(["--print-config", "--config", path.join(tmpDir, "civet-clint.config.json")])
+    finally
+      console.log = originalLog
+
+    expect(code).toBe(0)
+    payload := JSON.parse(captured.join("\n"))
+    expect(payload.compileOptions.js).toBe(true)
+    expect(payload.compileOptions.sync).toBeUndefined()
+    expect(payload.compileOptions.ast).toBeUndefined()
+    expect(payload.ignoredCompileOptions).toContain("sync")
+    expect(payload.ignoredCompileOptions).toContain("ast")
+
+    await fs.rm(tmpDir, { recursive: true, force: true })

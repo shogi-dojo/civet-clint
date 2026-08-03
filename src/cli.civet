@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { loadConfig } from "./config.civet"
+import { pipelineOptions, controlledOptionKeys } from "./compiler.civet"
 import { lintFile } from "./engine.civet"
 import type { LintResult, ResolvedConfig } from "./types.civet"
 
@@ -192,12 +193,17 @@ Options:
     return 2
 
   if options.printConfig
+    // Report the options the adapter will actually pass to the compiler, not the
+    // raw file contents: Clint strips execution-mode keys such as `sync` and `ast`,
+    // and printing them as active would misreport the resolved configuration.
+    ignored := controlledOptionKeys(config.compileOptions)
     payload := {
       preset: config.preset
       configPath: config.configPath
       civetConfigPath: config.civetConfigPath
       civetOptions: config.civetOptions
-      compileOptions: config.compileOptions
+      compileOptions: pipelineOptions(config.compileOptions)
+      ignoredCompileOptions: ignored
       rules: config.rules
       skippedRules: config.skippedRules
     }

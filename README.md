@@ -114,6 +114,8 @@ Rules declare required dial keys via `meta.capabilities.requires` (all required)
 
 Use `clint --print-config` to inspect the resolved preset, compiler options, rules, and skipped/incompatible rules for your workspace.
 
+`compileOptions` lists only the options Clint actually forwards to the compiler. Execution-mode keys (`sync`, `ast`, `filename`, `parseOptions`, `errors`) are controlled by Clint and stripped from project configuration; any that were present appear under `ignoredCompileOptions`.
+
 ---
 
 ## Rules Catalog

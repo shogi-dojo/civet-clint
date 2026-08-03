@@ -32,11 +32,17 @@ const CONTROLLED_OPTIONS = new Set([
   "errors"
 ])
 
-function pipelineOptions(options?: CompileOptions): CompileOptions
+export function pipelineOptions(options?: CompileOptions): CompileOptions
   retained: CompileOptions := {}
   for [key, value] of Object.entries(options or {})
     retained[key] = value unless CONTROLLED_OPTIONS.has(key)
   retained
+
+// Keys present in project configuration that Clint refuses to forward to the
+// compiler. Reported by `--print-config` so the resolved output never claims an
+// option is active when the adapter strips it.
+export function controlledOptionKeys(options?: CompileOptions): string[]
+  Object.keys(options or {}).filter (key) -> CONTROLLED_OPTIONS.has(key)
 
 export interface CompileDialOptions
   // The compiler dial (parseOptions).
