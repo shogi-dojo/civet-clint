@@ -47,6 +47,12 @@ describe "Rules Test Suite", ->
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
       expect(res.fixedSource).toBeUndefined()
 
+    it "preserves double-bang boolean coercion", ->
+      input := "isEditing := !!selectedEvent\nvisible := !!(a and b)"
+      res := lintSource(input, { fix: true })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+      expect(res.fixedSource).toBeUndefined()
+
     it "handles unary ! on expressions cleanly", ->
       input := "!foo\n!(a && b)\n!isReady"
       res := lintSource(input, { fix: true })

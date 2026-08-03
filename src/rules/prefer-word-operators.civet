@@ -34,7 +34,10 @@ export const preferWordOperatorsRule: Rule = {
             pos := preItem.$loc.pos
             // `unless` is normalized to a synthetic `!` in the raw AST, with
             // its location pointing at the `u`. Only rewrite a literal bang.
-            if source[pos] is "!" and not reportedStarts.has(pos)
+            // Preserve adjacent bangs: Civet supports `!!value` as the
+            // conventional, compact boolean-coercion form.
+            adjacentBang := source[pos - 1] is "!" or source[pos + 1] is "!"
+            if source[pos] is "!" and not adjacentBang and not reportedStarts.has(pos)
               reportedStarts.add(pos)
               // Determine if trailing space is needed
               nextChar := source[pos + 1]
