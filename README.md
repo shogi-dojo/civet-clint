@@ -63,9 +63,6 @@ npx clint --print-config
 
 # Print effective resolved configuration for a specific file (including overrides)
 npx clint --print-config src/components/Button.civet
-
-# List all available rules and capabilities
-npx clint --rules
 ```
 
 ### CLI Flags
@@ -75,7 +72,6 @@ npx clint --rules
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
-| `--rules` | List all registered rules with descriptions, fixability, and capability requirements, then exit. |
 | `-c`, `--config <path>` | Path to a `civet-clint.config.json` configuration file. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
 | `-v`, `--version` | Print `clint` version and exit. |
