@@ -20,6 +20,7 @@ import { preferNamedExportDefaultRule } from "./prefer-named-export-default.cive
 import { noThinArrowRule } from "./no-thin-arrow.civet"
 import { noPipeOperatorRule } from "./no-pipe-operator.civet"
 import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
+import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -42,5 +43,6 @@ export {
   preferNamedExportDefaultRule,
   noThinArrowRule,
   noPipeOperatorRule,
-  preferRangeOperatorRule
+  preferRangeOperatorRule,
+  preferTerseImportsRule
 }

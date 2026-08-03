@@ -64,6 +64,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-named-export-default": "warn"
       "style/no-thin-arrow": "warn"
       "style/prefer-range-operator": "warn"
+      "style/prefer-terse-imports": "error"
     }
     civetOptions: {
       autoLet: true

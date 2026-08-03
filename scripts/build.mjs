@@ -217,6 +217,7 @@ export const preferNamedExportDefaultRule: Rule;
 export const noThinArrowRule: Rule;
 export const noPipeOperatorRule: Rule;
 export const preferRangeOperatorRule: Rule;
+export const preferTerseImportsRule: Rule;
 export function findConfigFile(cwd?: string): string | undefined;
 export function findCivetConfigFile(cwd?: string): string | undefined;
 export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial: CompileDial; compileOptions: CompileOptions; resolvedPath?: string };
