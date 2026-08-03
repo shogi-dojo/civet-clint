@@ -1,5 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { walkAst } from "../utils.civet"
+import { parseRawAst } from "../compiler.civet"
 
 // Module specifiers that are provably safe to unquote. Civet's terse import form
 // parses the specifier as a bare token, so anything containing whitespace or
@@ -12,25 +13,31 @@ import { walkAst } from "../utils.civet"
 // and path separators all round-trip to byte-identical output when unquoted.
 const SAFE_SPECIFIER = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._:/-]+$/
 
-// Only double-quoted specifiers may be unquoted.
+// Strips the quotes from a specifier literal.
 //
-// Civet preserves the original quote character in its emitted output, but the
-// terse unquoted form always emits double quotes. So dropping the quotes from
-// `'./foo'` changes the compiled bytes from `'./foo'` to `"./foo"` and the
-// compiler-equivalence gate rejects the edit. Because that gate validates each
-// rule's fixes as one batch per file, a single single-quoted import would
-// discard every terse-import fix in that file. Single-quoted imports therefore
-// keep their quotes and only lose the optional `import` keyword, which is
-// byte-identical on its own.
-function unquote(raw: string): string | undefined
+// Double-quoted specifiers are byte-safe by default: Civet preserves the original
+// quote character in its output, and the terse unquoted form always emits double
+// quotes, so `"./foo"` -> `./foo` leaves the compiled bytes untouched.
+//
+// Single-quoted specifiers are not byte-identical for exactly that reason —
+// unquoting `'./foo'` changes the emitted literal from `'./foo'` to `"./foo"`. That
+// is a quote-style change and nothing else, but it is still a change, so it is gated
+// behind the `unquoteSingleQuotes` option and validated against a reference compile
+// rather than the original output. See `buildQuoteReference` below.
+function unquote(raw: string, allowSingle: boolean): string | undefined
   return undefined unless raw.length >= 2
   first := raw[0]
   last := raw[raw.length - 1]
-  return undefined unless first is '"' and last is '"'
+  isDouble := first is '"' and last is '"'
+  isSingle := first is "'" and last is "'"
+  return undefined unless isDouble or (isSingle and allowSingle)
   inner := raw.slice(1, raw.length - 1)
   // A specifier carrying an escape sequence is not the same string once the
   // quotes are removed, so leave it alone.
   return undefined if inner.includes("\\")
+  // A single-quoted specifier containing a double quote cannot be re-expressed as a
+  // double-quoted literal without escaping, so it has no valid reference form.
+  return undefined if isSingle and inner.includes('"')
   inner
 
 function isSafeToUnquote(spec: string): boolean
@@ -74,16 +81,75 @@ function collectParts(node: any)
   visit node
   { importKeyword, specifier, hasBindings }
 
+// Re-parses `input` and returns the source spans of every import-declaration module
+// specifier, ascending. The reference source is built from a fresh parse rather than
+// from the positions captured during `check`, because the engine may hand this
+// builder a source that other rules' fixes have already shifted.
+function parseSpecifierSpans(input: string, dial: Record<string, any>): { pos: number, length: number }[]
+  res := parseRawAst input, { dial }
+  return [] unless res.ok
+  spans: { pos: number, length: number }[] := []
+  walkAst res.ast, (node) ->
+    return unless node? and typeof node is "object"
+    return unless node.type is "ImportDeclaration"
+    { specifier } := collectParts node
+    return unless specifier?.$loc
+    pos := specifier.$loc.pos
+    length := specifier.$loc.length
+    // Only trust a span that still matches the token the parser recorded.
+    return unless input.slice(pos, pos + length) is specifier.token
+    // An import attribute follows the specifier; those declarations are skipped by
+    // `check`, so the reference must leave them alone too or the two would disagree.
+    trailing := input.slice pos + length, pos + length + 240
+    return if /^\s*(?:with|assert)\b/.test trailing
+    spans.push { pos, length }
+  spans.sort (a, b) -> a.pos - b.pos
+  spans
+
 export const preferTerseImportsRule: Rule = {
   id: "style/prefer-terse-imports"
   meta: {
     description: "Prefer terse imports: omit the optional 'import' keyword and unquote safe module paths"
     fixable: true
     defaultSeverity: "error"
+    defaultOptions: {
+      // Off by default: enabling it takes the rule off the strictly byte-identical
+      // path and onto the reference-compile check (see the rule's
+      // `declareEquivalenceReference` call below).
+      unquoteSingleQuotes: false
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    allowSingle := ctx.options.unquoteSingleQuotes is true
     seen := new Set<number>()
+
+    // When single-quote unquoting is enabled, this rule's fixes are no longer
+    // byte-identical: the emitted specifier's quote character changes from `'` to
+    // `"`. Rather than weaken the gate or accept the batch being rejected, the rule
+    // hands the engine a reference source — the original with those same specifiers
+    // rewritten to double quotes, and nothing else changed. The engine compiles it
+    // and requires an exact match.
+    //
+    // This is safe in a way that normalizing compiled *output* would not be: the
+    // rewrite happens on Civet source at positions the parser identified as module
+    // specifiers, so ordinary strings that merely look like paths are never touched.
+    if allowSingle and ctx.declareEquivalenceReference?
+      ctx.declareEquivalenceReference "quote-style", (input: string) ->
+        parsed := parseSpecifierSpans input, ctx.parseOptions
+        return undefined unless parsed.length > 0
+        var out = ""
+        var cursor = 0
+        for { pos, length } of parsed
+          raw := input.slice pos, pos + length
+          continue unless raw.length >= 2 and raw[0] is "'" and raw[raw.length - 1] is "'"
+          inner := raw.slice 1, raw.length - 1
+          continue if inner.includes("\\") or inner.includes('"')
+          continue unless isSafeToUnquote inner
+          out += input.slice(cursor, pos) + '"' + inner + '"'
+          cursor = pos + length
+        return undefined if cursor is 0
+        out + input.slice(cursor)
 
     walkAst ctx.ast, (node) ->
       return unless node? and typeof node is "object"
@@ -139,7 +205,7 @@ export const preferTerseImportsRule: Rule = {
             })
 
       return unless specUsable
-      inner := unquote rawSpec
+      inner := unquote rawSpec, allowSingle
       if inner? and isSafeToUnquote(inner) and not seen.has(specPos)
         seen.add specPos
         ctx.report({

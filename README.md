@@ -112,6 +112,55 @@ Create a `civet-clint.config.json`, `.civet-clintrc.json`, or `.civet-clint.json
 }
 ```
 
+### Rule Options
+
+A rule entry is normally a bare level (`"error"`). Rules that accept options also
+support the array form `[level, options]`:
+
+```json
+{
+  "rules": {
+    "style/prefer-terse-imports": ["error", { "unquoteSingleQuotes": true }]
+  }
+}
+```
+
+Options are validated when the config loads: an unknown option key, a value of the
+wrong type, or options given to a rule that declares none is a hard error rather than
+a silently ignored setting. `clint --print-config` prints the effective options for
+every active rule, including defaults you did not set. Overrides accept the same array
+form, so options can be scoped to a glob.
+
+#### `style/prefer-terse-imports`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `unquoteSingleQuotes` | boolean | `false` | Also unquote single-quoted module specifiers. |
+
+By default the rule only unquotes double-quoted specifiers, because that rewrite is
+byte-identical: Civet echoes the original quote character, and the terse form emits
+double quotes. Unquoting `'./x'` therefore changes the emitted literal to `"./x"` —
+a quote-style change, but still a change, so it stays opt-in.
+
+When enabled, these fixes are **not** validated against the original compiled output.
+Two checks replace that one, and a fix must pass both:
+
+1. **Reference source.** The rule hands the engine the original file with exactly
+   those specifiers rewritten to double quotes, and nothing else. The engine compiles
+   it and requires the fixed file's output to match byte-for-byte. Because the rewrite
+   is driven by parser-identified specifier spans rather than text matching, a string
+   that merely looks like a path (`x := 'plain from ./str'`) is never touched.
+2. **Output-delta bound.** The rule also declares *how* its output may differ — here,
+   `quote-style`. The engine independently verifies that the two compiled outputs are
+   identical once string-literal quoting is normalized, so the change is provably
+   confined to quote characters and cannot alter identifiers, structure, or string
+   contents.
+
+The second check is what makes the first safe to trust. A reference source is supplied
+by the rule, so on its own it would let a rule authorize its own rewrite; the
+engine-owned delta bound is not something a rule can widen. The strict byte-identity
+check is unchanged for every other rule and for this rule's default path.
+
 ### Presets
 
 #### `default`
@@ -180,7 +229,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
 | [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. | `react` |
 | [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
-| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). | — |
+| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 
 ### Diagnostic Rules
 
@@ -209,7 +258,7 @@ out of scope; their absence is a design boundary, not a missing feature.
 |---|---|---|
 | Word operators, existential checks, terse declarations/exports, terse imports, JSX shorthands, arrow style, range loops | **Automated** | See the rule tables above. |
 | Side-effect import ordering | Not automated | Reordering imports can change evaluation order, so it is not compiler-equivalent. |
-| Single-quoted module paths | Partially automated | The `import` keyword is dropped, but quotes are kept: Civet echoes the original quote character while the terse form emits double quotes, so unquoting would change the compiled output. |
+| Single-quoted module paths | Automated, opt-in | Off by default, because unquoting `'./x'` changes the emitted quote character. Set [`unquoteSingleQuotes`](#rule-options) on `style/prefer-terse-imports` to enable it; the fix is then verified against a reference compile so the change is provably confined to specifier quote style. |
 | Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |
 | Comment quality, naming, file/layer organization, architectural policy (i18n via `t()`, no `fetch` in components) | Not automated | Qualitative judgments with no mechanical rewrite. Enforce in review. |
 
@@ -273,8 +322,28 @@ flowchart TD
     C --> H{Verify Byte-Identical Output}
     G --> H
     H -- Match --> I[Approved: Atomic Write]
-    H -- Mismatch --> J[Rejected: Retain Original Source]
+    H -- Mismatch --> K{Rule declared a reference source?}
+    K -- No --> J[Rejected: Retain Original Source]
+    K -- Yes --> L[Compile Reference Source]
+    L --> M{Byte-Identical to Reference?}
+    M -- No --> J
+    M -- Yes --> N{Within Declared Output Delta?}
+    N -- No --> J
+    N -- Yes --> I
 ```
+
+Fixes are validated per rule, one batch per file, so a rejected rule never discards
+another rule's approved edits.
+
+The reference-source branch is the single, opt-in exception to comparing against the
+original file's output, currently used only by
+[`unquoteSingleQuotes`](#styleprefer-terse-imports). It does not relax the gate,
+because it is paired with an engine-owned bound on the emitted difference. A rule
+supplies the reference *source*; the engine defines what each delta kind permits and
+verifies it separately, so a rule cannot widen its own allowance or launder an
+arbitrary rewrite through a broad reference. A rule never inspects, normalizes, or
+approves compiled output. Rules that declare no reference — every rule today by
+default — are governed solely by the strict check against the original.
 
 For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](docs/upstream.md).
 

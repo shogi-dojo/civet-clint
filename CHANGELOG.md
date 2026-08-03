@@ -5,6 +5,51 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Per-rule options**: rule entries in a config's `rules` map now accept the array
+  form `["error", { ...options }]` alongside the bare level. Options are threaded
+  through presets and glob `overrides` into each rule, and `clint --print-config`
+  reports the effective options — including defaults not set explicitly. Validation
+  is strict: an unknown option key, a wrong-typed value, or options passed to a rule
+  that declares none is a load-time error, so a typo cannot silently disable a
+  setting a user believes is active.
+
+- **`style/prefer-terse-imports` option `unquoteSingleQuotes`** (default `false`):
+  unquotes single-quoted module specifiers as well as double-quoted ones. Previously
+  single-quoted paths kept their quotes and only lost the `import` keyword, so
+  adopting terse imports in a single-quoted codebase required an external codemod
+  first.
+
+  Enabling it takes the rule off the strictly byte-identical path, because Civet
+  echoes the original quote character while the terse form always emits double
+  quotes. Rather than weaken the equivalence gate, two checks replace the single
+  byte comparison, and a fix must pass both:
+
+  1. The rule declares a *reference source* — the original with exactly those
+     specifiers requoted, and nothing else — which the engine compiles and requires
+     the fixed output to match byte-for-byte.
+  2. The rule declares the kind of emitted difference it may cause (`quote-style`),
+     which the engine verifies independently by normalizing string-literal quoting in
+     both outputs.
+
+  The second check is what makes the first safe: a reference source is authored by
+  the rule, so alone it would let a rule authorize its own rewrite, whereas the delta
+  bound is engine-owned and cannot be widened by a rule. A rule never inspects,
+  normalizes, or approves compiled output. The strict check against the original
+  output is unchanged for every other rule and for this rule's default path.
+
+  Because the rewrite is driven by parser-identified specifier spans rather than
+  text matching, ordinary strings that resemble module paths — such as
+  `x := 'plain from ./str'` — are provably unaffected.
+
+  Validated against the same 266-file Civet codebase that previously required the
+  codemod: 300 fixes in one pass, 206 files byte-identical and 60 differing only in
+  specifier quote style with zero other differences, a second pass a no-op, and the
+  project's 1233 tests, typecheck, and build all passing.
+
 ## [0.1.0-alpha.3] - 2026-08-03
 
 ### Added
