@@ -6,7 +6,7 @@ export const preferRangeOperatorRule: Rule = {
   meta: {
     description: "Prefer '[0...N].map' range loops over 'Array.from({ length: N }, ...)'"
     fixable: false
-    defaultSeverity: "error"
+    defaultSeverity: "warn"
     capabilities: {
       requires: ["coffeeRange"]
     }

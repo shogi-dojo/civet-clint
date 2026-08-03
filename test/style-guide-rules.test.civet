@@ -23,6 +23,18 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
       expect(diags.length).toBe(1)
 
+    it "ignores semicolons inside a template literal", ->
+      // CSS-in-JS is the common case: a `TemplateLiteral` carries no `$loc` of its
+      // own, so its span must be derived from descendant tokens or every CSS
+      // declaration is reported as a stray semicolon.
+      source := "x = <style>{`\n  a { opacity: 1; }\n`}</style>\n"
+      res := lintSource(source, {
+        rules: { "style/no-trailing-semicolons": "error" }
+        civetOptions: { autoLet: true, react: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
+      expect(diags).toHaveLength(0)
+
     it "preserves semicolons inside strings and multi-statement lines", ->
       source := 'str = "hello; world";\na = 1; b = 2\n'
       res := lintSource(source, {
@@ -149,7 +161,28 @@ describe "Style Guide Rules Coverage", ->
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-single-param-arrow-without-parens"
       expect(diags.length).toBe(1)
-      expect(diags[0].message).toContain("Arrow parameter 'x' must have parentheses")
+      expect(diags[0].message).toContain("write '(x) =>'")
+
+    it "does not flag zero-arg arrows whose body is on the next line", ->
+      // `beforeEach =>` / `useEffect =>` are the style guide's mandated zero-arg
+      // form. Flagging them made the rule unsatisfiable on real code.
+      source := "beforeEach =>\n  reset()\n\nuseEffect =>\n  go()\n"
+      res := lintSource(source, {
+        rules: { "style/no-single-param-arrow-without-parens": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-single-param-arrow-without-parens"
+      expect(diags).toHaveLength(0)
+
+    it "does not flag TypeScript return-type annotations", ->
+      // `(o: unknown): unknown => …` puts a TYPE where a parameter would be.
+      source := "read = (o: unknown): unknown => go(o)\nf = (v: unknown): v is Foo => true\n"
+      res := lintSource(source, {
+        rules: { "style/no-single-param-arrow-without-parens": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-single-param-arrow-without-parens"
+      expect(diags).toHaveLength(0)
 
     it "does not flag async => or parenthesized arrows", ->
       source := "f = async => 42\ng = (x) => x + 1\n"

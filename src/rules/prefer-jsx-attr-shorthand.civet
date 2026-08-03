@@ -6,7 +6,7 @@ export const preferJsxAttrShorthandRule: Rule = {
   meta: {
     description: "Prefer JSX attribute shorthand (attr={attr} -> {attr}, prop={true} -> prop)"
     fixable: false
-    defaultSeverity: "error"
+    defaultSeverity: "warn"
     capabilities: {
       requires: ["react"]
     }

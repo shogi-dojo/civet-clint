@@ -6,7 +6,7 @@ export const preferAmpersandShorthandRule: Rule = {
   meta: {
     description: "Prefer '&' block shorthand for single-parameter property/method access callbacks"
     fixable: false
-    defaultSeverity: "error"
+    defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

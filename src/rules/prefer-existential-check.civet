@@ -6,7 +6,7 @@ export const preferExistentialCheckRule: Rule = {
   meta: {
     description: "Prefer existential postfix (x? / not x?) over null equality checks"
     fixable: false
-    defaultSeverity: "error"
+    defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

@@ -17,7 +17,7 @@ export const noThinArrowRule: Rule = {
   meta: {
     description: "Disallow thin arrows (->); use fat arrows (=>) instead"
     fixable: false
-    defaultSeverity: "error"
+    defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

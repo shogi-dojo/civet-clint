@@ -50,16 +50,20 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/no-null-equality": "warn"
       "style/no-is-not": "warn"
       "style/no-mixed-interpolation": "warn"
+      // `error` is reserved for unambiguous defects and autofixable rewrites. The
+      // taste-level preferences below are `warn`: they are not autofixable, so at
+      // `error` they would block CI on style-guide-conformant code with no
+      // mechanical remedy.
       "style/no-trailing-semicolons": "error"
       "style/prefer-bare-assignment": "error"
-      "style/prefer-existential-check": "error"
-      "style/prefer-jsx-attr-shorthand": "error"
-      "style/prefer-ampersand-shorthand": "error"
-      "style/no-single-param-arrow-without-parens": "error"
-      "style/prefer-named-export-default": "warn"
-      "style/no-thin-arrow": "error"
       "style/no-pipe-operator": "error"
-      "style/prefer-range-operator": "error"
+      "style/prefer-existential-check": "warn"
+      "style/prefer-jsx-attr-shorthand": "warn"
+      "style/prefer-ampersand-shorthand": "warn"
+      "style/no-single-param-arrow-without-parens": "warn"
+      "style/prefer-named-export-default": "warn"
+      "style/no-thin-arrow": "warn"
+      "style/prefer-range-operator": "warn"
     }
     civetOptions: {
       autoLet: true
