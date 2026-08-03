@@ -32,5 +32,11 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Type-check public API
+        run: npm run typecheck
+
       - name: Run self-check
         run: npm run check
+
+      - name: Verify package contents
+        run: npm pack --dry-run

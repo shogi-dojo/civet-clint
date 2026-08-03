@@ -5,7 +5,8 @@ export default defineConfig({
   plugins: [
     civetPlugin({
       ts: 'civet',
-      emitDeclaration: false
+      emitDeclaration: false,
+      parseOptions: { coffeeIsnt: true }
     })
   ],
   test: {

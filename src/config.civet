@@ -48,7 +48,16 @@ export function loadCivetOptions(civetConfigPath?: string, cwd: string = process
   if resolvedPath and fs.existsSync(resolvedPath)
     try
       raw := fs.readFileSync(resolvedPath, "utf8")
-      return JSON.parse(raw)
+      parsed := JSON.parse(raw)
+      unless parsed? and typeof parsed is "object" and not Array.isArray(parsed)
+        throw new Error("Civet config must contain a JSON object")
+
+      // `civet.json` normally wraps the compiler dial in `parseOptions`.
+      // Clint consumes the dial itself, not the outer CompileOptions object.
+      parseOptions := if parsed.parseOptions? then parsed.parseOptions else parsed
+      unless parseOptions? and typeof parseOptions is "object" and not Array.isArray(parseOptions)
+        throw new Error("Civet parseOptions must contain a JSON object")
+      return parseOptions
     catch err
       throw new Error(`Failed to parse Civet config file at ${resolvedPath}: ${(err as Error).message}`)
   {}
@@ -79,13 +88,22 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
 
   mergedRules: Record<string, RuleLevel> := { ...presetDef.rules, ...(userConfig.rules or {}) }
 
-  userCivetOptions := loadCivetOptions(userConfig.civetConfig, cwd)
+  for ruleId of Object.keys(mergedRules)
+    level := mergedRules[ruleId]
+    unless level is "off" or level is "warn" or level is "error"
+      throw new Error(`Invalid level for rule "${ruleId}": expected off, warn, or error`)
+
+  configBase := configPath ? path.dirname(configPath) : cwd
+  resolvedCivetConfigPath := userConfig.civetConfig
+    ? path.resolve(configBase, userConfig.civetConfig)
+    : findCivetConfigFile(cwd)
+  userCivetOptions := loadCivetOptions(resolvedCivetConfigPath, cwd)
   civetOptions := { ...presetDef.civetOptions, ...userCivetOptions }
 
   {
     preset: presetName
     rules: mergedRules
-    civetConfigPath: userConfig.civetConfig
+    civetConfigPath: resolvedCivetConfigPath
     civetOptions
     configPath
   }

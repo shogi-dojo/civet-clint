@@ -3,15 +3,17 @@
 [![CI](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml/badge.svg)](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**civet-clint** is a high-performance, compiler-backed style linter and safe autofixer for [Civet](https://civet.dev).
+**civet-clint** is an experimental compiler-backed style checker and autofixer for [Civet](https://civet.dev).
 
-Unlike regex-based formatters or approximate AST replacers, `civet-clint` uses the official `@danielx/civet` compiler parser and validates every single autofix by re-compiling the transformed code. If the emitted output diverges by even a single byte from the original compiled code, the fix is immediately rejected, guaranteeing **100% semantic safety and zero runtime regression**.
+Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Each rule's edits and the combined result are recompiled; edits are applied only when the emitted output is byte-identical. This is a strong behavior-preservation guard, while the project remains a proof of concept built on Civet's currently untyped raw AST.
+
+> **Status:** POC. The package is not published to npm yet. Install it from GitHub or clone the repository while its public API is being validated.
 
 ---
 
 ## Features
 
-- 🛡️ **Compiler-Equivalence Verification**: Every autofix is verified against Civet's compilation output. Unsafe or output-altering fixes are automatically discarded.
+- 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are discarded without blocking safe batches from other rules.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via tempfiles, avoiding partial writes, corruption, and preserving line endings (`\n` vs `\r\n`).
 - 🎯 **Coffee React Style Rules**: Idiomatic rules designed for modern Civet codebases using CoffeeScript and React syntax styles.
 - ⚙️ **Configurable & Extensible**: Support for presets (`coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -22,11 +24,14 @@ Unlike regex-based formatters or approximate AST replacers, `civet-clint` uses t
 ## Installation
 
 ```bash
-# Local project dependency
-npm install --save-dev civet-clint
+# Install directly from the public GitHub repository
+npm install --save-dev github:shogi-dojo/civet-clint
 
-# Or global CLI
-npm install -g civet-clint
+# Or develop locally
+git clone https://github.com/shogi-dojo/civet-clint.git
+cd civet-clint
+npm ci
+npm test
 ```
 
 ---
@@ -108,7 +113,7 @@ Replaces standard JavaScript operators with concise Civet word operators:
 - `||` $\to$ `or`
 - `!flag` $\to$ `not flag`
 
-> **Safety**: Comparisons against `null` or `undefined` (e.g. `x === null`) are safely excluded to prevent unintended semantics changes.
+> **Safety**: Comparisons against `null` (e.g. `x === null`) are excluded because Civet's existential forms require an intentional migration decision. Comparisons against `undefined` can be rewritten normally.
 
 #### `style/prefer-concise-arrow`
 Converts parameterless arrow functions to concise Civet arrow syntax:
@@ -135,7 +140,7 @@ Flags direct comparisons with `null` (`=== null`, `!== null`, `== null`, `is nul
 Flags the use of `is not` (preferring `isnt`).
 
 #### `style/no-mixed-interpolation`
-Flags `${...}` string interpolations inside double quotes and mixed interpolation styles in the same file, recommending consistent CoffeeScript style `#{...}`.
+Flags the two silent interpolation traps: `${...}` inside double-quoted strings and `#{...}` inside backtick templates. Use backticks with `${...}` for ordinary interpolation; Coffee-style `"#{...}"` remains valid when deliberately needed.
 
 ---
 
@@ -173,6 +178,8 @@ flowchart TD
     H -- Match --> I[Approved: Atomic Write]
     H -- Mismatch --> J[Rejected: Keep Original]
 ```
+
+The intended path into the Civet project, including the raw-AST compatibility risk, is documented in [docs/upstream.md](docs/upstream.md).
 
 ---
 

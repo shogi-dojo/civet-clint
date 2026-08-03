@@ -5,6 +5,13 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "civet-clint": "./bin/civet-clint.js"
   },
@@ -20,7 +27,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
-    "check": "node bin/civet-clint.js src",
+    "typecheck": "npm run build && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 test/types/public-api.ts",
+    "check": "npm run build && node bin/civet-clint.js src",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [

@@ -9,11 +9,24 @@ describe "Rules Test Suite", ->
       expect(res.isEquivalencePreserved).toBe(true)
       expect(res.fixedSource).toBe("a is b and c isnt d or (e and f) or not flag")
 
+    it "replaces coffeeEq operators using their original source spelling", ->
+      input := "a == b\nc != d"
+      res := lintSource(input, {
+        civetOptions: { coffeeEq: true, coffeeIsnt: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b\nc isnt d")
+
     it "ignores null and undefined equality comparisons", ->
-      input := "a === null\nb !== null\nc === undefined\nd !== undefined"
+      input := "a === null\nb !== null"
       res := lintSource(input, { fix: true })
       expect(res.fixedSource).toBeUndefined()
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+    it "still rewrites comparisons with undefined", ->
+      res := lintSource("a === undefined\nb !== undefined", { fix: true })
+      expect(res.fixedSource).toBe("a is undefined\nb isnt undefined")
 
     it "does not replace operators inside strings, comments, or JSX text", ->
       input := 's := "=== && || !"\n// comment with !== and ||\n<div>=== and &&</div>'
@@ -22,6 +35,17 @@ describe "Rules Test Suite", ->
         fix: true
       })
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+    it "does not treat Object prototype property names as operators", ->
+      input := "toString\nconstructor\n__proto__"
+      res := lintSource(input, { fix: true })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+      expect(res.fixedSource).toBeUndefined()
+
+    it "does not rewrite synthetic bang tokens produced by unless", ->
+      res := lintSource("unless ready\n  start()", { fix: true })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+      expect(res.fixedSource).toBeUndefined()
 
     it "handles unary ! on expressions cleanly", ->
       input := "!foo\n!(a && b)\n!isReady"
@@ -120,3 +144,9 @@ describe "Rules Test Suite", ->
       res := lintSource(input)
       interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
       expect(interpDiags.length).toBe(0)
+
+    it "reports warning on '#{...}' inside backtick templates", ->
+      input := 'msg := `Hello #{name}`'
+      res := lintSource(input)
+      interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
+      expect(interpDiags.length).toBe(1)

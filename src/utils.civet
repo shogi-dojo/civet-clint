@@ -83,5 +83,10 @@ export async function atomicWriteFile(filePath: string, content: string): Promis
   dir := path.dirname(filePath)
   base := path.basename(filePath)
   tmpPath := path.join(dir, `.${base}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`)
-  await fs.writeFile(tmpPath, content, "utf8")
-  await fs.rename(tmpPath, filePath)
+  stat := await fs.stat(filePath)
+  try
+    await fs.writeFile(tmpPath, content, { encoding: "utf8", mode: stat.mode })
+    await fs.rename(tmpPath, filePath)
+  catch err
+    await fs.rm(tmpPath, { force: true })
+    throw err

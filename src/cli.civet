@@ -1,9 +1,8 @@
 import fs from "node:fs/promises"
-import fsSync from "node:fs"
 import path from "node:path"
 import { loadConfig } from "./config.civet"
-import { lintFile, lintSource } from "./engine.civet"
-import type { Diagnostic, LintResult, ResolvedConfig } from "./types.civet"
+import { lintFile } from "./engine.civet"
+import type { LintResult, ResolvedConfig } from "./types.civet"
 
 const IGNORED_DIRS = new Set([
   "node_modules"
@@ -21,11 +20,7 @@ export async function findCivetFiles(targets: string[], cwd: string = process.cw
   files: string[] := []
 
   traverse := async (dirPath: string): Promise<void> ->
-    var entries: any[] = []
-    try
-      entries = await fs.readdir(dirPath, { withFileTypes: true })
-    catch
-      return
+    entries := await fs.readdir(dirPath, { withFileTypes: true })
 
     for entry of entries
       if entry.isDirectory()
@@ -43,8 +38,7 @@ export async function findCivetFiles(targets: string[], cwd: string = process.cw
       else if stat.isFile() and resolved.endsWith(".civet")
         files.push(resolved)
     catch
-      // Target might not exist or might be glob
-      continue
+      throw new Error(`Target not found or unreadable: ${target}`)
 
   // Return sorted unique absolute paths
   Array.from(new Set(files)).sort()
@@ -57,15 +51,20 @@ export interface CliOptions
   help?: boolean
   version?: boolean
   targets: string[]
+  errors: string[]
 
 export function parseCliArgs(args: string[]): CliOptions
   options: CliOptions := {
     targets: []
     format: "text"
+    errors: []
   }
 
   for let i = 0; i < args.length; i++
     arg := args[i]
+    if arg is "--"
+      options.targets.push(...args.slice(i + 1))
+      break
     if arg is "--check"
       options.check = true
     else if arg is "--write" or arg is "-w" or arg is "--fix"
@@ -76,7 +75,10 @@ export function parseCliArgs(args: string[]): CliOptions
       options.version = true
     else if arg is "--config" or arg is "-c"
       i++
-      options.config = args[i]
+      if args[i]?
+        options.config = args[i]
+      else
+        options.errors.push(`${arg} requires a path`)
     else if arg.startsWith("--config=")
       options.config = arg.slice("--config=".length)
     else if arg is "--format" or arg is "-f"
@@ -84,12 +86,18 @@ export function parseCliArgs(args: string[]): CliOptions
       formatVal := args[i]
       if formatVal is "json" or formatVal is "text"
         options.format = formatVal
+      else
+        options.errors.push(`${arg} requires "text" or "json"`)
     else if arg.startsWith("--format=")
       formatVal := arg.slice("--format=".length)
       if formatVal is "json" or formatVal is "text"
         options.format = formatVal as any
+      else
+        options.errors.push(`Unknown output format: ${formatVal}`)
     else if not arg.startsWith("-")
       options.targets.push(arg)
+    else
+      options.errors.push(`Unknown option: ${arg}`)
 
   options
 
@@ -99,6 +107,7 @@ export function formatTextReport(results: LintResult[], isWriteMode: boolean): {
   var totalWarnings = 0
   var totalFixable = 0
   var totalFixed = 0
+  var hasFatalError = false
 
   cwd := process.cwd()
 
@@ -107,6 +116,12 @@ export function formatTextReport(results: LintResult[], isWriteMode: boolean): {
     totalWarnings += res.warningCount
     totalFixable += res.fixableCount
     totalFixed += res.appliedFixesCount
+    hasFatalError = true if res.diagnostics.some (diag) ->
+      diag.ruleId is "syntax-error" or
+        diag.ruleId is "compile-error" or
+        diag.ruleId is "io-error" or
+        diag.ruleId is "internal-rule-error" or
+        diag.ruleId.startsWith("compiler-equivalence-")
 
     if res.diagnostics.length > 0
       relPath := path.relative(cwd, res.filePath) or res.filePath
@@ -121,21 +136,26 @@ export function formatTextReport(results: LintResult[], isWriteMode: boolean): {
   lines.push("")
 
   if totalProblems > 0
-    lines.push(`✖ ${totalProblems} problem${totalProblems === 1 ? "" : "s"} (${totalErrors} error${totalErrors === 1 ? "" : "s"}, ${totalWarnings} warning${totalWarnings === 1 ? "" : "s"})`)
+    lines.push(`✖ ${totalProblems} problem${totalProblems is 1 ? "" : "s"} (${totalErrors} error${totalErrors is 1 ? "" : "s"}, ${totalWarnings} warning${totalWarnings is 1 ? "" : "s"})`)
     if totalFixable > 0 and not isWriteMode
       lines.push(`  ${totalFixable} fixable with --write`)
 
   if isWriteMode and totalFixed > 0
-    lines.push(`✔ Fixed ${totalFixed} problem${totalFixed === 1 ? "" : "s"}`)
+    lines.push(`✔ Fixed ${totalFixed} problem${totalFixed is 1 ? "" : "s"}`)
 
   if totalProblems is 0 and totalFixed is 0
     lines.push("✔ No problems found")
 
-  exitCode := totalErrors > 0 ? 1 : 0
+  exitCode := hasFatalError ? 2 : totalErrors > 0 ? 1 : 0
   { output: lines.join("\n").trim(), exitCode }
 
 export async function runCli(argv: string[] = process.argv.slice(2)): Promise<number>
   options := parseCliArgs(argv)
+
+  if options.errors.length > 0
+    for error of options.errors
+      console.error(`Argument error: ${error}`)
+    return 2
 
   if options.help
     console.log(`
@@ -164,9 +184,14 @@ Options:
     config = loadConfig(options.config, process.cwd())
   catch err: any
     console.error(`Configuration error: ${err.message or err}`)
-    return 1
+    return 2
 
-  files := await findCivetFiles(options.targets, process.cwd())
+  var files: string[]
+  try
+    files = await findCivetFiles(options.targets, process.cwd())
+  catch err: any
+    console.error(`Input error: ${err.message or err}`)
+    return 2
   if files.length is 0
     if options.format is "json"
       console.log(JSON.stringify({ files: [], totalErrors: 0, totalWarnings: 0, totalFixed: 0 }, null, 2))
@@ -206,10 +231,17 @@ Options:
     var totalErrors = 0
     var totalWarnings = 0
     var totalFixed = 0
+    var hasFatalError = false
     for r of results
       totalErrors += r.errorCount
       totalWarnings += r.warningCount
       totalFixed += r.appliedFixesCount
+      hasFatalError = true if r.diagnostics.some (diag) ->
+        diag.ruleId is "syntax-error" or
+          diag.ruleId is "compile-error" or
+          diag.ruleId is "io-error" or
+          diag.ruleId is "internal-rule-error" or
+          diag.ruleId.startsWith("compiler-equivalence-")
 
     jsonPayload := {
       files: results.map (r) -> {
@@ -225,7 +257,7 @@ Options:
       totalFixed
     }
     console.log(JSON.stringify(jsonPayload, null, 2))
-    return totalErrors > 0 ? 1 : 0
+    return hasFatalError ? 2 : totalErrors > 0 ? 1 : 0
   else
     { output, exitCode } := formatTextReport(results, isWriteMode)
     if output

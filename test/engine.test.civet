@@ -81,6 +81,36 @@ describe "Engine & Utils", ->
     expect(res.fixedSource).toBeUndefined()
     expect(res.diagnostics.some (d) -> d.ruleId.startsWith("compiler-equivalence")).toBe(true)
 
+  it "keeps safe rule batches when another rule is rejected", ->
+    dummyRule: Rule := {
+      id: "test/bad-batch"
+      meta: {
+        description: "Bad batch"
+        fixable: true
+        defaultSeverity: "error"
+      }
+      check: (ctx) ->
+        pos := ctx.source.lastIndexOf("1")
+        ctx.report({
+          ruleId: "test/bad-batch"
+          message: "Change behavior"
+          fix: { start: pos, end: pos + 1, replacement: "2" }
+        })
+    }
+    allRules["test/bad-batch"] = dummyRule
+
+    res := lintSource("a === b\nx := 1", {
+      rules: { "test/bad-batch": "error" }
+      fix: true
+    })
+
+    delete allRules["test/bad-batch"]
+
+    expect(res.fixedSource).toBe("a is b\nx := 1")
+    expect(res.appliedFixesCount).toBe(1)
+    expect(res.isEquivalencePreserved).toBe(false)
+    expect(res.diagnostics.some (d) -> d.ruleId is "test/bad-batch").toBe(true)
+
   it "preserves CRLF line endings on write", async ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-test-"))
     testFile := path.join(tmpDir, "test.civet")
@@ -121,10 +151,13 @@ describe "Engine & Utils", ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-atomic-"))
     testFile := path.join(tmpDir, "atomic.civet")
     await fs.writeFile(testFile, "original content", "utf8")
+    await fs.chmod(testFile, 0o744)
 
     await atomicWriteFile(testFile, "new atomic content")
     readBack := await fs.readFile(testFile, "utf8")
+    mode := (await fs.stat(testFile)).mode & 0o777
     expect(readBack).toBe("new atomic content")
+    expect(mode).toBe(0o744)
 
     await fs.rm(tmpDir, { recursive: true, force: true })
 
@@ -132,3 +165,23 @@ describe "Engine & Utils", ->
     config := loadConfig()
     expect(config.preset).toBe("coffee-react")
     expect(config.rules["style/prefer-word-operators"]).toBe("error")
+
+  it "loads parseOptions and resolves civetConfig relative to the Clint config", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-config-"))
+    configDir := path.join(tmpDir, "config")
+    await fs.mkdir(configDir)
+    await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+      parseOptions: { coffeeEq: true, coffeeComment: true }
+    }))
+    await fs.writeFile(path.join(configDir, "civet-clint.config.json"), JSON.stringify({
+      preset: "coffee-react"
+      civetConfig: "../civet.json"
+    }))
+
+    config := loadConfig("config/civet-clint.config.json", tmpDir)
+    expect(config.civetOptions.coffeeEq).toBe(true)
+    expect(config.civetOptions.coffeeComment).toBe(true)
+    expect(config.civetOptions.parseOptions).toBeUndefined()
+    expect(config.civetConfigPath).toBe(path.join(tmpDir, "civet.json"))
+
+    await fs.rm(tmpDir, { recursive: true, force: true })

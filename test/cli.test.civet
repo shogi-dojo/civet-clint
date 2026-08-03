@@ -11,6 +11,11 @@ describe "CLI Suite", ->
     expect(opts.config).toBe("./custom.json")
     expect(opts.format).toBe("json")
     expect(opts.targets).toEqual(["src", "test/file.civet"])
+    expect(opts.errors).toEqual([])
+
+  it "rejects unknown options and missing targets", async ->
+    expect(await runCli(["--wat"])).toBe(2)
+    expect(await runCli(["/definitely/not/a/civet/path"])).toBe(2)
 
   it "discovers .civet files while ignoring node_modules and dist", async ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disc-"))

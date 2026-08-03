@@ -40,13 +40,9 @@ async function build() {
       let compiled = civet.compile(content, {
         filename: file,
         js: true,
-        sync: true
+        sync: true,
+        parseOptions: { coffeeIsnt: true, rewriteCivetImports: '.js' }
       })
-
-      // Rewrite .civet relative imports to .js
-      compiled = compiled.replace(/(from\s+["']\.[^"']*?)\.civet(["'])/g, '$1.js$2')
-      compiled = compiled.replace(/(import\s+["']\.[^"']*?)\.civet(["'])/g, '$1.js$2')
-      compiled = compiled.replace(/(import\([^"']*?["']\.[^"']*?)\.civet(["']\))/g, '$1.js$2')
 
       await fs.writeFile(outPath, compiled, 'utf8')
     } else {
@@ -57,12 +53,27 @@ async function build() {
   }
 
   // Create TypeScript declarations
-  const indexDts = `export * from './index.js';
+  const indexDts = `export type Severity = 'warn' | 'error';
+export type RuleLevel = 'off' | 'warn' | 'error';
+export interface Fix {
+  start: number;
+  end: number;
+  replacement: string;
+}
+export interface RuleReport {
+  ruleId: string;
+  severity?: Severity;
+  message: string;
+  line?: number;
+  column?: number;
+  pos?: number;
+  fix?: Fix;
+}
 export interface RuleContext {
   source: string;
   ast: any;
   filename?: string;
-  report(diagnostic: Diagnostic): void;
+  report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
 }
 export interface Diagnostic {
@@ -74,10 +85,15 @@ export interface Diagnostic {
   pos?: number;
   fix?: Fix;
 }
-export interface Fix {
-  start: number;
-  end: number;
-  replacement: string;
+export interface RuleMeta {
+  description: string;
+  fixable: boolean;
+  defaultSeverity: Severity;
+}
+export interface Rule {
+  id: string;
+  meta: RuleMeta;
+  check(context: RuleContext): void;
 }
 export interface LintResult {
   filePath: string;
@@ -102,6 +118,47 @@ export interface ResolvedConfig {
   civetOptions: Record<string, any>;
   configPath?: string;
 }
+export interface LintOptions {
+  filename?: string;
+  config?: ResolvedConfig;
+  civetOptions?: Record<string, any>;
+  fix?: boolean;
+  rules?: Record<string, RuleLevel>;
+}
+export interface CliOptions {
+  check?: boolean;
+  write?: boolean;
+  config?: string;
+  format?: 'text' | 'json';
+  help?: boolean;
+  version?: boolean;
+  targets: string[];
+  errors: string[];
+}
+export const PRESETS: Record<string, { rules: Record<string, RuleLevel>; civetOptions: Record<string, any> }>;
+export const allRules: Record<string, Rule>;
+export const preferWordOperatorsRule: Rule;
+export const preferConciseArrowRule: Rule;
+export const preferJsxShorthandRule: Rule;
+export const noNullEqualityRule: Rule;
+export const noIsNotRule: Rule;
+export const noMixedInterpolationRule: Rule;
+export function findConfigFile(cwd?: string): string | undefined;
+export function findCivetConfigFile(cwd?: string): string | undefined;
+export function loadCivetOptions(civetConfigPath?: string, cwd?: string): Record<string, any>;
+export function loadConfig(explicitConfigPath?: string, cwd?: string): ResolvedConfig;
+export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
+export function lintSource(source: string, options?: LintOptions): LintResult;
+export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;
+export function createLineColumnIndex(source: string): (pos: number) => { line: number; column: number };
+export function walkAst(ast: any, visitor: (node: any, parent: any) => void): void;
+export function applyEdits(source: string, edits: Fix[]): { output: string; appliedEdits: Fix[]; conflicts: Fix[] };
+export function detectLineEnding(source: string): string;
+export function atomicWriteFile(filePath: string, content: string): Promise<void>;
+export function findCivetFiles(targets: string[], cwd?: string): Promise<string[]>;
+export function parseCliArgs(args: string[]): CliOptions;
+export function formatTextReport(results: LintResult[], isWriteMode: boolean): { output: string; exitCode: number };
+export function runCli(argv?: string[]): Promise<number>;
 `
   await fs.writeFile(path.join(DIST_DIR, 'index.d.ts'), indexDts, 'utf8')
   console.log(`Successfully built ${files.length} files to dist/`)

@@ -23,7 +23,7 @@ export const preferConciseArrowRule: Rule = {
           if Array.isArray(params.children) and params.children[1]?.$loc
             openParenPos = params.children[1].$loc.pos
 
-          if openParenPos !== undefined and not reportedStarts.has(openParenPos)
+          if openParenPos isnt undefined and not reportedStarts.has(openParenPos)
             sliceFromParen := source.slice(openParenPos)
             match := sliceFromParen.match(/^\(\)\s*/)
             if match

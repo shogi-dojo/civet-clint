@@ -4,32 +4,50 @@ import { walkAst } from "../utils.civet"
 export const noMixedInterpolationRule: Rule = {
   id: "style/no-mixed-interpolation"
   meta: {
-    description: "Flag mixed string interpolation styles (#{...} vs ${...})"
+    description: 'Flag mixed string interpolation styles (#{...} vs ${...})'
     fixable: false
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
-    var hasHashInterpolation = false
-    dollarInterpolations: { pos: number, message: string }[] := []
+    findings: { pos: number, message: string }[] := []
+    reported := new Set<number>()
 
     walkAst ctx.ast, (node, parent) ->
       return unless node? and typeof node is "object"
 
       if node.type is "StringLiteral" and node.token and node.$loc
-        token: string := node.token
         pos: number := node.$loc.pos
+        raw := ctx.source.slice(pos, pos + node.$loc.length)
 
-        if token.includes("#{")
-          hasHashInterpolation = true
-
-        if token.includes("${")
-          dollarInterpolations.push({
+        // Double-quoted `${}` looks like JavaScript interpolation but Civet
+        // emits it literally. Ignore escaped sequences intended as text.
+        if raw.startsWith('"') and /(^|[^\\])\$\{[^}]+\}/.test(raw) and not reported.has(pos)
+          reported.add(pos)
+          findings.push({
             pos
-            message: "Avoid using '${...}' inside string literals; prefer CoffeeScript style '#{...}'"
+            message: '${...} does not interpolate inside double-quoted strings; use a backtick template'
           })
 
-    // If file uses ${...} or mixes both styles, report warnings
-    for item of dollarInterpolations
+      if node.type is "TemplateLiteral"
+        tickPositions: number[] := []
+        walkAst node, (part) ->
+          if part?.$loc
+            actual := ctx.source.slice(part.$loc.pos, part.$loc.pos + part.$loc.length)
+            tickPositions.push(part.$loc.pos) if actual is "`"
+
+        if tickPositions.length >= 2
+          minPos := Math.min(...tickPositions)
+          maxPos := Math.max(...tickPositions) + 1
+          raw := ctx.source.slice(minPos, maxPos)
+          // Backtick `#{}` is the inverse trap: it also emits literally.
+          if raw.startsWith("`") and /(^|[^\\])#\{/.test(raw) and not reported.has(minPos)
+            reported.add(minPos)
+            findings.push({
+              pos: minPos
+              message: '#{...} does not interpolate inside backtick templates; use ${...}'
+            })
+
+    for item of findings
       ctx.report({
         ruleId: "style/no-mixed-interpolation"
         message: item.message
