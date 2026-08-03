@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import civet from "@danielx/civet"
 import type { Diagnostic, Fix, LintResult, ResolvedConfig, RuleContext, RuleLevel, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, collectCommentRanges, intersectsRange } from "./utils.civet"
 import { loadConfig } from "./config.civet"
 import { allRules } from "./rules/index.civet"
 
@@ -83,6 +83,12 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       fixableCount: 0
     }
 
+  // Comments are stripped before codegen, so an edit landing inside one is
+  // invisible to the compiler-equivalence check. Drop such fixes centrally:
+  // every rule is covered, including future ones. Block comments (`/* */`)
+  // survive into the output, so equivalence already guards those.
+  commentRanges := collectCommentRanges(ast)
+
   // Step 2: Run active rules
   context: RuleContext := {
     source
@@ -92,6 +98,9 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     report: (d) ->
       ruleLevel := mergedRules[d.ruleId] or "off"
       return if ruleLevel is "off"
+
+      if d.fix and intersectsRange(commentRanges, d.fix.start, d.fix.end)
+        return
 
       severity: Severity := (ruleLevel is "error" or ruleLevel is "warn")
         ? ruleLevel

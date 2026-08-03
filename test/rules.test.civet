@@ -9,6 +9,21 @@ describe "Rules Test Suite", ->
       expect(res.isEquivalencePreserved).toBe(true)
       expect(res.fixedSource).toBe("a is b and c isnt d or (e and f) or not flag")
 
+    it "never edits inside a stripped comment", ->
+      // Comments are dropped before codegen, so compiler equivalence cannot
+      // catch a fix that lands inside one. The guard must reject it outright.
+      input := "r := a === b  # keep x === y intact"
+      res := lintSource(input, {
+        civetOptions: { coffeeComment: true, coffeeEq: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("r := a is b  # keep x === y intact")
+
+    it "leaves a comment-only line untouched", ->
+      res := lintSource("// only a === b here\nr := 1", { fix: true })
+      expect(res.fixedSource).toBeUndefined()
+
     it "replaces coffeeEq operators using their original source spelling", ->
       input := "a == b\nc != d"
       res := lintSource(input, {

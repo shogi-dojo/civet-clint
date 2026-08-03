@@ -4,3 +4,4 @@ dist
 *.log
 PLAN*.md
 coverage
+notes

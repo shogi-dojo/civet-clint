@@ -44,6 +44,20 @@ export function walkAst(ast: any, visitor: (node: any, parent: any) => void)
 
   traverse(ast, null)
 
+export function collectCommentRanges(ast: any): { start: number, end: number }[]
+  ranges: { start: number, end: number }[] := []
+  walkAst ast, (node) ->
+    return unless node?.type is "Comment" and node.$loc
+    ranges.push({ start: node.$loc.pos, end: node.$loc.pos + node.$loc.length })
+  ranges.sort (a, b) -> a.start - b.start
+
+export function intersectsRange(ranges: { start: number, end: number }[], start: number, end: number): boolean
+  // A zero-width insertion is only inside a comment when strictly within it.
+  for range of ranges
+    if start < range.end and (end > range.start or (start is end and start > range.start))
+      return true
+  false
+
 export function applyEdits(source: string, edits: Fix[]): { output: string, appliedEdits: Fix[], conflicts: Fix[] }
   return { output: source, appliedEdits: [], conflicts: [] } if edits.length is 0
 
