@@ -8,6 +8,13 @@ const repoRoot = process.cwd()
 const smokeDir = await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-smoke-"))
 const npmCache = path.join(smokeDir, ".npm-cache")
 
+// This script runs under `prepublishOnly`, so `npm publish --dry-run` leaks
+// npm_config_dry_run into every nested npm call. That would make the pack below
+// print a tarball name without writing the file, breaking the smoke test on the
+// exact command a maintainer uses to rehearse a release.
+const npmEnv = { ...process.env, npm_config_cache: npmCache }
+delete npmEnv.npm_config_dry_run
+
 console.log(`[smoke-test] Isolated smoke directory: ${smokeDir}`)
 
 try {
@@ -15,7 +22,7 @@ try {
   console.log("[smoke-test] Packing civet-clint tarball...")
   execFileSync("npm", ["pack", "--pack-destination", smokeDir, "--ignore-scripts"], {
     cwd: repoRoot,
-    env: { ...process.env, npm_config_cache: npmCache },
+    env: npmEnv,
     stdio: "inherit"
   })
 
@@ -46,7 +53,7 @@ try {
   console.log("[smoke-test] Installing tarball into consumer project...")
   execFileSync("npm", ["install", tarballPath, "--no-audit", "--no-fund", "--cache", npmCache], {
     cwd: testProject,
-    env: { ...process.env, npm_config_cache: npmCache },
+    env: npmEnv,
     stdio: "inherit"
   })
 
