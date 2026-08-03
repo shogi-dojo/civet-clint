@@ -1,0 +1,6 @@
+export function checkSource(source: string, filename?: string)
+  {
+    diagnostics: []
+    appliedFixesCount: 0
+    isEquivalencePreserved: true
+  }

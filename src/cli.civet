@@ -1,0 +1,4 @@
+export function main()
+  console.log "civet-clint v0.1.0"
+
+main()
