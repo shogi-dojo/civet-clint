@@ -40,8 +40,10 @@
     "test": "vitest run",
     "typecheck": "npm run build && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 test/types/public-api.ts",
     "check": "npm run build && node bin/civet-clint.js src",
+    "smoke-test": "node scripts/smoke-test.mjs",
+    "release:check": "npm run build && npm test && npm run typecheck && npm run check && npm pack --dry-run && npm run smoke-test",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run release:check"
   },
   "keywords": [
     "civet",
