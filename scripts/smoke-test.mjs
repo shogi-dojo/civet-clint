@@ -50,9 +50,15 @@ try {
     stdio: "inherit"
   })
 
+  // Resolve the binary the tarball actually installed. Using `npx clint` here
+  // would happily fall back to a globally installed or registry-fetched clint,
+  // which would silently verify the wrong build.
+  const clintBin = path.join(testProject, "node_modules", ".bin", "clint")
+  await fs.access(clintBin)
+
   // 4. Test binary execution: --version
   console.log("[smoke-test] Testing clint --version...")
-  const versionOutput = execFileSync("npx", ["clint", "--version"], {
+  const versionOutput = execFileSync(clintBin, ["--version"], {
     cwd: testProject,
     encoding: "utf8"
   })
@@ -62,7 +68,7 @@ try {
 
   // 5. Test binary execution: --print-config
   console.log("[smoke-test] Testing clint --print-config...")
-  const configOutput = execFileSync("npx", ["clint", "--print-config"], {
+  const configOutput = execFileSync(clintBin, ["--print-config"], {
     cwd: testProject,
     encoding: "utf8"
   })
@@ -78,7 +84,7 @@ try {
 
   let checkFailedAsExpected = false
   try {
-    execFileSync("npx", ["clint", "sample.civet"], {
+    execFileSync(clintBin, ["sample.civet"], {
       cwd: testProject,
       stdio: "pipe"
     })
@@ -95,7 +101,7 @@ try {
   }
 
   // Run --write
-  execFileSync("npx", ["clint", "--write", "sample.civet"], {
+  execFileSync(clintBin, ["--write", "sample.civet"], {
     cwd: testProject,
     stdio: "inherit"
   })
@@ -106,7 +112,7 @@ try {
   }
 
   // Run check again (must succeed now)
-  execFileSync("npx", ["clint", "sample.civet"], {
+  execFileSync(clintBin, ["sample.civet"], {
     cwd: testProject,
     stdio: "inherit"
   })

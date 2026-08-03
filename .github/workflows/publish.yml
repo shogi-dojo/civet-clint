@@ -24,9 +24,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org/'
           cache: 'npm'
+
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -34,14 +37,23 @@ jobs:
       - name: Verify Git tag matches package.json version
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-              echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
-              exit 1
-            fi
-            echo "Verified tag version $TAG_VERSION matches package.json version $PKG_VERSION"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Refusing to publish from a non-tag ref ($GITHUB_REF_TYPE '$GITHUB_REF_NAME'). Publish must run from a v<version> tag or a Release that points at one."
+            exit 1
           fi
+          case "$GITHUB_REF_NAME" in
+            v*) ;;
+            *)
+              echo "::error::Tag '$GITHUB_REF_NAME' does not use the required v<version> format."
+              exit 1
+              ;;
+          esac
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Verified tag version $TAG_VERSION matches package.json version $PKG_VERSION"
 
       - name: Run full release verification suite
         run: npm run release:check
@@ -58,6 +70,9 @@ jobs:
           echo "tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
           echo "Publishing version $PKG_VERSION under dist-tag '$DIST_TAG'"
 
+      # Publishes via npm Trusted Publishing (OIDC) when configured for this
+      # repo/workflow; NODE_AUTH_TOKEN is the fallback for a granular access
+      # token. Provenance is attested from the id-token: write permission.
       - name: Publish package to npm
         run: npm publish --access public --tag ${{ steps.dist-tag.outputs.tag }} --provenance
         env:

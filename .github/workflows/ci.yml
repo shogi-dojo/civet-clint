@@ -40,3 +40,9 @@ jobs:
 
       - name: Verify package contents
         run: npm pack --dry-run
+
+      # Packing, installing and running the tarball is slow, so it is gated to a
+      # single Node version to keep the matrix runtime in check.
+      - name: Packaged install smoke test
+        if: matrix.node-version == '24.x'
+        run: npm run smoke-test

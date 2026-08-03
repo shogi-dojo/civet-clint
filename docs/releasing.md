@@ -38,12 +38,15 @@ Publishing is automated via GitHub Actions in [`.github/workflows/publish.yml`](
 
 - **Triggers**:
   - GitHub Release published, OR
-  - Push of a Git tag matching `v*`.
+  - Push of a Git tag matching `v*`, OR
+  - Manual `workflow_dispatch` **against a `v<version>` tag ref**. Dispatching
+    from a branch fails the version-verification step by design.
 - **Security & Permissions**:
   - Uses npm Granular Access Tokens or GitHub Actions OIDC Trusted Publishing (`id-token: write`).
   - Protected `npm` deployment environment.
   - Read-only repository access (`contents: read`).
 - **Validation Gates**:
+  - Refuses to run from any non-tag ref, and requires the `v<version>` tag format.
   - Verifies Git tag version equals `package.json` version.
   - Runs `npm run release:check` (build, tests, types, self-lint, pack dry-run, packaged smoke-test).
   - Publishes with `--access public --tag <tag> --provenance`.
