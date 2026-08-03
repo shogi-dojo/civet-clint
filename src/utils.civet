@@ -51,6 +51,32 @@ export function collectCommentRanges(ast: any): { start: number, end: number }[]
     ranges.push({ start: node.$loc.pos, end: node.$loc.pos + node.$loc.length })
   ranges.sort (a, b) -> a.start - b.start
 
+// Source span of a node. String and template nodes often carry no `$loc` of their
+// own — a `TemplateLiteral` holding CSS has its extent only in descendant tokens —
+// so fall back to the min/max `$loc` across the subtree.
+function nodeSpan(node: any): { start: number, end: number } | undefined
+  if node.$loc
+    return { start: node.$loc.pos, end: node.$loc.pos + (node.$loc.length or 0) }
+
+  var lo = Infinity
+  var hi = -Infinity
+  walkAst node, (child) ->
+    return unless child?.$loc
+    lo = Math.min(lo, child.$loc.pos)
+    hi = Math.max(hi, child.$loc.pos + (child.$loc.length or 0))
+
+  return undefined unless hi > lo
+  { start: lo, end: hi }
+
+export function collectStringRanges(ast: any): { start: number, end: number }[]
+  ranges: { start: number, end: number }[] := []
+  walkAst ast, (node) ->
+    return unless node? and typeof node is "object"
+    return unless node.type is "StringLiteral" or node.type is "TemplateLiteral"
+    span := nodeSpan(node)
+    ranges.push(span) if span
+  ranges.sort (a, b) -> a.start - b.start
+
 export function intersectsRange(ranges: { start: number, end: number }[], start: number, end: number): boolean
   // A zero-width insertion is only inside a comment when strictly within it.
   for range of ranges

@@ -11,6 +11,16 @@ import {
   parseRawAst,
   parseCliArgs,
   RuleRegistry,
+  noTrailingSemicolonsRule,
+  preferBareAssignmentRule,
+  preferExistentialCheckRule,
+  preferJsxAttrShorthandRule,
+  preferAmpersandShorthandRule,
+  noSingleParamArrowWithoutParensRule,
+  preferNamedExportDefaultRule,
+  noThinArrowRule,
+  noPipeOperatorRule,
+  preferRangeOperatorRule,
   type ClintConfig,
   type CompileDialOptions,
   type CompileResult,
@@ -71,6 +81,16 @@ void compiled
 void parsed
 void rule
 void customRule
+void noTrailingSemicolonsRule
+void preferBareAssignmentRule
+void preferExistentialCheckRule
+void preferJsxAttrShorthandRule
+void preferAmpersandShorthandRule
+void noSingleParamArrowWithoutParensRule
+void preferNamedExportDefaultRule
+void noThinArrowRule
+void noPipeOperatorRule
+void preferRangeOperatorRule
 void lintFile('example.civet', options)
 void findCivetFiles(['src'])
 void parseCliArgs(['--check'])

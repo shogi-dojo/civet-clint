@@ -10,6 +10,16 @@ import { preferJsxShorthandRule } from "./prefer-jsx-shorthand.civet"
 import { noNullEqualityRule } from "./no-null-equality.civet"
 import { noIsNotRule } from "./no-is-not.civet"
 import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
+import { noTrailingSemicolonsRule } from "./no-trailing-semicolons.civet"
+import { preferBareAssignmentRule } from "./prefer-bare-assignment.civet"
+import { preferExistentialCheckRule } from "./prefer-existential-check.civet"
+import { preferJsxAttrShorthandRule } from "./prefer-jsx-attr-shorthand.civet"
+import { preferAmpersandShorthandRule } from "./prefer-ampersand-shorthand.civet"
+import { noSingleParamArrowWithoutParensRule } from "./no-single-param-arrow-without-parens.civet"
+import { preferNamedExportDefaultRule } from "./prefer-named-export-default.civet"
+import { noThinArrowRule } from "./no-thin-arrow.civet"
+import { noPipeOperatorRule } from "./no-pipe-operator.civet"
+import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -22,5 +32,15 @@ export {
   preferJsxShorthandRule,
   noNullEqualityRule,
   noIsNotRule,
-  noMixedInterpolationRule
+  noMixedInterpolationRule,
+  noTrailingSemicolonsRule,
+  preferBareAssignmentRule,
+  preferExistentialCheckRule,
+  preferJsxAttrShorthandRule,
+  preferAmpersandShorthandRule,
+  noSingleParamArrowWithoutParensRule,
+  preferNamedExportDefaultRule,
+  noThinArrowRule,
+  noPipeOperatorRule,
+  preferRangeOperatorRule
 }

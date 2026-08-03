@@ -1,0 +1,42 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+
+export const noTrailingSemicolonsRule: Rule = {
+  id: "style/no-trailing-semicolons"
+  meta: {
+    description: "Disallow unnecessary trailing semicolons at statement or line ends"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    commentRanges := collectCommentRanges(ctx.ast)
+    stringRanges := collectStringRanges(ctx.ast)
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    lines := source.split("\n")
+    var currentOffset = 0
+
+    for line of lines
+      lineLen := line.length
+      for let i = 0; i < lineLen; i++
+        if line[i] is ";"
+          pos := currentOffset + i
+          continue if intersectsRange(ignoredRanges, pos, pos + 1)
+
+          restOfLine := line.slice(i + 1)
+          trimmedRest := restOfLine.trim()
+
+          isTrailing := trimmedRest.length is 0 or
+            trimmedRest.startsWith("#") or
+            trimmedRest.startsWith("//")
+
+          if isTrailing
+            ctx.report({
+              ruleId: "style/no-trailing-semicolons"
+              message: "Unnecessary trailing semicolon"
+              pos
+            })
+
+      currentOffset += lineLen + 1
+}
