@@ -2,14 +2,20 @@ import fs from "node:fs"
 import path from "node:path"
 import type { ClintConfig, ResolvedConfig, RuleLevel } from "./types.civet"
 
-export const PRESETS: Record<string, Record<string, RuleLevel>> = {
+export const PRESETS: Record<string, { rules: Record<string, RuleLevel>, civetOptions: Record<string, any> }> = {
   "coffee-react": {
-    "style/prefer-word-operators": "error"
-    "style/prefer-concise-arrow": "error"
-    "style/prefer-jsx-shorthand": "error"
-    "style/no-null-equality": "warn"
-    "style/no-is-not": "warn"
-    "style/no-mixed-interpolation": "warn"
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/prefer-jsx-shorthand": "error"
+      "style/no-null-equality": "warn"
+      "style/no-is-not": "warn"
+      "style/no-mixed-interpolation": "warn"
+    }
+    civetOptions: {
+      coffeeIsnt: true
+      react: true
+    }
   }
 }
 
@@ -67,13 +73,14 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
       throw new Error(`Failed to parse config file at ${configPath}: ${(err as Error).message}`)
 
   presetName := userConfig.preset or "coffee-react"
-  presetRules := PRESETS[presetName]
-  if not presetRules
+  presetDef := PRESETS[presetName]
+  if not presetDef
     throw new Error(`Unknown preset: "${presetName}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
 
-  mergedRules: Record<string, RuleLevel> := { ...presetRules, ...(userConfig.rules or {}) }
+  mergedRules: Record<string, RuleLevel> := { ...presetDef.rules, ...(userConfig.rules or {}) }
 
-  civetOptions := loadCivetOptions(userConfig.civetConfig, cwd)
+  userCivetOptions := loadCivetOptions(userConfig.civetConfig, cwd)
+  civetOptions := { ...presetDef.civetOptions, ...userCivetOptions }
 
   {
     preset: presetName

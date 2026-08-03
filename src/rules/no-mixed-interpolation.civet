@@ -1,0 +1,39 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+export const noMixedInterpolationRule: Rule = {
+  id: "style/no-mixed-interpolation"
+  meta: {
+    description: "Flag mixed string interpolation styles (#{...} vs ${...})"
+    fixable: false
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    var hasHashInterpolation = false
+    dollarInterpolations: { pos: number, message: string }[] := []
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      if node.type is "StringLiteral" and node.token and node.$loc
+        token: string := node.token
+        pos: number := node.$loc.pos
+
+        if token.includes("#{")
+          hasHashInterpolation = true
+
+        if token.includes("${")
+          dollarInterpolations.push({
+            pos
+            message: "Avoid using '${...}' inside string literals; prefer CoffeeScript style '#{...}'"
+          })
+
+    // If file uses ${...} or mixes both styles, report warnings
+    for item of dollarInterpolations
+      ctx.report({
+        ruleId: "style/no-mixed-interpolation"
+        message: item.message
+        pos: item.pos
+        severity: "warn"
+      })
+}

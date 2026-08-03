@@ -1,0 +1,105 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+const VALID_IDENTIFIER = /^[a-zA-Z_-][a-zA-Z0-9_-]*$/
+
+function extractAttributes(jsxElement: any): any[]
+  if not jsxElement.children
+    return []
+
+  // Check opening tag in paired element <div ...>...</div>
+  if Array.isArray(jsxElement.children[0]) and Array.isArray(jsxElement.children[0][3])
+    return jsxElement.children[0][3]
+
+  // Check self-closing element <div ... />
+  if Array.isArray(jsxElement.children[3])
+    return jsxElement.children[3]
+
+  []
+
+export const preferJsxShorthandRule: Rule = {
+  id: "style/prefer-jsx-shorthand"
+  meta: {
+    description: "Prefer JSX class and id shorthands (.class and #id) over className and id attributes"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    reportedStarts := new Set<number>()
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      if node.type is "JSXElement"
+        attrs := extractAttributes(node)
+        for attr of attrs
+          continue unless Array.isArray(attr) and attr.length >= 2
+          leadingWs := attr[0]
+          attrBody := attr[1]
+          continue unless Array.isArray(attrBody) and attrBody.length >= 2
+
+          namePart := attrBody[0]
+          valuePart := attrBody[1]
+
+          var attrName: string | undefined = undefined
+          if Array.isArray(namePart) and typeof namePart[0] is "string"
+            attrName = namePart[0]
+          else if typeof namePart is "string"
+            attrName = namePart
+
+          continue unless attrName is "className" or attrName is "id"
+          continue unless Array.isArray(valuePart) and valuePart.length >= 4
+
+          val := valuePart[3]
+          // Must be a static string literal
+          continue unless typeof val is "string"
+          continue unless (val.startsWith('"') and val.endsWith('"')) or (val.startsWith("'") and val.endsWith("'"))
+
+          rawVal := val.slice(1, -1).trim()
+          continue if rawVal is ""
+          continue if rawVal.includes("#{") or rawVal.includes("${")
+
+          var shorthand: string | undefined = undefined
+          if attrName is "className"
+            classes := rawVal.split(/\s+/)
+            allValid := classes.every (c) -> VALID_IDENTIFIER.test(c)
+            continue unless allValid and classes.length > 0
+            shorthand = ` .${classes.join(".")}`
+          else if attrName is "id"
+            continue unless VALID_IDENTIFIER.test(rawVal)
+            shorthand = ` #${rawVal}`
+
+          continue unless shorthand
+
+          // Calculate start position including leading whitespace
+          var startPos: number | undefined = undefined
+          if leadingWs?.$loc
+            startPos = leadingWs.$loc.pos
+          else if valuePart[1]?.$loc
+            // Fallback: search backwards for attrName
+            startPos = source.lastIndexOf(attrName, valuePart[1].$loc.pos)
+
+          continue if startPos is undefined or reportedStarts.has(startPos)
+
+          // Match the exact attribute syntax from startPos
+          slice := source.slice(startPos)
+          regex := attrName is "className"
+            ? /^\s*className\s*=\s*(?:"[^"]*"|'[^']*')/
+            : /^\s*id\s*=\s*(?:"[^"]*"|'[^']*')/
+
+          match := slice.match(regex)
+          if match
+            matchLen := match[0].length
+            reportedStarts.add(startPos)
+            ctx.report({
+              ruleId: "style/prefer-jsx-shorthand"
+              message: `Use JSX shorthand '${shorthand.trim()}' instead of '${match[0].trim()}'`
+              pos: startPos
+              fix: {
+                start: startPos
+                end: startPos + matchLen
+                replacement: shorthand
+              }
+            })
+}

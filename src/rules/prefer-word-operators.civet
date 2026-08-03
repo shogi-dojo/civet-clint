@@ -1,0 +1,89 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+const REPLACEMENT_MAP: Record<string, string> = {
+  "===": "is"
+  "!==": "isnt"
+  "==": "is"
+  "!=": "isnt"
+  "&&": "and"
+  "||": "or"
+}
+
+function isNullOrUndefined(text: string): boolean
+  t := text.trim()
+  t is "null" or t is "undefined"
+
+export const preferWordOperatorsRule: Rule = {
+  id: "style/prefer-word-operators"
+  meta: {
+    description: "Prefer word operators (is, isnt, and, or, not) over JS operators"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    reportedStarts := new Set<number>()
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      // Check UnaryExpression with '!'
+      if node.type is "UnaryExpression" and Array.isArray(node.pre)
+        for preItem of node.pre
+          if preItem?.$loc and preItem.token is "!"
+            pos := preItem.$loc.pos
+            if not reportedStarts.has(pos)
+              reportedStarts.add(pos)
+              // Determine if trailing space is needed
+              nextChar := source[pos + 1]
+              replacement := (nextChar is " " or nextChar is "\t" or nextChar is "\n")
+                ? "not"
+                : "not "
+              ctx.report({
+                ruleId: "style/prefer-word-operators"
+                message: "Use 'not' instead of '!'"
+                pos
+                fix: {
+                  start: pos
+                  end: pos + 1
+                  replacement
+                }
+              })
+
+      // Check Binary Operators tokens
+      if node.$loc and node.token and REPLACEMENT_MAP[node.token]
+        pos := node.$loc.pos
+        len := node.$loc.length
+        token := node.token
+        wordOp := REPLACEMENT_MAP[token]
+
+        if not reportedStarts.has(pos)
+          // Make sure source at this position actually matches the token
+          actualSlice := source.slice(pos, pos + len)
+          if actualSlice is token
+            // For equality operators, check if comparing to null/undefined
+            if token is "===" or token is "!==" or token is "==" or token is "!="
+              // Inspect surrounding tokens/words
+              beforeSlice := source.slice(Math.max(0, pos - 30), pos)
+              afterSlice := source.slice(pos + len, Math.min(source.length, pos + len + 30))
+
+              beforeMatch := beforeSlice.match(/([a-zA-Z0-9_$]+)\s*$/)
+              afterMatch := afterSlice.match(/^\s*([a-zA-Z0-9_$]+)/)
+
+              if (beforeMatch and isNullOrUndefined(beforeMatch[1])) or (afterMatch and isNullOrUndefined(afterMatch[1]))
+                // Skip null/undefined comparisons
+                return
+
+            reportedStarts.add(pos)
+            ctx.report({
+              ruleId: "style/prefer-word-operators"
+              message: `Use '${wordOp}' instead of '${token}'`
+              pos
+              fix: {
+                start: pos
+                end: pos + len
+                replacement: wordOp
+              }
+            })
+}

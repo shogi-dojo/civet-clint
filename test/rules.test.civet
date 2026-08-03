@@ -1,0 +1,122 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+
+describe "Rules Test Suite", ->
+  describe "style/prefer-word-operators", ->
+    it "replaces JS operators with Civet word operators", ->
+      input := "a === b and c !== d or (e && f) || !flag"
+      res := lintSource(input, { fix: true })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b and c isnt d or (e and f) or not flag")
+
+    it "ignores null and undefined equality comparisons", ->
+      input := "a === null\nb !== null\nc === undefined\nd !== undefined"
+      res := lintSource(input, { fix: true })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+    it "does not replace operators inside strings, comments, or JSX text", ->
+      input := 's := "=== && || !"\n// comment with !== and ||\n<div>=== and &&</div>'
+      res := lintSource(input, {
+        civetOptions: { react: true }
+        fix: true
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
+
+    it "handles unary ! on expressions cleanly", ->
+      input := "!foo\n!(a && b)\n!isReady"
+      res := lintSource(input, { fix: true })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("not foo\nnot (a and b)\nnot isReady")
+
+  describe "style/prefer-concise-arrow", ->
+    it "replaces parameterless () => with =>", ->
+      input := "fn := () => 42\nasyncFn := async () => 42"
+      res := lintSource(input, { fix: true })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("fn := => 42\nasyncFn := async => 42")
+
+    it "replaces () => in callbacks and JSX props", ->
+      input := "items.map(() => 0)\n<button onClick={() => doSomething()} />"
+      res := lintSource(input, {
+        civetOptions: { react: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("items.map(=> 0)\n<button onClick={=> doSomething()} />")
+
+    it "does not touch arrow functions with parameters", ->
+      input := "(x) => x * 2\n(a, b) => a + b"
+      res := lintSource(input, { fix: true })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-concise-arrow")).toHaveLength(0)
+      expect(res.fixedSource).toBeUndefined()
+
+  describe "style/prefer-jsx-shorthand", ->
+    it "replaces static className and id with JSX shorthand in React mode", ->
+      input := '<div className="btn primary" id="main-card">hello</div>'
+      res := lintSource(input, {
+        civetOptions: { react: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe('<div .btn.primary #main-card>hello</div>')
+
+    it "works on self-closing tags and custom component tags", ->
+      input := '<Button className="btn-save" id="save-btn" />'
+      res := lintSource(input, {
+        civetOptions: { react: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe('<Button .btn-save #save-btn />')
+
+    it "ignores dynamic, interpolated, or empty attributes", ->
+      input := '<div className={dynamicClass} id="" className="" />'
+      res := lintSource(input, {
+        civetOptions: { react: true }
+        fix: true
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-jsx-shorthand")).toHaveLength(0)
+      expect(res.fixedSource).toBeUndefined()
+
+  describe "style/no-null-equality", ->
+    it "reports warning diagnostics on null comparisons", ->
+      input := "a === null\nb !== null\nc is null\nd isnt null"
+      res := lintSource(input)
+      nullDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-null-equality")
+      expect(nullDiags.length).toBe(4)
+      expect(nullDiags.every((d) -> d.severity is "warn")).toBe(true)
+
+    it "does not warn on non-null comparisons", ->
+      input := "a === 5\nb !== 'hello'\nc is true"
+      res := lintSource(input)
+      nullDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-null-equality")
+      expect(nullDiags.length).toBe(0)
+
+  describe "style/no-is-not", ->
+    it "reports warning diagnostic on 'is not'", ->
+      input := "a is not b"
+      res := lintSource(input)
+      isNotDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
+      expect(isNotDiags.length).toBe(1)
+      expect(isNotDiags[0].severity).toBe("warn")
+
+    it "does not warn on 'isnt'", ->
+      input := "a isnt b"
+      res := lintSource(input)
+      isNotDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
+      expect(isNotDiags.length).toBe(0)
+
+  describe "style/no-mixed-interpolation", ->
+    it "reports warning on '${...}' inside string literals", ->
+      input := 'msg := "Hello ${name}"'
+      res := lintSource(input)
+      interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
+      expect(interpDiags.length).toBe(1)
+      expect(interpDiags[0].severity).toBe("warn")
+
+    it "does not warn on '#{...}' style interpolation", ->
+      input := 'msg := "Hello #{name}"'
+      res := lintSource(input)
+      interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
+      expect(interpDiags.length).toBe(0)

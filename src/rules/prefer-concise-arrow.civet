@@ -1,0 +1,42 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+export const preferConciseArrowRule: Rule = {
+  id: "style/prefer-concise-arrow"
+  meta: {
+    description: "Prefer concise '=>' over '() =>' for parameterless arrow functions"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    reportedStarts := new Set<number>()
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      if node.type is "ArrowFunction"
+        params := node.parameters
+        if params and Array.isArray(params.parameters) and params.parameters.length is 0
+          // Locate the empty parens in source
+          var openParenPos: number | undefined = undefined
+          if Array.isArray(params.children) and params.children[1]?.$loc
+            openParenPos = params.children[1].$loc.pos
+
+          if openParenPos !== undefined and not reportedStarts.has(openParenPos)
+            sliceFromParen := source.slice(openParenPos)
+            match := sliceFromParen.match(/^\(\)\s*/)
+            if match
+              matchLen := match[0].length
+              reportedStarts.add(openParenPos)
+              ctx.report({
+                ruleId: "style/prefer-concise-arrow"
+                message: "Use concise '=>' instead of '() =>'"
+                pos: openParenPos
+                fix: {
+                  start: openParenPos
+                  end: openParenPos + matchLen
+                  replacement: ""
+                }
+              })
+}
