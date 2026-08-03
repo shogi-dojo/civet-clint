@@ -77,10 +77,16 @@ export const PRESETS: Record<string, PresetDefinition> = {
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined
+  // Ordered by specificity. The `civet-clint.*` names come first so an existing
+  // project that has both keeps its current file; the shorter `clint.*` names match
+  // the CLI's own name and are what new projects reach for.
   candidates := [
     "civet-clint.config.json"
     ".civet-clintrc.json"
     ".civet-clint.json"
+    "clint.config.json"
+    ".clintrc.json"
+    ".clint.json"
   ]
   for candidate of candidates
     p := path.resolve(cwd, candidate)

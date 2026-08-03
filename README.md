@@ -81,7 +81,10 @@ npx clint --print-config src/components/Button.civet
 
 ## Configuration
 
-Create a `civet-clint.config.json`, `.civet-clintrc.json`, or `.civet-clint.json` file in your repository root:
+Create a config file in your repository root. These names are discovered
+automatically, in order: `civet-clint.config.json`, `.civet-clintrc.json`,
+`.civet-clint.json`, `clint.config.json`, `.clintrc.json`, `.clint.json`. Any other
+filename works too, but must be passed explicitly with `--config`.
 
 ```json
 {

@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
-import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, PRESETS } from "../src/config.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, PRESETS } from "../src/config.civet"
 import { parseRawAst, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -281,6 +281,43 @@ describe "Configuration matrix", ->
         expect(baseline.ok).toBe(true)
         expect(candidate.ok).toBe(true)
         expect(candidate.output).toBe(baseline.output)
+
+  describe "config file auto-discovery", ->
+    // A config that is present but not discovered is worse than a missing one: the
+    // run silently falls back to the default preset instead of failing.
+    discoverable := [
+      "civet-clint.config.json"
+      ".civet-clintrc.json"
+      ".civet-clint.json"
+      "clint.config.json"
+      ".clintrc.json"
+      ".clint.json"
+    ]
+
+    for name of discoverable
+      it `discovers ${name}`, ->
+        tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco-"))
+        await fs.writeFile(path.join(tmpDir, name), JSON.stringify({
+          preset: "coffee-react"
+        }))
+        expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, name))
+        // Discovery must actually feed loadConfig, not just resolve a path.
+        expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
+        await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "prefers civet-clint.config.json over clint.config.json", ->
+      // A project holding both keeps the established name.
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco2-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({ preset: "coffee-react" }))
+      await fs.writeFile(path.join(tmpDir, "clint.config.json"), JSON.stringify({ preset: "default" }))
+      expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, "civet-clint.config.json"))
+      expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "returns undefined when no config file is present", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco3-"))
+      expect(findConfigFile(tmpDir)).toBeUndefined()
+      await fs.rm(tmpDir, { recursive: true, force: true })
 
   describe "per-rule options", ->
     writeConfig := (rules: any) ->

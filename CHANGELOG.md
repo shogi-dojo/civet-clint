@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that declares none is a load-time error, so a typo cannot silently disable a
   setting a user believes is active.
 
+- **Config auto-discovery for `clint.config.json`**, `.clintrc.json`, and
+  `.clint.json`, matching the CLI's own name. The existing `civet-clint.*` names are
+  still checked first, so a project holding both keeps its current file. Previously a
+  config under any of the shorter names was silently ignored and the run fell back to
+  the `default` preset — a failure mode worse than a missing config, because it looks
+  like a pass.
+
 - **`style/prefer-terse-imports` option `unquoteSingleQuotes`** (default `false`):
   unquotes single-quoted module specifiers as well as double-quoted ones. Previously
   single-quoted paths kept their quotes and only lost the `import` keyword, so
