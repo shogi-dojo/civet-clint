@@ -1,4 +1,233 @@
-export function main()
-  console.log "civet-clint v0.1.0"
+import fs from "node:fs/promises"
+import fsSync from "node:fs"
+import path from "node:path"
+import { loadConfig } from "./config.civet"
+import { lintFile, lintSource } from "./engine.civet"
+import type { Diagnostic, LintResult, ResolvedConfig } from "./types.civet"
 
-main()
+const IGNORED_DIRS = new Set([
+  "node_modules"
+  ".git"
+  "dist"
+  "build"
+  "coverage"
+  ".next"
+  ".turbo"
+  ".output"
+])
+
+export async function findCivetFiles(targets: string[], cwd: string = process.cwd()): Promise<string[]>
+  effectiveTargets := targets.length > 0 ? targets : ["."]
+  files: string[] := []
+
+  traverse := async (dirPath: string): Promise<void> ->
+    var entries: any[] = []
+    try
+      entries = await fs.readdir(dirPath, { withFileTypes: true })
+    catch
+      return
+
+    for entry of entries
+      if entry.isDirectory()
+        if not IGNORED_DIRS.has(entry.name) and not entry.name.startsWith(".")
+          await traverse(path.join(dirPath, entry.name))
+      else if entry.isFile() and entry.name.endsWith(".civet")
+        files.push(path.join(dirPath, entry.name))
+
+  for target of effectiveTargets
+    resolved := path.resolve(cwd, target)
+    try
+      stat := await fs.stat(resolved)
+      if stat.isDirectory()
+        await traverse(resolved)
+      else if stat.isFile() and resolved.endsWith(".civet")
+        files.push(resolved)
+    catch
+      // Target might not exist or might be glob
+      continue
+
+  // Return sorted unique absolute paths
+  Array.from(new Set(files)).sort()
+
+export interface CliOptions
+  check?: boolean
+  write?: boolean
+  config?: string
+  format?: "text" | "json"
+  help?: boolean
+  version?: boolean
+  targets: string[]
+
+export function parseCliArgs(args: string[]): CliOptions
+  options: CliOptions := {
+    targets: []
+    format: "text"
+  }
+
+  for let i = 0; i < args.length; i++
+    arg := args[i]
+    if arg is "--check"
+      options.check = true
+    else if arg is "--write" or arg is "-w" or arg is "--fix"
+      options.write = true
+    else if arg is "--help" or arg is "-h"
+      options.help = true
+    else if arg is "--version" or arg is "-v"
+      options.version = true
+    else if arg is "--config" or arg is "-c"
+      i++
+      options.config = args[i]
+    else if arg.startsWith("--config=")
+      options.config = arg.slice("--config=".length)
+    else if arg is "--format" or arg is "-f"
+      i++
+      formatVal := args[i]
+      if formatVal is "json" or formatVal is "text"
+        options.format = formatVal
+    else if arg.startsWith("--format=")
+      formatVal := arg.slice("--format=".length)
+      if formatVal is "json" or formatVal is "text"
+        options.format = formatVal as any
+    else if not arg.startsWith("-")
+      options.targets.push(arg)
+
+  options
+
+export function formatTextReport(results: LintResult[], isWriteMode: boolean): { output: string, exitCode: number }
+  lines: string[] := []
+  var totalErrors = 0
+  var totalWarnings = 0
+  var totalFixable = 0
+  var totalFixed = 0
+
+  cwd := process.cwd()
+
+  for res of results
+    totalErrors += res.errorCount
+    totalWarnings += res.warningCount
+    totalFixable += res.fixableCount
+    totalFixed += res.appliedFixesCount
+
+    if res.diagnostics.length > 0
+      relPath := path.relative(cwd, res.filePath) or res.filePath
+      lines.push(`\n${relPath}`)
+      for diag of res.diagnostics
+        tag := diag.severity is "error" ? "error" : "warning"
+        posStr := `${diag.line}:${diag.column}`
+        fixableTag := diag.fix ? " (fixable)" : ""
+        lines.push(`  ${posStr.padEnd(8)} ${tag.padEnd(8)} ${diag.message}  [${diag.ruleId}]${fixableTag}`)
+
+  totalProblems := totalErrors + totalWarnings
+  lines.push("")
+
+  if totalProblems > 0
+    lines.push(`✖ ${totalProblems} problem${totalProblems === 1 ? "" : "s"} (${totalErrors} error${totalErrors === 1 ? "" : "s"}, ${totalWarnings} warning${totalWarnings === 1 ? "" : "s"})`)
+    if totalFixable > 0 and not isWriteMode
+      lines.push(`  ${totalFixable} fixable with --write`)
+
+  if isWriteMode and totalFixed > 0
+    lines.push(`✔ Fixed ${totalFixed} problem${totalFixed === 1 ? "" : "s"}`)
+
+  if totalProblems is 0 and totalFixed is 0
+    lines.push("✔ No problems found")
+
+  exitCode := totalErrors > 0 ? 1 : 0
+  { output: lines.join("\n").trim(), exitCode }
+
+export async function runCli(argv: string[] = process.argv.slice(2)): Promise<number>
+  options := parseCliArgs(argv)
+
+  if options.help
+    console.log(`
+civet-clint: Compiler-backed style linter & autofixer for Civet
+
+Usage:
+  civet-clint [options] [files/directories...]
+
+Options:
+  --check              Check files and report errors (default mode)
+  -w, --write, --fix   Automatically fix style issues in place
+  -c, --config <path>  Path to civet-clint configuration file
+  -f, --format <type>  Output format: text (default) | json
+  -v, --version        Print version and exit
+  -h, --help           Show this help message
+`.trim())
+    return 0
+
+  if options.version
+    // Read package.json version
+    console.log("civet-clint v0.1.0")
+    return 0
+
+  var config: ResolvedConfig
+  try
+    config = loadConfig(options.config, process.cwd())
+  catch err: any
+    console.error(`Configuration error: ${err.message or err}`)
+    return 1
+
+  files := await findCivetFiles(options.targets, process.cwd())
+  if files.length is 0
+    if options.format is "json"
+      console.log(JSON.stringify({ files: [], totalErrors: 0, totalWarnings: 0, totalFixed: 0 }, null, 2))
+    else
+      console.log("No .civet files found.")
+    return 0
+
+  results: LintResult[] := []
+  isWriteMode := options.write is true
+
+  for file of files
+    try
+      res := await lintFile(file, {
+        config
+        fix: isWriteMode
+      })
+      results.push(res)
+    catch err: any
+      results.push({
+        filePath: file
+        source: ""
+        diagnostics: [{
+          ruleId: "io-error"
+          severity: "error"
+          message: `Failed to process file: ${err.message or err}`
+          line: 1
+          column: 1
+        }]
+        appliedFixesCount: 0
+        isEquivalencePreserved: false
+        errorCount: 1
+        warningCount: 0
+        fixableCount: 0
+      })
+
+  if options.format is "json"
+    var totalErrors = 0
+    var totalWarnings = 0
+    var totalFixed = 0
+    for r of results
+      totalErrors += r.errorCount
+      totalWarnings += r.warningCount
+      totalFixed += r.appliedFixesCount
+
+    jsonPayload := {
+      files: results.map (r) -> {
+        filePath: r.filePath
+        diagnostics: r.diagnostics
+        errorCount: r.errorCount
+        warningCount: r.warningCount
+        appliedFixesCount: r.appliedFixesCount
+        isEquivalencePreserved: r.isEquivalencePreserved
+      }
+      totalErrors
+      totalWarnings
+      totalFixed
+    }
+    console.log(JSON.stringify(jsonPayload, null, 2))
+    return totalErrors > 0 ? 1 : 0
+  else
+    { output, exitCode } := formatTextReport(results, isWriteMode)
+    if output
+      console.log(output)
+    return exitCode

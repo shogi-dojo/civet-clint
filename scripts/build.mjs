@@ -37,11 +37,17 @@ async function build() {
       const outPath = path.join(DIST_DIR, outRelPath)
       await fs.mkdir(path.dirname(outPath), { recursive: true })
 
-      const compiled = civet.compile(content, {
+      let compiled = civet.compile(content, {
         filename: file,
         js: true,
         sync: true
       })
+
+      // Rewrite .civet relative imports to .js
+      compiled = compiled.replace(/(from\s+["']\.[^"']*?)\.civet(["'])/g, '$1.js$2')
+      compiled = compiled.replace(/(import\s+["']\.[^"']*?)\.civet(["'])/g, '$1.js$2')
+      compiled = compiled.replace(/(import\([^"']*?["']\.[^"']*?)\.civet(["']\))/g, '$1.js$2')
+
       await fs.writeFile(outPath, compiled, 'utf8')
     } else {
       const outPath = path.join(DIST_DIR, relPath)
@@ -55,7 +61,9 @@ async function build() {
 export interface RuleContext {
   source: string;
   ast: any;
+  filename?: string;
   report(diagnostic: Diagnostic): void;
+  getLineColumn(pos: number): { line: number; column: number };
 }
 export interface Diagnostic {
   ruleId: string;
@@ -63,6 +71,7 @@ export interface Diagnostic {
   message: string;
   line: number;
   column: number;
+  pos?: number;
   fix?: Fix;
 }
 export interface Fix {
@@ -77,11 +86,21 @@ export interface LintResult {
   diagnostics: Diagnostic[];
   appliedFixesCount: number;
   isEquivalencePreserved: boolean;
+  errorCount: number;
+  warningCount: number;
+  fixableCount: number;
 }
 export interface ClintConfig {
   preset?: string;
   civetConfig?: string;
   rules?: Record<string, 'off' | 'warn' | 'error'>;
+}
+export interface ResolvedConfig {
+  preset: string;
+  rules: Record<string, 'off' | 'warn' | 'error'>;
+  civetConfigPath?: string;
+  civetOptions: Record<string, any>;
+  configPath?: string;
 }
 `
   await fs.writeFile(path.join(DIST_DIR, 'index.d.ts'), indexDts, 'utf8')
