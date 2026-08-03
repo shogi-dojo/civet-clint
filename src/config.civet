@@ -45,6 +45,14 @@ export function findCivetConfigFile(cwd: string = process.cwd()): string | undef
 
 export function loadCivetOptions(civetConfigPath?: string, cwd: string = process.cwd()): Record<string, any>
   resolvedPath := civetConfigPath ? path.resolve(cwd, civetConfigPath) : findCivetConfigFile(cwd)
+
+  // An explicitly configured `civetConfig` that does not exist must be fatal.
+  // Silently falling back to `{}` would lint against the wrong compiler dial —
+  // e.g. losing `coffeeComment` makes `# a === b` parse as code, so the fixer
+  // rewrites inside a comment. Auto-discovery finding nothing stays non-fatal.
+  if civetConfigPath and not fs.existsSync(resolvedPath!)
+    throw new Error(`Civet config file not found: ${resolvedPath}`)
+
   if resolvedPath and fs.existsSync(resolvedPath)
     try
       raw := fs.readFileSync(resolvedPath, "utf8")

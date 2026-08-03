@@ -185,3 +185,24 @@ describe "Engine & Utils", ->
     expect(config.civetConfigPath).toBe(path.join(tmpDir, "civet.json"))
 
     await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "fails loudly when an explicit civetConfig is missing", async ->
+    // Silently falling back to `{}` would lint against the wrong dial: without
+    // `coffeeComment`, `# a === b` parses as code and the fixer edits a comment.
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-missing-"))
+    await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+      preset: "coffee-react"
+      civetConfig: "./civet.jsonn"
+    }))
+
+    expect(=> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/Civet config file not found/)
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "still allows auto-discovery to find no civet.json", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-nodial-"))
+    config := loadConfig(undefined, tmpDir)
+    expect(config.civetOptions.react).toBe(true)
+    expect(config.civetConfigPath).toBeUndefined()
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
