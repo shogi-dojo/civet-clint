@@ -1,11 +1,15 @@
 import {
   allRules,
+  compileForOutput,
   findCivetFiles,
   lintFile,
   lintSource,
   loadConfig,
+  parseRawAst,
   parseCliArgs,
   type ClintConfig,
+  type CompileDialOptions,
+  type CompileResult,
   type LintOptions,
   type LintResult,
   type Rule,
@@ -18,6 +22,9 @@ const userConfig: ClintConfig = {
 const resolved = loadConfig()
 const options: LintOptions = { config: resolved, fix: true }
 const result: LintResult = lintSource('fn := () => a === b', options)
+const compileOptions: CompileDialOptions = { dial: {}, compileOptions: { js: true } }
+const compiled: CompileResult = compileForOutput('x := 1', compileOptions)
+const parsed: CompileResult = parseRawAst('x := 1', { dial: {} })
 const rule: Rule | undefined = allRules['style/prefer-word-operators']
 const customRule: Rule = {
   id: 'example/rule',
@@ -29,6 +36,8 @@ const customRule: Rule = {
 
 void userConfig
 void result
+void compiled
+void parsed
 void rule
 void customRule
 void lintFile('example.civet', options)

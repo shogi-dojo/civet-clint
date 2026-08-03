@@ -81,6 +81,34 @@ describe "Engine & Utils", ->
     expect(res.fixedSource).toBeUndefined()
     expect(res.diagnostics.some (d) -> d.ruleId.startsWith("compiler-equivalence")).toBe(true)
 
+  it "distinguishes candidate compile failures from output mismatches", ->
+    dummyRule: Rule := {
+      id: "test/broken-rule"
+      meta: {
+        description: "Broken rule"
+        fixable: true
+        defaultSeverity: "error"
+      }
+      check: (ctx) ->
+        ctx.report({
+          ruleId: "test/broken-rule"
+          message: "Break parsing"
+          fix: { start: 0, end: 1, replacement: ")" }
+        })
+    }
+    allRules["test/broken-rule"] = dummyRule
+
+    res := lintSource("x := 1", {
+      rules: { "test/broken-rule": "error" }
+      fix: true
+    })
+
+    delete allRules["test/broken-rule"]
+
+    expect(res.isEquivalencePreserved).toBe(false)
+    failure := res.diagnostics.find (d) -> d.ruleId is "compiler-equivalence-failed"
+    expect(failure?.message).toContain("failed compilation")
+
   it "keeps safe rule batches when another rule is rejected", ->
     dummyRule: Rule := {
       id: "test/bad-batch"
@@ -163,7 +191,7 @@ describe "Engine & Utils", ->
 
   it "loads configuration and allows explicit rules to override preset", ->
     config := loadConfig()
-    expect(config.preset).toBe("coffee-react")
+    expect(config.preset).toBe("default")
     expect(config.rules["style/prefer-word-operators"]).toBe("error")
 
   it "loads parseOptions and resolves civetConfig relative to the Clint config", async ->
@@ -202,7 +230,8 @@ describe "Engine & Utils", ->
   it "still allows auto-discovery to find no civet.json", async ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-nodial-"))
     config := loadConfig(undefined, tmpDir)
-    expect(config.civetOptions.react).toBe(true)
+    expect(config.preset).toBe("default")
+    expect(config.civetOptions.react).toBeUndefined()
     expect(config.civetConfigPath).toBeUndefined()
 
     await fs.rm(tmpDir, { recursive: true, force: true })

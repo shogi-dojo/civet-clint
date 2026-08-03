@@ -17,8 +17,8 @@ Clint consumes the project's `civet.json` through a compiler/config adapter (`sr
 
 Supported in Civet 0.11.15:
 
-- Presets: `default` (neutral, empty dial, only dial-independent rules) and `coffee-react` (`coffeeIsnt` + `react`, backward-compatible default for existing consumers).
-- Rule capabilities: a rule declares `meta.capabilities.requires` (e.g. `style/prefer-jsx-shorthand` requires `react`; `style/no-is-not` requires `coffeeIsnt`). Rules whose requirements are unsatisfied by the resolved dial are **skipped** — reported by `clint --print-config` and never executed — so an autofix whose replacement is invalid under the active dial is never even proposed.
+- Presets: `default` (the neutral default, empty dial, only dial-independent rules) and `coffee-react` (`coffeeIsnt` + `react`, explicitly selected by Coffee/React consumers).
+- Rule capabilities: a rule declares `meta.capabilities.requires` and/or `requiresAny` (e.g. `style/prefer-jsx-shorthand` requires `react`; `style/no-is-not` runs with either `coffeeIsnt` or `coffeeNot`). Rules whose requirements are unsatisfied by the resolved dial are **skipped** — reported by `clint --print-config` and never executed — so an autofix whose replacement is invalid under the active dial is never even proposed.
 - `clint --print-config` prints the resolved preset, compiler options, rules, and skipped/incompatible rules.
 
 Not yet supported (do not claim arbitrary compiler-version or compiler-configuration support):
@@ -29,7 +29,7 @@ Not yet supported (do not claim arbitrary compiler-version or compiler-configura
 
 ## Compatibility blocker
 
-The POC obtains source spans from `compile(source, { ast: "raw" })`. The option is public, but `CivetAST` is intentionally typed as `unknown`, and properties such as `$loc`, `children`, and `parent` are not a stable extension API. All raw-AST shape access (`$loc`, `children`, `parent`, comment-range collection) is isolated behind `src/compiler.civet` and `src/utils.civet` so an eventual stable Civet token/source-range API can replace it centrally.
+The POC obtains source spans from `compile(source, { ast: "raw" })`. The option is public, but `CivetAST` is intentionally typed as `unknown`, and properties such as `$loc`, `children`, and `parent` are not a stable extension API. `src/compiler.civet` now isolates construction of the compiler invocation, but raw node-shape access still exists in rules and `src/utils.civet`; introducing a node/source-range adapter remains required before upstreaming.
 
 Before upstreaming, expose a small supported source-token traversal API—or stable source ranges on public AST nodes—so style rules do not depend on compiler internals. Until then, `civet-clint` pins the exact Civet version and rejects fixes whenever recompilation changes the emitted output.
 

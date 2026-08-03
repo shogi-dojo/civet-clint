@@ -52,6 +52,8 @@ export interface RuleContext
 // active configuration.
 export interface RuleCapability
   requires?: string[]
+  // At least one of these dial keys must be truthy.
+  requiresAny?: string[]
 
 export interface RuleMeta
   description: string

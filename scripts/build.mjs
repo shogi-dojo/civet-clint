@@ -57,6 +57,21 @@ async function build() {
 export type RuleLevel = 'off' | 'warn' | 'error';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
+export interface CompileDialOptions {
+  dial: CompileDial;
+  compileOptions?: CompileOptions;
+  filename?: string;
+}
+export interface RawAstOptions extends CompileDialOptions {}
+export interface CompileResult {
+  ok: boolean;
+  output?: string;
+  ast?: any;
+  error?: string;
+  line?: number;
+  column?: number;
+  offset?: number;
+}
 export interface Fix {
   start: number;
   end: number;
@@ -90,6 +105,7 @@ export interface Diagnostic {
 }
 export interface RuleCapability {
   requires?: string[];
+  requiresAny?: string[];
 }
 export interface RuleMeta {
   description: string;
@@ -169,8 +185,8 @@ export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial:
 export function loadCivetOptions(civetConfigPath?: string, cwd?: string): CompileDial;
 export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial): SkippedRule[];
 export function loadConfig(explicitConfigPath?: string, cwd?: string): ResolvedConfig;
-export function parseRawAst(source: string, options: { dial: CompileDial; compileOptions?: CompileOptions; filename?: string }): { ok: boolean; ast?: any; error?: string; line?: number; column?: number; offset?: number };
-export function compileForOutput(source: string, options: { dial: CompileDial; compileOptions?: CompileOptions; filename?: string }): { ok: boolean; output?: string; error?: string; line?: number; column?: number; offset?: number };
+export function parseRawAst(source: string, options: RawAstOptions): CompileResult;
+export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
 export function lintSource(source: string, options?: LintOptions): LintResult;
 export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;

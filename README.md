@@ -92,25 +92,25 @@ Create a `civet-clint.config.json` file in your repository root:
 ### Presets
 
 #### `default`
-A neutral starting point that relies only on Civet's vanilla word-operator parsing. The dial is empty `{}`; a project's `civet.json` always overrides it, so a `default`-preset user with a Coffee-flavored `civet.json` still gets Coffee parsing.
+The default when no preset is configured: a neutral starting point that relies only on Civet's vanilla word-operator parsing. The dial is empty `{}`; a project's `civet.json` always overrides it, so a user with a Coffee-flavored `civet.json` still gets Coffee parsing.
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Civet compiler options: `{}`
 
 #### `coffee-react`
-Configured specifically for idiomatic Civet + React codebases (backward-compatible default for existing consumers):
+Configured specifically for idiomatic Civet + React codebases. Existing integrations such as Ranked select this preset explicitly:
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/no-null-equality`: `"warn"` (diagnostic)
-- `style/no-is-not`: `"warn"` (diagnostic, requires `coffeeIsnt`)
+- `style/no-is-not`: `"warn"` (diagnostic, requires `coffeeIsnt` or `coffeeNot`)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Civet compiler options: `{ "coffeeIsnt": true, "react": true }`
 
 ### Configuration-aware rule skipping
 
-Rules declare the dial keys they require via `meta.capabilities.requires`. When a required key is not truthy in the resolved dial, the rule is **skipped** rather than executed, so an autofix whose replacement is invalid under the active dial is never proposed. For example, `style/prefer-jsx-shorthand` requires `react` (the `.class`/`#id` shorthand is a React-parsing feature), and `style/no-is-not` requires `coffeeIsnt` (otherwise `isnt` parses as a function call). The compiler-equivalence guard remains the final safety net for any unsafe edit that slips through.
+Rules declare required dial keys via `meta.capabilities.requires` (all required) and `requiresAny` (at least one required). When the resolved dial does not satisfy a capability, the rule is **skipped** rather than executed, so an autofix whose replacement is invalid under the active dial is never proposed. For example, `style/prefer-jsx-shorthand` requires `react`. `style/no-is-not` runs when `coffeeIsnt` makes `isnt` available or when `coffeeNot` turns `a is not b` into the dangerous `a === !b` footgun. The compiler-equivalence guard remains the final safety net for unsafe edits.
 
 Use `clint --print-config` to inspect the resolved preset, compiler options, rules, and skipped/incompatible rules for your workspace.
 

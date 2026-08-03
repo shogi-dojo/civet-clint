@@ -186,14 +186,24 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       continue if ruleCandidate is source
 
       candidateRes := compileForOutput(ruleCandidate, { dial: civetOptions, compileOptions, filename })
-      if candidateRes.ok and candidateRes.output is originalCompiled
-        approvedFixes.push(...ruleApplied)
+      if candidateRes.ok
+        if candidateRes.output is originalCompiled
+          approvedFixes.push(...ruleApplied)
+        else
+          isEquivalencePreserved = false
+          diagnostics.push({
+            ruleId: "compiler-equivalence-mismatch"
+            severity: "error"
+            message: `Autofix from "${ruleId}" was rejected because emitted compiler output changed.`
+            line: 1
+            column: 1
+          })
       else
         isEquivalencePreserved = false
         diagnostics.push({
-          ruleId: "compiler-equivalence-mismatch"
+          ruleId: "compiler-equivalence-failed"
           severity: "error"
-          message: `Autofix from "${ruleId}" was rejected because emitted compiler output changed.`
+          message: `Autofix from "${ruleId}" was rejected because transformed code failed compilation: ${candidateRes.error}`
           line: 1
           column: 1
         })
@@ -201,19 +211,29 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     { output: combinedCandidate, appliedEdits } := applyEdits(source, approvedFixes)
     if combinedCandidate isnt source
       combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
-      if combinedRes.ok and combinedRes.output is originalCompiled
-        fixedSource = combinedCandidate
-        appliedFixesCount = appliedEdits.length
+      if combinedRes.ok
+        if combinedRes.output is originalCompiled
+          fixedSource = combinedCandidate
+          appliedFixesCount = appliedEdits.length
 
-        appliedKeys := new Set(appliedEdits.map (edit) -> `${edit.start}:${edit.end}:${edit.replacement}`)
-        diagnostics = diagnostics.filter (diag) ->
-          not diag.fix? or not appliedKeys.has(`${diag.fix.start}:${diag.fix.end}:${diag.fix.replacement}`)
+          appliedKeys := new Set(appliedEdits.map (edit) -> `${edit.start}:${edit.end}:${edit.replacement}`)
+          diagnostics = diagnostics.filter (diag) ->
+            not diag.fix? or not appliedKeys.has(`${diag.fix.start}:${diag.fix.end}:${diag.fix.replacement}`)
+        else
+          isEquivalencePreserved = false
+          diagnostics.push({
+            ruleId: "compiler-equivalence-mismatch"
+            severity: "error"
+            message: "Combined autofixes were rejected because emitted compiler output changed."
+            line: 1
+            column: 1
+          })
       else
         isEquivalencePreserved = false
         diagnostics.push({
-          ruleId: "compiler-equivalence-mismatch"
+          ruleId: "compiler-equivalence-failed"
           severity: "error"
-          message: "Combined autofixes were rejected because emitted compiler output changed."
+          message: `Combined autofixes were rejected because transformed code failed compilation: ${combinedRes.error}`
           line: 1
           column: 1
         })

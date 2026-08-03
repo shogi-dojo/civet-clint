@@ -3,10 +3,27 @@ import path from "node:path"
 import type { ClintConfig, CompileDial, CompileOptions, ResolvedConfig, RuleLevel, SkippedRule } from "./types.civet"
 import { allRules } from "./rules/index.civet"
 
+const TOP_LEVEL_COMPILE_OPTIONS = new Set([
+  "filename"
+  "outputFilename"
+  "sourceMap"
+  "inlineMap"
+  "upstreamSourceMap"
+  "ast"
+  "js"
+  "noCache"
+  "hits"
+  "trace"
+  "errors"
+  "threads"
+  "sync"
+  "tsConfig"
+])
+
 // Presets bundle a default rule set with a default compiler dial. `coffee-react`
-// remains the backward-compatible default for existing consumers (e.g. Ranked);
-// `default` is the neutral, Coffee-option-free starting point that relies only on
-// Civet's vanilla word-operator parsing. The dial is only a *default* — a project's
+// remains available to existing consumers that select it explicitly (e.g. Ranked);
+// `default` is the actual neutral, Coffee-option-free starting point that relies only
+// on Civet's vanilla word-operator parsing. The dial is only a *default* — a project's
 // `civet.json` always overrides it, so a `default`-preset user with a Coffee-flavored
 // `civet.json` still gets Coffee parsing.
 export interface PresetDefinition
@@ -99,7 +116,17 @@ export function loadCivetConfig(civetConfigPath?: string, cwd: string = process.
           compileOptions[key] = parsed[key]
         return { dial, compileOptions, resolvedPath }
       else
-        return { dial: parsed as CompileDial, compileOptions: {}, resolvedPath }
+        // Older POC configs allowed a bare dial. Preserve that form while still
+        // recognizing official top-level CompileOptions such as `js` and
+        // `sourceMap` when `parseOptions` is omitted.
+        dial: CompileDial := {}
+        compileOptions: CompileOptions := {}
+        for key of Object.keys(parsed)
+          if TOP_LEVEL_COMPILE_OPTIONS.has(key)
+            compileOptions[key] = parsed[key]
+          else
+            dial[key] = parsed[key]
+        return { dial, compileOptions, resolvedPath }
     catch err
       throw new Error(`Failed to parse Civet config file at ${resolvedPath}: ${(err as Error).message}`)
 
@@ -121,12 +148,16 @@ export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: Comp
     rule := allRules[ruleId]
     continue unless rule
     requires := rule.meta.capabilities?.requires
-    continue unless requires and requires.length > 0
-    missing := requires.filter (key) -> not dial[key]
-    if missing.length > 0
+    requiresAny := rule.meta.capabilities?.requiresAny
+    missing := (requires or []).filter (key) -> not dial[key]
+    lacksAny := requiresAny? and requiresAny.length > 0 and not requiresAny.some (key) -> dial[key]
+    if missing.length > 0 or lacksAny
+      reasons: string[] := []
+      reasons.push(`requires ${missing.join(", ")} in the compiler dial`) if missing.length > 0
+      reasons.push(`requires one of ${requiresAny!.join(", ")} in the compiler dial`) if lacksAny
       skipped.push({
         ruleId
-        reason: `requires ${missing.join(", ")} in the compiler dial`
+        reason: reasons.join("; ")
       })
   skipped
 
@@ -149,7 +180,7 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
     catch err
       throw new Error(`Failed to parse config file at ${configPath}: ${(err as Error).message}`)
 
-  presetName := userConfig.preset or "coffee-react"
+  presetName := userConfig.preset or "default"
   presetDef := PRESETS[presetName]
   if not presetDef
     throw new Error(`Unknown preset: "${presetName}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
