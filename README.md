@@ -3,7 +3,7 @@
 [![CI](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml/badge.svg)](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**civet-clint** is an experimental compiler-backed style checker and autofixer for [Civet](https://civet.dev).
+**civet-clint** is an experimental compiler-backed style checker and autofixer for [Civet](https://civet.dev). The package installs the concise `clint` command.
 
 Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Each rule's edits and the combined result are recompiled; edits are applied only when the emitted output is byte-identical. This is a strong behavior-preservation guard, while the project remains a proof of concept built on Civet's currently untyped raw AST.
 
@@ -40,19 +40,19 @@ npm test
 
 ```bash
 # Check all .civet files in the current workspace
-civet-clint --check
+clint --check
 
 # Check specific files or folders
-civet-clint src/ components/ app.civet
+clint src/ components/ app.civet
 
 # Automatically fix all safe style violations in place
-civet-clint --write
+clint --write
 
 # Specify custom configuration file
-civet-clint --write --config ./civet-clint.config.json
+clint --write --config ./civet-clint.config.json
 
 # Output diagnostics in JSON for CI/CD pipelines
-civet-clint --check --format json
+clint --check --format json
 ```
 
 ### CLI Flags
@@ -63,7 +63,7 @@ civet-clint --check --format json
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
 | `-c`, `--config <path>` | Path to a `civet-clint.config.json` configuration file. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
-| `-v`, `--version` | Print `civet-clint` version and exit. |
+| `-v`, `--version` | Print `clint` version and exit. |
 | `-h`, `--help` | Show CLI usage help. |
 
 ---

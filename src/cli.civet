@@ -159,10 +159,10 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
 
   if options.help
     console.log(`
-civet-clint: Compiler-backed style linter & autofixer for Civet
+clint: Compiler-backed style linter & autofixer for Civet
 
 Usage:
-  civet-clint [options] [files/directories...]
+  clint [options] [files/directories...]
 
 Options:
   --check              Check files and report errors (default mode)
@@ -176,7 +176,7 @@ Options:
 
   if options.version
     // Read package.json version
-    console.log("civet-clint v0.1.0")
+    console.log("clint v0.1.0")
     return 0
 
   var config: ResolvedConfig

@@ -5,6 +5,11 @@ import os from "node:os"
 import { parseCliArgs, findCivetFiles, formatTextReport, runCli } from "../src/cli.civet"
 
 describe "CLI Suite", ->
+  it "publishes the civet-clint package with the clint executable", async ->
+    manifest := JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"))
+    expect(manifest.name).toBe("civet-clint")
+    expect(manifest.bin).toEqual({ clint: "./bin/civet-clint.js" })
+
   it "parses command line arguments correctly", ->
     opts := parseCliArgs(["--write", "--config", "./custom.json", "--format=json", "src", "test/file.civet"])
     expect(opts.write).toBe(true)
