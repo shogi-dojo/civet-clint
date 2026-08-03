@@ -24,8 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly one space), and skips import attributes, dynamic `import()`,
   `import.meta`, and specifiers containing escape sequences.
 
+  Validated against a real 266-file Civet codebase: 284 import rewrites produced
+  byte-identical compiled output for every file, a second pass was a no-op, and
+  the project's own tests, lint, build, and typecheck all passed unchanged.
+
 ### Fixed
 
+- **Partially terse imports**: a declaration whose path was already unquoted
+  (`import { A } from ./constants`) kept its `import` keyword, because an
+  unquoted specifier has no positioned string node in the raw AST and the rule
+  skipped the whole declaration. Keyword removal and unquoting are now
+  independent.
+- **README preset severities**: the `coffee-react` list documented six rules as
+  `error` that the preset actually sets to `warn`.
 - **Changelog accuracy**: the `0.1.0-alpha.1` entry described
   `style/prefer-jsx-shorthand` as enforcing self-closing elements and empty
   fragments. It actually converts static `className`/`id` attributes to Civet's
