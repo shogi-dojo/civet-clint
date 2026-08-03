@@ -55,6 +55,23 @@ async function build() {
   // Create TypeScript declarations
   const indexDts = `export type Severity = 'warn' | 'error';
 export type RuleLevel = 'off' | 'warn' | 'error';
+export type CompileDial = Record<string, any>;
+export type CompileOptions = Record<string, any>;
+export interface CompileDialOptions {
+  dial: CompileDial;
+  compileOptions?: CompileOptions;
+  filename?: string;
+}
+export interface RawAstOptions extends CompileDialOptions {}
+export interface CompileResult {
+  ok: boolean;
+  output?: string;
+  ast?: any;
+  error?: string;
+  line?: number;
+  column?: number;
+  offset?: number;
+}
 export interface Fix {
   start: number;
   end: number;
@@ -73,6 +90,7 @@ export interface RuleContext {
   source: string;
   ast: any;
   filename?: string;
+  parseOptions: CompileDial;
   report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
 }
@@ -85,10 +103,15 @@ export interface Diagnostic {
   pos?: number;
   fix?: Fix;
 }
+export interface RuleCapability {
+  requires?: string[];
+  requiresAny?: string[];
+}
 export interface RuleMeta {
   description: string;
   fixable: boolean;
   defaultSeverity: Severity;
+  capabilities?: RuleCapability;
 }
 export interface Rule {
   id: string;
@@ -111,17 +134,24 @@ export interface ClintConfig {
   civetConfig?: string;
   rules?: Record<string, 'off' | 'warn' | 'error'>;
 }
+export interface SkippedRule {
+  ruleId: string;
+  reason: string;
+}
 export interface ResolvedConfig {
   preset: string;
   rules: Record<string, 'off' | 'warn' | 'error'>;
   civetConfigPath?: string;
-  civetOptions: Record<string, any>;
+  civetOptions: CompileDial;
+  compileOptions: CompileOptions;
   configPath?: string;
+  skippedRules: SkippedRule[];
 }
 export interface LintOptions {
   filename?: string;
   config?: ResolvedConfig;
   civetOptions?: Record<string, any>;
+  compileOptions?: Record<string, any>;
   fix?: boolean;
   rules?: Record<string, RuleLevel>;
 }
@@ -130,12 +160,18 @@ export interface CliOptions {
   write?: boolean;
   config?: string;
   format?: 'text' | 'json';
+  printConfig?: boolean;
   help?: boolean;
   version?: boolean;
   targets: string[];
   errors: string[];
 }
-export const PRESETS: Record<string, { rules: Record<string, RuleLevel>; civetOptions: Record<string, any> }>;
+export interface PresetDefinition {
+  rules: Record<string, RuleLevel>;
+  civetOptions: CompileDial;
+  compileOptions: CompileOptions;
+}
+export const PRESETS: Record<string, PresetDefinition>;
 export const allRules: Record<string, Rule>;
 export const preferWordOperatorsRule: Rule;
 export const preferConciseArrowRule: Rule;
@@ -145,13 +181,19 @@ export const noIsNotRule: Rule;
 export const noMixedInterpolationRule: Rule;
 export function findConfigFile(cwd?: string): string | undefined;
 export function findCivetConfigFile(cwd?: string): string | undefined;
-export function loadCivetOptions(civetConfigPath?: string, cwd?: string): Record<string, any>;
+export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial: CompileDial; compileOptions: CompileOptions; resolvedPath?: string };
+export function loadCivetOptions(civetConfigPath?: string, cwd?: string): CompileDial;
+export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial): SkippedRule[];
 export function loadConfig(explicitConfigPath?: string, cwd?: string): ResolvedConfig;
+export function parseRawAst(source: string, options: RawAstOptions): CompileResult;
+export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
 export function lintSource(source: string, options?: LintOptions): LintResult;
 export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;
 export function createLineColumnIndex(source: string): (pos: number) => { line: number; column: number };
 export function walkAst(ast: any, visitor: (node: any, parent: any) => void): void;
+export function collectCommentRanges(ast: any): { start: number; end: number }[];
+export function intersectsRange(ranges: { start: number; end: number }[], start: number, end: number): boolean;
 export function applyEdits(source: string, edits: Fix[]): { output: string; appliedEdits: Fix[]; conflicts: Fix[] };
 export function detectLineEnding(source: string): string;
 export function atomicWriteFile(filePath: string, content: string): Promise<void>;

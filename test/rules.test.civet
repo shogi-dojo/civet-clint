@@ -5,7 +5,10 @@ describe "Rules Test Suite", ->
   describe "style/prefer-word-operators", ->
     it "replaces JS operators with Civet word operators", ->
       input := "a === b and c !== d or (e && f) || !flag"
-      res := lintSource(input, { fix: true })
+      res := lintSource(input, {
+        civetOptions: { coffeeIsnt: true }
+        fix: true
+      })
       expect(res.isEquivalencePreserved).toBe(true)
       expect(res.fixedSource).toBe("a is b and c isnt d or (e and f) or not flag")
 
@@ -40,7 +43,10 @@ describe "Rules Test Suite", ->
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-word-operators")).toHaveLength(0)
 
     it "still rewrites comparisons with undefined", ->
-      res := lintSource("a === undefined\nb !== undefined", { fix: true })
+      res := lintSource("a === undefined\nb !== undefined", {
+        civetOptions: { coffeeIsnt: true }
+        fix: true
+      })
       expect(res.fixedSource).toBe("a is undefined\nb isnt undefined")
 
     it "does not replace operators inside strings, comments, or JSX text", ->
@@ -101,6 +107,7 @@ describe "Rules Test Suite", ->
       input := '<div className="btn primary" id="main-card">hello</div>'
       res := lintSource(input, {
         civetOptions: { react: true }
+        rules: { "style/prefer-jsx-shorthand": "error" }
         fix: true
       })
       expect(res.isEquivalencePreserved).toBe(true)
@@ -110,6 +117,7 @@ describe "Rules Test Suite", ->
       input := '<Button className="btn-save" id="save-btn" />'
       res := lintSource(input, {
         civetOptions: { react: true }
+        rules: { "style/prefer-jsx-shorthand": "error" }
         fix: true
       })
       expect(res.isEquivalencePreserved).toBe(true)
@@ -119,6 +127,7 @@ describe "Rules Test Suite", ->
       input := '<div className={dynamicClass} id="" className="" />'
       res := lintSource(input, {
         civetOptions: { react: true }
+        rules: { "style/prefer-jsx-shorthand": "error" }
         fix: true
       })
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-jsx-shorthand")).toHaveLength(0)
@@ -127,28 +136,37 @@ describe "Rules Test Suite", ->
   describe "style/no-null-equality", ->
     it "reports warning diagnostics on null comparisons", ->
       input := "a === null\nb !== null\nc is null\nd isnt null"
-      res := lintSource(input)
+      res := lintSource(input, {
+        civetOptions: { coffeeIsnt: true }
+        rules: { "style/no-null-equality": "warn" }
+      })
       nullDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-null-equality")
       expect(nullDiags.length).toBe(4)
       expect(nullDiags.every((d) -> d.severity is "warn")).toBe(true)
 
     it "does not warn on non-null comparisons", ->
       input := "a === 5\nb !== 'hello'\nc is true"
-      res := lintSource(input)
+      res := lintSource(input, { rules: { "style/no-null-equality": "warn" } })
       nullDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-null-equality")
       expect(nullDiags.length).toBe(0)
 
   describe "style/no-is-not", ->
     it "reports warning diagnostic on 'is not'", ->
       input := "a is not b"
-      res := lintSource(input)
+      res := lintSource(input, {
+        civetOptions: { coffeeIsnt: true }
+        rules: { "style/no-is-not": "warn" }
+      })
       isNotDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
       expect(isNotDiags.length).toBe(1)
       expect(isNotDiags[0].severity).toBe("warn")
 
     it "does not warn on 'isnt'", ->
       input := "a isnt b"
-      res := lintSource(input)
+      res := lintSource(input, {
+        civetOptions: { coffeeIsnt: true }
+        rules: { "style/no-is-not": "warn" }
+      })
       isNotDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
       expect(isNotDiags.length).toBe(0)
 

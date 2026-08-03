@@ -1,0 +1,295 @@
+import { describe, it, expect } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { lintSource } from "../src/engine.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, PRESETS } from "../src/config.civet"
+import { parseRawAst, compileForOutput } from "../src/compiler.civet"
+import type { ResolvedConfig } from "../src/types.civet"
+
+// Configuration matrix: every supported dial × rule interaction must be covered. The
+// core invariant is that an autofix is accepted only when baseline and candidate
+// output are equivalent under the same compiler configuration; these tests pin that
+// invariant across default Civet, Coffee options, React on/off, and deliberately
+// incompatible rule/config combinations.
+
+describe "Configuration matrix", ->
+  describe "default preset (neutral, no Coffee options)", ->
+    it "ships an empty dial and only dial-independent rules", ->
+      expect(PRESETS["default"].civetOptions).toEqual({})
+      expect(PRESETS["default"].compileOptions).toEqual({})
+      // prefer-word-operators rewrites === / && / || / !, all valid in vanilla Civet.
+      expect(PRESETS["default"].rules["style/prefer-word-operators"]).toBe("error")
+      // JSX shorthand and no-is-not are NOT in the default preset.
+      expect(PRESETS["default"].rules["style/prefer-jsx-shorthand"]).toBeUndefined()
+      expect(PRESETS["default"].rules["style/no-is-not"]).toBeUndefined()
+
+    it "uses the neutral preset when no Clint config exists", async ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
+      config := loadConfig(undefined, tmpDir)
+      expect(config.preset).toBe("default")
+      expect(config.civetOptions).toEqual({})
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "rewrites === to is under the default (vanilla) dial", ->
+      input := "a === b"
+      res := lintSource(input, {
+        config: neutralConfig()
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b")
+
+    it "does not rewrite == to is under the default dial", ->
+      // In vanilla Civet `a == b` emits `a == b`; rewriting to `is` would emit
+      // `a === b`, so the option-aware rule does not propose that edit.
+      input := "a == b"
+      res := lintSource(input, {
+        config: neutralConfig()
+        fix: true
+      })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "keeps safe default-dial edits when an unsafe spelling shares the file", ->
+      res := lintSource("a === b\nc !== d", {
+        config: neutralConfig()
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b\nc !== d")
+
+  describe "Coffee options dial", ->
+    it "rewrites == to is when coffeeEq is enabled", ->
+      input := "a == b"
+      res := lintSource(input, {
+        civetOptions: { coffeeEq: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b")
+
+    it "flags is not when isnt is available or coffeeNot makes it dangerous", ->
+      // With neither option, `is not` safely emits !== while `isnt` is unavailable,
+      // so the style rule is intentionally skipped.
+      vanilla := lintSource("a isnt b", { config: neutralConfig() })
+      expect(vanilla.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")).toHaveLength(0)
+
+      coffee := lintSource("a is not b", {
+        civetOptions: { coffeeIsnt: true }
+        rules: { "style/no-is-not": "warn" }
+      })
+      expect(coffee.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")).toHaveLength(1)
+
+      dangerous := lintSource("a is not b", {
+        config: neutralConfig()
+        civetOptions: { coffeeNot: true }
+        rules: { "style/no-is-not": "warn" }
+      })
+      dangerousDiags := dangerous.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
+      expect(dangerousDiags).toHaveLength(1)
+      expect(dangerousDiags[0].message).toContain("coffeeNot")
+
+  describe "React on/off", ->
+    it "skips prefer-jsx-shorthand when react is off, runs it when react is on", ->
+      off := lintSource('<div className="btn">hi</div>', {
+        config: neutralConfig()
+        rules: { "style/prefer-jsx-shorthand": "error" }
+        fix: true
+      })
+      // React is not in the dial, so the rule is skipped and reports nothing.
+      expect(off.diagnostics.filter((d) -> d.ruleId is "style/prefer-jsx-shorthand")).toHaveLength(0)
+      expect(off.fixedSource).toBeUndefined()
+
+      onn := lintSource('<div className="btn">hi</div>', {
+        civetOptions: { react: true }
+        rules: { "style/prefer-jsx-shorthand": "error" }
+        fix: true
+      })
+      expect(onn.isEquivalencePreserved).toBe(true)
+      expect(onn.fixedSource).toBe('<div .btn>hi</div>')
+
+  describe "typed / TS-preserving output", ->
+    it "threads top-level compileOptions through baseline and candidate compiles", ->
+      // `js: true` is a top-level CompileOption (not a dial key). Confirm the adapter
+      // applies it to both baseline and candidate so equivalence is decided under the
+      // same emitted-output pipeline the project uses.
+      input := "a === b"
+      res := lintSource(input, {
+        config: neutralConfig()
+        compileOptions: { js: true }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b")
+
+    it "honors output options through the adapter", ->
+      baseline := compileForOutput("x := 1", { dial: {}, compileOptions: { js: true } })
+      expect(baseline.ok).toBe(true)
+      expect(baseline.output).toBe("const x = 1")
+
+    it "keeps Clint control options synchronous and text-producing", ->
+      raw := parseRawAst("x := 1", {
+        dial: {}
+        compileOptions: { sync: false, ast: false, filename: "wrong.civet" }
+        filename: "right.civet"
+      })
+      expect(raw.ok).toBe(true)
+      expect(raw.ast?.type).toBe("BlockStatement")
+      expect(raw.ast).not.toBeInstanceOf(Promise)
+
+      output := compileForOutput("x := 1", {
+        dial: {}
+        compileOptions: { sync: false, ast: "raw", filename: "wrong.civet" }
+        filename: "right.civet"
+      })
+      expect(output.ok).toBe(true)
+      expect(output.output).toBe("const x = 1")
+
+    it "compares generated code when sourceMap output is requested", ->
+      output := compileForOutput("x := 1", {
+        dial: {}
+        compileOptions: { sourceMap: true }
+        filename: "input.civet"
+      })
+      expect(output.ok).toBe(true)
+      expect(output.output).toBe("const x = 1")
+
+  describe "incompatible rule/config combinations", ->
+    it "computeSkippedRules flags JSX rule without react", ->
+      skipped := computeSkippedRules(
+        { "style/prefer-jsx-shorthand": "error" }
+        {}
+      )
+      expect(skipped).toHaveLength(1)
+      expect(skipped[0].ruleId).toBe("style/prefer-jsx-shorthand")
+      expect(skipped[0].reason).toContain("react")
+
+    it "computeSkippedRules flags no-is-not without coffeeIsnt", ->
+      skipped := computeSkippedRules(
+        { "style/no-is-not": "warn" }
+        {}
+      )
+      expect(skipped).toHaveLength(1)
+      expect(skipped[0].ruleId).toBe("style/no-is-not")
+      expect(skipped[0].reason).toContain("coffeeIsnt")
+
+    it "computeSkippedRules enables no-is-not for coffeeNot alone", ->
+      skipped := computeSkippedRules(
+        { "style/no-is-not": "warn" }
+        { coffeeNot: true }
+      )
+      expect(skipped).toEqual([])
+
+    it "computeSkippedRules clears when the dial satisfies the requirement", ->
+      skipped := computeSkippedRules(
+        { "style/prefer-jsx-shorthand": "error", "style/no-is-not": "warn" }
+        { react: true, coffeeIsnt: true }
+      )
+      expect(skipped).toEqual([])
+
+    it "does not skip rules with no declared capabilities", ->
+      skipped := computeSkippedRules(
+        { "style/prefer-word-operators": "error" }
+        {}
+      )
+      expect(skipped).toEqual([])
+
+    it "loadConfig populates skippedRules for an incompatible default-preset override", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-matrix-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+        preset: "default"
+        rules: { "style/prefer-jsx-shorthand": "error" }
+      }))
+
+      config := loadConfig("civet-clint.config.json", tmpDir)
+      expect(config.preset).toBe("default")
+      expect(config.civetOptions).toEqual({})
+      expect(config.skippedRules.map (s) -> s.ruleId).toContain("style/prefer-jsx-shorthand")
+
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+  describe "loadCivetConfig splits parseOptions and top-level options", ->
+    it "extracts the dial and retains top-level CompileOptions", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-split-"))
+      await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+        parseOptions: { coffeeEq: true, coffeeComment: true }
+        js: true
+      }))
+
+      { dial, compileOptions, resolvedPath } := loadCivetConfig(undefined, tmpDir)
+      expect(dial.coffeeEq).toBe(true)
+      expect(dial.coffeeComment).toBe(true)
+      expect(dial.js).toBeUndefined()
+      expect(compileOptions.js).toBe(true)
+      expect(resolvedPath).toBe(path.join(tmpDir, "civet.json"))
+
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "splits a bare object into dial and recognized top-level options", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-bare-"))
+      await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+        coffeeEq: true
+        js: true
+      }))
+
+      { dial, compileOptions } := loadCivetConfig(undefined, tmpDir)
+      expect(dial.coffeeEq).toBe(true)
+      expect(dial.js).toBeUndefined()
+      expect(compileOptions).toEqual({ js: true })
+
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+  describe "autofix equivalence under each dial", ->
+    // For every autofix fixture, compile original and fixed source through the same
+    // adapter/options and assert exact output equality. This is the matrix variant of
+    // the engine's internal check.
+    cases := [
+      {
+        name: "default dial === -> is"
+        input: "a === b"
+        expected: "a is b"
+        dial: {}
+      }
+      {
+        name: "coffeeEq dial == -> is"
+        input: "a == b"
+        expected: "a is b"
+        dial: { coffeeEq: true }
+      }
+      {
+        name: "react dial concise arrow in JSX"
+        input: "<button onClick={() => doSomething()} />"
+        expected: "<button onClick={=> doSomething()} />"
+        dial: { react: true }
+      }
+    ]
+
+    for c of cases
+      it "preserves emitted output: #{c.name}", ->
+        res := lintSource(c.input, {
+          civetOptions: c.dial
+          config: neutralConfig()
+          fix: true
+        })
+        expect(res.isEquivalencePreserved).toBe(true)
+        expect(res.fixedSource).toBe(c.expected)
+
+        // Independent cross-check through the adapter.
+        baseline := compileForOutput(c.input, { dial: c.dial })
+        candidate := compileForOutput(c.expected, { dial: c.dial })
+        expect(baseline.ok).toBe(true)
+        expect(candidate.ok).toBe(true)
+        expect(candidate.output).toBe(baseline.output)
+
+// Helper: a ResolvedConfig built from the default preset with an empty dial, so tests
+// can pass it to lintSource without relying on the coffee-react default.
+function neutralConfig(): ResolvedConfig
+  preset := PRESETS["default"]
+  {
+    preset: "default"
+    rules: { ...preset.rules }
+    civetOptions: {}
+    compileOptions: {}
+    skippedRules: computeSkippedRules({ ...preset.rules }, {})
+  }

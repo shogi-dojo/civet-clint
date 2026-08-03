@@ -23,6 +23,11 @@ export const preferJsxShorthandRule: Rule = {
     description: "Prefer JSX class and id shorthands (.class and #id) over className and id attributes"
     fixable: true
     defaultSeverity: "error"
+    // The `.class`/`#id` JSX shorthand syntax is a React-parsing feature; without
+    // `react` enabled the rewrite is invalid Civet.
+    capabilities: {
+      requires: ["react"]
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

@@ -1,6 +1,18 @@
 export type Severity = "warn" | "error"
 export type RuleLevel = "off" | "warn" | "error"
 
+// The Civet compiler "dial" — the `parseOptions` object that selects Coffee/React/TS
+// parsing behaviors. Civet reserves the right to change these keys; Clint treats the
+// dial opaquely and only inspects the handful of option keys declared in
+// `RuleCapability.requires`.
+export type CompileDial = Record<string, any>
+
+// Top-level `CompileOptions` fields (everything outside `parseOptions`) retained from
+// the project's `civet.json`. Clint controls `sync`, `ast`, and `filename` itself; the
+// remaining user-supplied fields (e.g. `js`, `trace`) are threaded through so the
+// baseline and candidate compiles run under the same pipeline the project uses.
+export type CompileOptions = Record<string, any>
+
 export interface Fix
   start: number
   end: number
@@ -19,6 +31,10 @@ export interface RuleContext
   source: string
   ast: any
   filename?: string
+  // The resolved compiler dial for the current file. Rules consult this to avoid
+  // emitting rewrites whose replacement is invalid under the active dial — e.g. the
+  // `isnt` rewrite is only valid when `coffeeIsnt` is enabled.
+  parseOptions: CompileDial
   report: (diag: {
     ruleId: string
     severity?: Severity
@@ -30,10 +46,20 @@ export interface RuleContext
   }) => void
   getLineColumn: (pos: number) => { line: number, column: number }
 
+// Declares what a rule needs from the compiler dial. When a key in `requires` is not
+// truthy under the resolved dial, the rule is explicitly skipped (see
+// `ResolvedConfig.skippedRules`) rather than emitting fixes that are invalid for the
+// active configuration.
+export interface RuleCapability
+  requires?: string[]
+  // At least one of these dial keys must be truthy.
+  requiresAny?: string[]
+
 export interface RuleMeta
   description: string
   fixable: boolean
   defaultSeverity: Severity
+  capabilities?: RuleCapability
 
 export interface Rule
   id: string
@@ -45,12 +71,22 @@ export interface ClintConfig
   civetConfig?: string
   rules?: Record<string, RuleLevel>
 
+export interface SkippedRule
+  ruleId: string
+  reason: string
+
 export interface ResolvedConfig
   preset: string
   rules: Record<string, RuleLevel>
   civetConfigPath?: string
-  civetOptions: Record<string, any>
+  // The compiler dial (`parseOptions`). Backward-compatible field name.
+  civetOptions: CompileDial
+  // Retained top-level CompileOptions from `civet.json` (outside `parseOptions`).
+  compileOptions: CompileOptions
   configPath?: string
+  // Rules that were enabled but cannot run under the resolved dial. Surfaced by
+  // `clint --print-config` and never executed, so they never report invalid autofixes.
+  skippedRules: SkippedRule[]
 
 export interface LintResult
   filePath: string

@@ -64,6 +64,13 @@ export const preferWordOperatorsRule: Rule = {
         wordOp := REPLACEMENT_MAP.get(actualSlice)
 
         if wordOp and not reportedStarts.has(pos)
+          // Some source spellings only lower equivalently under Coffee options.
+          // Skip those individual operators instead of letting one unsafe edit make
+          // the equivalence gate reject an otherwise-safe rule batch.
+          return if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
+          return if actualSlice is "==" and not ctx.parseOptions.coffeeEq
+          return if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
+
           // Only rewrite real compiler operator tokens, never coincidental
           // operator-looking text in a string, comment, or JSX text node.
           normalizedOp := REPLACEMENT_MAP.get(node.token)

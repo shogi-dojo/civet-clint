@@ -16,8 +16,9 @@ Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` c
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are discarded without blocking safe batches from other rules.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via tempfiles, avoiding partial writes, corruption, and preserving line endings (`\n` vs `\r\n`).
 - 🎯 **Coffee React Style Rules**: Idiomatic rules designed for modern Civet codebases using CoffeeScript and React syntax styles.
-- ⚙️ **Configurable & Extensible**: Support for presets (`coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
-- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, and machine-readable `--format json`.
+- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
+- 🧭 **Configuration-Aware**: A compiler/config adapter consumes the project's full `civet.json` (dial + top-level `CompileOptions`). Rules declare the dial keys they require; incompatible rules are skipped and surfaced via `clint --print-config` rather than emitting invalid autofixes.
+- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `--print-config` for inspecting the resolved configuration.
 
 ---
 
@@ -61,6 +62,7 @@ clint --check --format json
 |---|---|
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
+| `--print-config` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. |
 | `-c`, `--config <path>` | Path to a `civet-clint.config.json` configuration file. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
 | `-v`, `--version` | Print `clint` version and exit. |
@@ -89,15 +91,30 @@ Create a `civet-clint.config.json` file in your repository root:
 
 ### Presets
 
-#### `coffee-react`
-Configured specifically for idiomatic Civet + React codebases:
+#### `default`
+The default when no preset is configured: a neutral starting point that relies only on Civet's vanilla word-operator parsing. The dial is empty `{}`; a project's `civet.json` always overrides it, so a user with a Coffee-flavored `civet.json` still gets Coffee parsing.
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
-- `style/prefer-jsx-shorthand`: `"error"` (fixable)
+- `style/no-mixed-interpolation`: `"warn"` (diagnostic)
+- Civet compiler options: `{}`
+
+#### `coffee-react`
+Configured specifically for idiomatic Civet + React codebases. Existing integrations such as Ranked select this preset explicitly:
+- `style/prefer-word-operators`: `"error"` (fixable)
+- `style/prefer-concise-arrow`: `"error"` (fixable)
+- `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/no-null-equality`: `"warn"` (diagnostic)
-- `style/no-is-not`: `"warn"` (diagnostic)
+- `style/no-is-not`: `"warn"` (diagnostic, requires `coffeeIsnt` or `coffeeNot`)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Civet compiler options: `{ "coffeeIsnt": true, "react": true }`
+
+### Configuration-aware rule skipping
+
+Rules declare required dial keys via `meta.capabilities.requires` (all required) and `requiresAny` (at least one required). When the resolved dial does not satisfy a capability, the rule is **skipped** rather than executed, so an autofix whose replacement is invalid under the active dial is never proposed. For example, `style/prefer-jsx-shorthand` requires `react`. `style/no-is-not` runs when `coffeeIsnt` makes `isnt` available or when `coffeeNot` turns `a is not b` into the dangerous `a === !b` footgun. The compiler-equivalence guard remains the final safety net for unsafe edits.
+
+Use `clint --print-config` to inspect the resolved preset, compiler options, rules, and skipped/incompatible rules for your workspace.
+
+`compileOptions` lists only the options Clint actually forwards to the compiler. Execution-mode keys (`sync`, `ast`, `filename`, `parseOptions`, `errors`) are controlled by Clint and stripped from project configuration; any that were present appear under `ignoredCompileOptions`.
 
 ---
 
@@ -179,7 +196,7 @@ flowchart TD
     H -- Mismatch --> J[Rejected: Keep Original]
 ```
 
-The intended path into the Civet project, including the raw-AST compatibility risk, is documented in [docs/upstream.md](docs/upstream.md).
+The intended path into the Civet project, including the raw-AST compatibility risk and the supported configuration boundary, is documented in [docs/upstream.md](docs/upstream.md).
 
 ---
 
