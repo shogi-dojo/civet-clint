@@ -1,8 +1,29 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ClintConfig, ResolvedConfig, RuleLevel } from "./types.civet"
+import type { ClintConfig, CompileDial, CompileOptions, ResolvedConfig, RuleLevel, SkippedRule } from "./types.civet"
+import { allRules } from "./rules/index.civet"
 
-export const PRESETS: Record<string, { rules: Record<string, RuleLevel>, civetOptions: Record<string, any> }> = {
+// Presets bundle a default rule set with a default compiler dial. `coffee-react`
+// remains the backward-compatible default for existing consumers (e.g. Ranked);
+// `default` is the neutral, Coffee-option-free starting point that relies only on
+// Civet's vanilla word-operator parsing. The dial is only a *default* — a project's
+// `civet.json` always overrides it, so a `default`-preset user with a Coffee-flavored
+// `civet.json` still gets Coffee parsing.
+export interface PresetDefinition
+  rules: Record<string, RuleLevel>
+  civetOptions: CompileDial
+  compileOptions: CompileOptions
+
+export const PRESETS: Record<string, PresetDefinition> = {
+  "default": {
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/no-mixed-interpolation": "warn"
+    }
+    civetOptions: {}
+    compileOptions: {}
+  }
   "coffee-react": {
     rules: {
       "style/prefer-word-operators": "error"
@@ -16,6 +37,7 @@ export const PRESETS: Record<string, { rules: Record<string, RuleLevel>, civetOp
       coffeeIsnt: true
       react: true
     }
+    compileOptions: {}
   }
 }
 
@@ -43,13 +65,16 @@ export function findCivetConfigFile(cwd: string = process.cwd()): string | undef
       return p
   undefined
 
-export function loadCivetOptions(civetConfigPath?: string, cwd: string = process.cwd()): Record<string, any>
+// Load and split a `civet.json` into the compiler dial (`parseOptions`) and the
+// retained top-level `CompileOptions`. An explicitly configured `civetConfig` that
+// does not exist must be fatal. Silently falling back to `{}` would lint against the
+// wrong compiler dial — e.g. losing `coffeeComment` makes `# a === b` parse as code,
+// so the fixer rewrites inside a comment. Auto-discovery finding nothing stays
+// non-fatal.
+export function loadCivetConfig(civetConfigPath?: string, cwd: string = process.cwd()): { dial: CompileDial, compileOptions: CompileOptions, resolvedPath?: string }
   resolvedPath := civetConfigPath ? path.resolve(cwd, civetConfigPath) : findCivetConfigFile(cwd)
 
   // An explicitly configured `civetConfig` that does not exist must be fatal.
-  // Silently falling back to `{}` would lint against the wrong compiler dial —
-  // e.g. losing `coffeeComment` makes `# a === b` parse as code, so the fixer
-  // rewrites inside a comment. Auto-discovery finding nothing stays non-fatal.
   if civetConfigPath and not fs.existsSync(resolvedPath!)
     throw new Error(`Civet config file not found: ${resolvedPath}`)
 
@@ -60,15 +85,50 @@ export function loadCivetOptions(civetConfigPath?: string, cwd: string = process
       unless parsed? and typeof parsed is "object" and not Array.isArray(parsed)
         throw new Error("Civet config must contain a JSON object")
 
-      // `civet.json` normally wraps the compiler dial in `parseOptions`.
-      // Clint consumes the dial itself, not the outer CompileOptions object.
-      parseOptions := if parsed.parseOptions? then parsed.parseOptions else parsed
-      unless parseOptions? and typeof parseOptions is "object" and not Array.isArray(parseOptions)
-        throw new Error("Civet parseOptions must contain a JSON object")
-      return parseOptions
+      // `civet.json` normally wraps the compiler dial in `parseOptions`. When present,
+      // the remaining top-level keys are retained CompileOptions (e.g. `js`, `trace`).
+      // When `parseOptions` is absent, the whole object is treated as the dial to stay
+      // backward-compatible with the POC's `loadCivetOptions`.
+      if parsed.parseOptions?
+        unless parsed.parseOptions? and typeof parsed.parseOptions is "object" and not Array.isArray(parsed.parseOptions)
+          throw new Error("Civet parseOptions must contain a JSON object")
+        dial := parsed.parseOptions as CompileDial
+        compileOptions: CompileOptions := {}
+        for key of Object.keys(parsed)
+          continue if key is "parseOptions"
+          compileOptions[key] = parsed[key]
+        return { dial, compileOptions, resolvedPath }
+      else
+        return { dial: parsed as CompileDial, compileOptions: {}, resolvedPath }
     catch err
       throw new Error(`Failed to parse Civet config file at ${resolvedPath}: ${(err as Error).message}`)
-  {}
+
+  { dial: {}, compileOptions: {} }
+
+// Backward-compatible wrapper: returns only the dial. Existing callers and the public
+// API keep working; new code reads `loadCivetConfig` for the full split.
+export function loadCivetOptions(civetConfigPath?: string, cwd: string = process.cwd()): CompileDial
+  loadCivetConfig(civetConfigPath, cwd).dial
+
+// Compute which enabled rules cannot run under the resolved dial. A rule is skipped
+// when any key in `meta.capabilities.requires` is falsy on the dial. Skipped rules
+// are reported by `clint --print-config` and never executed, so they never emit an
+// autofix whose replacement is invalid under the active dial.
+export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial): SkippedRule[]
+  skipped: SkippedRule[] := []
+  for ruleId of Object.keys(rules)
+    continue if rules[ruleId] is "off"
+    rule := allRules[ruleId]
+    continue unless rule
+    requires := rule.meta.capabilities?.requires
+    continue unless requires and requires.length > 0
+    missing := requires.filter (key) -> not dial[key]
+    if missing.length > 0
+      skipped.push({
+        ruleId
+        reason: `requires ${missing.join(", ")} in the compiler dial`
+      })
+  skipped
 
 export function loadConfig(explicitConfigPath?: string, cwd: string = process.cwd()): ResolvedConfig
   var configPath: string | undefined = undefined
@@ -102,16 +162,21 @@ export function loadConfig(explicitConfigPath?: string, cwd: string = process.cw
       throw new Error(`Invalid level for rule "${ruleId}": expected off, warn, or error`)
 
   configBase := configPath ? path.dirname(configPath) : cwd
-  resolvedCivetConfigPath := userConfig.civetConfig
+  explicitCivetConfigPath := userConfig.civetConfig
     ? path.resolve(configBase, userConfig.civetConfig)
     : findCivetConfigFile(cwd)
-  userCivetOptions := loadCivetOptions(resolvedCivetConfigPath, cwd)
-  civetOptions := { ...presetDef.civetOptions, ...userCivetOptions }
+  { dial: userDial, compileOptions: userCompileOptions, resolvedPath: resolvedCivetConfigPath } := loadCivetConfig(explicitCivetConfigPath, cwd)
+  civetOptions := { ...presetDef.civetOptions, ...userDial }
+  compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
+
+  skippedRules := computeSkippedRules(mergedRules, civetOptions)
 
   {
     preset: presetName
     rules: mergedRules
     civetConfigPath: resolvedCivetConfigPath
     civetOptions
+    compileOptions
     configPath
+    skippedRules
   }

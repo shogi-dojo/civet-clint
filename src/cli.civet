@@ -48,6 +48,7 @@ export interface CliOptions
   write?: boolean
   config?: string
   format?: "text" | "json"
+  printConfig?: boolean
   help?: boolean
   version?: boolean
   targets: string[]
@@ -69,6 +70,8 @@ export function parseCliArgs(args: string[]): CliOptions
       options.check = true
     else if arg is "--write" or arg is "-w" or arg is "--fix"
       options.write = true
+    else if arg is "--print-config"
+      options.printConfig = true
     else if arg is "--help" or arg is "-h"
       options.help = true
     else if arg is "--version" or arg is "-v"
@@ -167,6 +170,8 @@ Usage:
 Options:
   --check              Check files and report errors (default mode)
   -w, --write, --fix   Automatically fix style issues in place
+  --print-config       Print the resolved preset, compiler options, rules, and
+                       skipped/incompatible rules, then exit
   -c, --config <path>  Path to civet-clint configuration file
   -f, --format <type>  Output format: text (default) | json
   -v, --version        Print version and exit
@@ -185,6 +190,19 @@ Options:
   catch err: any
     console.error(`Configuration error: ${err.message or err}`)
     return 2
+
+  if options.printConfig
+    payload := {
+      preset: config.preset
+      configPath: config.configPath
+      civetConfigPath: config.civetConfigPath
+      civetOptions: config.civetOptions
+      compileOptions: config.compileOptions
+      rules: config.rules
+      skippedRules: config.skippedRules
+    }
+    console.log(JSON.stringify(payload, null, 2))
+    return 0
 
   var files: string[]
   try

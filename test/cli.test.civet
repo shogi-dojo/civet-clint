@@ -67,3 +67,41 @@ describe "CLI Suite", ->
     expect(codeCheckAfter).toBe(0)
 
     await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "prints the resolved config and skips incompatible rules with --print-config", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-printcfg-"))
+    await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+      parseOptions: { coffeeIsnt: true, coffeeEq: true }
+    }))
+    await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+      preset: "default"
+      civetConfig: "./civet.json"
+      rules: {
+        "style/prefer-jsx-shorthand": "error"
+        "style/no-is-not": "warn"
+      }
+    }))
+
+    // Capture stdout. runCli logs via console.log; hook it temporarily.
+    originalLog := console.log
+    captured: string[] := []
+    console.log = (...args) -> captured.push(args.join(" "))
+    var code = 2
+    try
+      code = await runCli(["--print-config", "--config", path.join(tmpDir, "civet-clint.config.json")])
+    finally
+      console.log = originalLog
+
+    expect(code).toBe(0)
+    payload := JSON.parse(captured.join("\n"))
+    expect(payload.preset).toBe("default")
+    expect(payload.civetOptions.coffeeIsnt).toBe(true)
+    expect(payload.civetOptions.coffeeEq).toBe(true)
+    expect(payload.rules["style/prefer-jsx-shorthand"]).toBe("error")
+    // react is not in the dial, so the JSX rule must be skipped.
+    skippedIds := payload.skippedRules.map (s) -> s.ruleId
+    expect(skippedIds).toContain("style/prefer-jsx-shorthand")
+    // no-is-not requires coffeeIsnt, which IS present, so it must not be skipped.
+    expect(skippedIds).not.toContain("style/no-is-not")
+
+    await fs.rm(tmpDir, { recursive: true, force: true })

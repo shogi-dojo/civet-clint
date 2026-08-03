@@ -1,0 +1,84 @@
+import civet from "@danielx/civet"
+import type { CompileDial, CompileOptions } from "./types.civet"
+
+// Compiler/config adapter.
+//
+// Civet's `compile` accepts a top-level `CompileOptions` object whose `parseOptions`
+// field carries the "dial" (Coffee/React/TS parsing flags). Clint consumes both
+// layers: the dial drives raw-AST shape and rule applicability, while the remaining
+// top-level options select the emitted-output pipeline (e.g. `js`). This adapter is
+// the single place that constructs the `compile` argument, so the baseline and
+// candidate compiles in the engine always run under identical options, and a future
+// stable Civet token/source-range API can replace the raw-AST path here.
+//
+// Supported configuration boundary (Civet 0.11.15):
+//   - dial keys: coffeeIsnt, coffeeEq, coffeeBooleans, coffeeNot, coffeeComment,
+//     coffeeInterpolation, coffeeDo, coffeeLineContinuation, coffeePrototype,
+//     coffeeRange, react, ts, autoLet, rewriteCivetImports, ...
+//   - top-level: js, filename, sync, ast, trace, ...
+// Civet reserves the right to change any of these; Clint never interprets dial values
+// beyond the truthiness checks declared in `RuleCapability.requires`.
+
+export interface CompileDialOptions
+  // The compiler dial (parseOptions).
+  dial: CompileDial
+  // Retained top-level CompileOptions outside parseOptions (e.g. js, trace).
+  compileOptions?: CompileOptions
+  filename?: string
+
+export interface RawAstOptions extends CompileDialOptions
+  // no extra fields; raw-AST parsing forces ast: "raw"
+
+export interface CompileResult
+  ok: boolean
+  output?: string
+  ast?: any
+  error?: string
+  line?: number
+  column?: number
+  offset?: number
+
+// Parse a raw AST from source under the given dial. The `ast: "raw"` shape is Civet's
+// intentionally unstable internal representation; all access to `$loc`, `children`,
+// and `parent` is isolated behind `src/utils.civet` so a future stable source-span
+// API can replace this call site centrally.
+export function parseRawAst(source: string, options: RawAstOptions): CompileResult
+  try
+    ast := civet.compile(source, {
+      sync: true
+      ast: "raw"
+      filename: options.filename
+      ...options.compileOptions
+      parseOptions: options.dial
+    }) as any
+    { ok: true, ast }
+  catch err: any
+    {
+      ok: false
+      error: err.message or String(err)
+      line: err.line
+      column: err.column
+      offset: err.offset
+    }
+
+// Compile source to emitted output under the given dial. Used for the baseline and
+// candidate equivalence checks. Both calls receive an identical options object built
+// here, preserving the core invariant that an autofix is accepted only when baseline
+// and candidate output are equivalent under the same compiler configuration.
+export function compileForOutput(source: string, options: CompileDialOptions): CompileResult
+  try
+    output := civet.compile(source, {
+      sync: true
+      filename: options.filename
+      ...options.compileOptions
+      parseOptions: options.dial
+    }) as string
+    { ok: true, output }
+  catch err: any
+    {
+      ok: false
+      error: err.message or String(err)
+      line: err.line
+      column: err.column
+      offset: err.offset
+    }

@@ -7,6 +7,11 @@ export const noIsNotRule: Rule = {
     description: "Flag 'is not' (prefer 'isnt')"
     fixable: false
     defaultSeverity: "warn"
+    // `is not` only parses as the negated comparison operator when `coffeeIsnt` (or a
+    // dial that implies it) is enabled; otherwise `isnt` is parsed as a function call.
+    capabilities: {
+      requires: ["coffeeIsnt"]
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
