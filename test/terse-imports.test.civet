@@ -90,6 +90,22 @@ describe "style/prefer-terse-imports", ->
       source := 'x from "./a\\u0062c"\n'
       expect(fix(source).fixedSource ?? source).toBe(source)
 
+  describe "partially terse imports", ->
+    // Found while validating against a real codebase: a source that already
+    // dropped its quotes has no positioned StringLiteral in the AST, and an
+    // earlier version skipped the whole declaration, leaving `import` behind.
+    it "removes the keyword when the path is already unquoted", ->
+      expect(expectEquivalent("import { A } from ./constants\n"))
+        .toBe("{ A } from ./constants\n")
+
+    it "removes the keyword from an unquoted default import", ->
+      expect(expectEquivalent("import Foo from ./foo\n"))
+        .toBe("Foo from ./foo\n")
+
+    it "keeps the keyword on an unquoted side-effect import", ->
+      source := "import ./style.scss\n"
+      expect(fix(source).fixedSource ?? source).toBe(source)
+
   describe "robustness", ->
     it "is idempotent", ->
       once := expectEquivalent('import { t } from "../i18n"\n')

@@ -90,21 +90,28 @@ export const preferTerseImportsRule: Rule = {
       return unless node.type is "ImportDeclaration"
 
       { importKeyword, specifier, hasBindings } := collectParts node
-      return unless specifier?
 
-      specPos := specifier.$loc.pos
-      specLen := specifier.$loc.length
-      rawSpec := source.slice specPos, specPos + specLen
-
-      // Only touch a declaration whose recorded span still matches the source.
-      // Anything else means the shape is not what this rule understands.
-      return unless rawSpec is specifier.token
+      // An already-unquoted specifier has no positioned StringLiteral child, so
+      // `specifier` is absent. That is not a reason to skip the declaration: the
+      // keyword removal and the unquoting are independent edits, and a partially
+      // terse import still needs its keyword dropped.
+      var specPos = -1
+      var specLen = 0
+      var rawSpec = ""
+      var specUsable = false
+      if specifier?
+        specPos = specifier.$loc.pos
+        specLen = specifier.$loc.length
+        rawSpec = source.slice specPos, specPos + specLen
+        // Only touch a specifier whose recorded span still matches the source.
+        specUsable = rawSpec is specifier.token
 
       // Import attributes/assertions (`with { type: "json" }`) follow the
       // specifier. Removing the keyword there is not covered by the fixtures
       // that back this rule, so leave the whole declaration untouched.
-      trailing := source.slice specPos + specLen, specPos + specLen + 240
-      return if /^\s*(?:with|assert)\b/.test trailing
+      if specUsable
+        trailing := source.slice specPos + specLen, specPos + specLen + 240
+        return if /^\s*(?:with|assert)\b/.test trailing
 
       if importKeyword?
         kwPos := importKeyword.$loc.pos
@@ -131,6 +138,7 @@ export const preferTerseImportsRule: Rule = {
               fix: { start: kwPos, end, replacement: "" }
             })
 
+      return unless specUsable
       inner := unquote rawSpec
       if inner? and isSafeToUnquote(inner) and not seen.has(specPos)
         seen.add specPos
