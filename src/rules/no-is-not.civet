@@ -1,0 +1,31 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+export const noIsNotRule: Rule = {
+  id: "style/no-is-not"
+  meta: {
+    description: "Flag 'is not' (prefer 'isnt')"
+    fixable: false
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    reportedStarts := new Set<number>()
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      if node.$loc
+        pos := node.$loc.pos
+        len := node.$loc.length
+        slice := source.slice(pos, pos + len)
+
+        if slice is "is not" and not reportedStarts.has(pos)
+          reportedStarts.add(pos)
+          ctx.report({
+            ruleId: "style/no-is-not"
+            message: "Prefer 'isnt' over 'is not'"
+            pos
+            severity: "warn"
+          })
+}

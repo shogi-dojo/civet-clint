@@ -1,0 +1,259 @@
+import fs from "node:fs/promises"
+import civet from "@danielx/civet"
+import type { Diagnostic, Fix, LintResult, ResolvedConfig, RuleContext, RuleLevel, Severity } from "./types.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, collectCommentRanges, intersectsRange } from "./utils.civet"
+import { loadConfig } from "./config.civet"
+import { allRules } from "./rules/index.civet"
+
+export interface LintOptions
+  filename?: string
+  config?: ResolvedConfig
+  civetOptions?: Record<string, any>
+  fix?: boolean
+  rules?: Record<string, RuleLevel>
+
+export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
+  civet.compile(source, {
+    sync: true
+    filename
+    parseOptions: civetOptions
+  }) as string
+
+export function lintSource(source: string, options: LintOptions = {}): LintResult
+  filename := options.filename or "input.civet"
+  resolvedConfig: ResolvedConfig := (options.config as ResolvedConfig)?.rules
+    ? (options.config as ResolvedConfig)
+    : loadConfig(undefined, process.cwd())
+
+  mergedRules := { ...resolvedConfig.rules, ...(options.rules or {}) }
+  civetOptions := { ...resolvedConfig.civetOptions, ...(options.civetOptions or {}) }
+
+  getLineColumn := createLineColumnIndex(source)
+  var diagnostics: Diagnostic[] = []
+
+  // Step 1: Parse and baseline compile
+  var ast: any = undefined
+  var originalCompiled: string | undefined = undefined
+
+  try
+    ast = civet.compile(source, {
+      ast: "raw"
+      sync: true
+      filename
+      parseOptions: civetOptions
+    }) as any
+  catch err: any
+    diag: Diagnostic := {
+      ruleId: "syntax-error"
+      severity: "error"
+      message: `Civet parse error: ${err.message or err}`
+      line: err.line or 1
+      column: err.column or 1
+      pos: err.offset or 0
+    }
+    return {
+      filePath: filename
+      source
+      diagnostics: [diag]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+  try
+    originalCompiled = compileSource(source, civetOptions, filename)
+  catch err: any
+    diag: Diagnostic := {
+      ruleId: "compile-error"
+      severity: "error"
+      message: `Civet baseline compile error: ${err.message or err}`
+      line: err.line or 1
+      column: err.column or 1
+    }
+    return {
+      filePath: filename
+      source
+      diagnostics: [diag]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+  // Comments are stripped before codegen, so an edit landing inside one is
+  // invisible to the compiler-equivalence check. Drop such fixes centrally:
+  // every rule is covered, including future ones. Block comments (`/* */`)
+  // survive into the output, so equivalence already guards those.
+  commentRanges := collectCommentRanges(ast)
+
+  // Step 2: Run active rules
+  context: RuleContext := {
+    source
+    ast
+    filename
+    getLineColumn
+    report: (d) ->
+      ruleLevel := mergedRules[d.ruleId] or "off"
+      return if ruleLevel is "off"
+
+      if d.fix and intersectsRange(commentRanges, d.fix.start, d.fix.end)
+        return
+
+      severity: Severity := (ruleLevel is "error" or ruleLevel is "warn")
+        ? ruleLevel
+        : (d.severity or "error")
+
+      var line = d.line
+      var column = d.column
+      if line is undefined or column is undefined
+        if d.pos isnt undefined
+          lc := getLineColumn(d.pos)
+          line = lc.line
+          column = lc.column
+        else if d.fix
+          lc := getLineColumn(d.fix.start)
+          line = lc.line
+          column = lc.column
+        else
+          line = 1
+          column = 1
+
+      diagnostics.push({
+        ruleId: d.ruleId
+        severity
+        message: d.message
+        line: line!
+        column: column!
+        pos: d.pos
+        fix: d.fix
+      })
+  }
+
+  for ruleId of Object.keys(mergedRules)
+    continue if mergedRules[ruleId] is "off"
+    rule := allRules[ruleId]
+    if rule
+      try
+        rule.check(context)
+      catch err: any
+        diagnostics.push({
+          ruleId: "internal-rule-error"
+          severity: "error"
+          message: `Rule "${ruleId}" threw an internal error: ${err.message or err}`
+          line: 1
+          column: 1
+        })
+
+  // Sort diagnostics by line, then column
+  diagnostics.sort (a, b) ->
+    if a.line isnt b.line
+      a.line - b.line
+    else
+      a.column - b.column
+
+  fixableList := diagnostics.filter (d) -> d.fix?
+  fixableCount := fixableList.length
+
+  var fixedSource: string | undefined = undefined
+  var appliedFixesCount = 0
+  var isEquivalencePreserved = true
+
+  if options.fix and fixableCount > 0
+    // Validate each rule's edit batch independently so one faulty rule does
+    // not prevent unrelated, compiler-equivalent fixes from being applied.
+    fixesByRule := new Map<string, Fix[]>()
+    for diag of fixableList
+      ruleFixes := fixesByRule.get(diag.ruleId) or []
+      ruleFixes.push(diag.fix!)
+      fixesByRule.set(diag.ruleId, ruleFixes)
+
+    approvedFixes: Fix[] := []
+    for [ruleId, ruleFixes] of fixesByRule
+      { output: ruleCandidate, appliedEdits: ruleApplied } := applyEdits(source, ruleFixes)
+      continue if ruleCandidate is source
+
+      try
+        ruleCompiled := compileSource(ruleCandidate, civetOptions, filename)
+        if ruleCompiled is originalCompiled
+          approvedFixes.push(...ruleApplied)
+        else
+          isEquivalencePreserved = false
+          diagnostics.push({
+            ruleId: "compiler-equivalence-mismatch"
+            severity: "error"
+            message: `Autofix from "${ruleId}" was rejected because emitted compiler output changed.`
+            line: 1
+            column: 1
+          })
+      catch err: any
+        isEquivalencePreserved = false
+        diagnostics.push({
+          ruleId: "compiler-equivalence-failed"
+          severity: "error"
+          message: `Autofix from "${ruleId}" was rejected because transformed code failed compilation: ${err.message or err}`
+          line: 1
+          column: 1
+        })
+
+    { output: combinedCandidate, appliedEdits } := applyEdits(source, approvedFixes)
+    if combinedCandidate isnt source
+      try
+        combinedCompiled := compileSource(combinedCandidate, civetOptions, filename)
+        if combinedCompiled is originalCompiled
+          fixedSource = combinedCandidate
+          appliedFixesCount = appliedEdits.length
+
+          appliedKeys := new Set(appliedEdits.map (edit) -> `${edit.start}:${edit.end}:${edit.replacement}`)
+          diagnostics = diagnostics.filter (diag) ->
+            not diag.fix? or not appliedKeys.has(`${diag.fix.start}:${diag.fix.end}:${diag.fix.replacement}`)
+        else
+          isEquivalencePreserved = false
+          diagnostics.push({
+            ruleId: "compiler-equivalence-mismatch"
+            severity: "error"
+            message: "Combined autofixes were rejected because emitted compiler output changed."
+            line: 1
+            column: 1
+          })
+      catch err: any
+        isEquivalencePreserved = false
+        diagnostics.push({
+          ruleId: "compiler-equivalence-failed"
+          severity: "error"
+          message: `Combined autofixes were rejected because transformed code failed compilation: ${err.message or err}`
+          line: 1
+          column: 1
+        })
+
+  errorCount := diagnostics.filter((d) -> d.severity is "error").length
+  warningCount := diagnostics.filter((d) -> d.severity is "warn").length
+
+  {
+    filePath: filename
+    source
+    fixedSource
+    diagnostics
+    appliedFixesCount
+    isEquivalencePreserved
+    errorCount
+    warningCount
+    fixableCount
+  }
+
+export async function lintFile(filePath: string, options: LintOptions = {}): Promise<LintResult>
+  content := await fs.readFile(filePath, "utf8")
+  res := lintSource(content, { ...options, filename: filePath })
+
+  if options.fix and res.fixedSource and res.fixedSource isnt content
+    // Preserve line endings
+    lineEnding := detectLineEnding(content)
+    normalizedFixed := lineEnding is "\r\n"
+      ? res.fixedSource.replace(/\r?\n/g, "\r\n")
+      : res.fixedSource.replace(/\r\n/g, "\n")
+
+    await atomicWriteFile(filePath, normalizedFixed)
+
+  res

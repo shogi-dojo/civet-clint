@@ -1,0 +1,39 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+const EQUALITY_TOKENS = new Set(["===", "!==", "==", "!=", "is", "isnt"])
+
+export const noNullEqualityRule: Rule = {
+  id: "style/no-null-equality"
+  meta: {
+    description: "Flag direct comparisons with null (prefer explicit undefined/null checks or coffee operators)"
+    fixable: false
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    reportedStarts := new Set<number>()
+
+    walkAst ctx.ast, (node, parent) ->
+      return unless node? and typeof node is "object"
+
+      if node.$loc and node.token and EQUALITY_TOKENS.has(node.token)
+        pos := node.$loc.pos
+        len := node.$loc.length
+
+        if not reportedStarts.has(pos)
+          beforeSlice := source.slice(Math.max(0, pos - 30), pos)
+          afterSlice := source.slice(pos + len, Math.min(source.length, pos + len + 30))
+
+          beforeMatch := beforeSlice.match(/\bnull\s*$/)
+          afterMatch := afterSlice.match(/^\s*null\b/)
+
+          if beforeMatch or afterMatch
+            reportedStarts.add(pos)
+            ctx.report({
+              ruleId: "style/no-null-equality"
+              message: "Avoid direct comparison with 'null'; consider using explicit checks or existential operators"
+              pos
+              severity: "warn"
+            })
+}

@@ -1,0 +1,64 @@
+export type Severity = "warn" | "error"
+export type RuleLevel = "off" | "warn" | "error"
+
+export interface Fix
+  start: number
+  end: number
+  replacement: string
+
+export interface Diagnostic
+  ruleId: string
+  severity: Severity
+  message: string
+  line: number
+  column: number
+  pos?: number
+  fix?: Fix
+
+export interface RuleContext
+  source: string
+  ast: any
+  filename?: string
+  report: (diag: {
+    ruleId: string
+    severity?: Severity
+    message: string
+    line?: number
+    column?: number
+    pos?: number
+    fix?: Fix
+  }) => void
+  getLineColumn: (pos: number) => { line: number, column: number }
+
+export interface RuleMeta
+  description: string
+  fixable: boolean
+  defaultSeverity: Severity
+
+export interface Rule
+  id: string
+  meta: RuleMeta
+  check: (context: RuleContext) => void
+
+export interface ClintConfig
+  preset?: string
+  civetConfig?: string
+  rules?: Record<string, RuleLevel>
+
+export interface ResolvedConfig
+  preset: string
+  rules: Record<string, RuleLevel>
+  civetConfigPath?: string
+  civetOptions: Record<string, any>
+  configPath?: string
+
+export interface LintResult
+  filePath: string
+  source: string
+  fixedSource?: string
+  diagnostics: Diagnostic[]
+  appliedFixesCount: number
+  isEquivalencePreserved: boolean
+  errorCount: number
+  warningCount: number
+  fixableCount: number

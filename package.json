@@ -1,0 +1,52 @@
+{
+  "name": "civet-clint",
+  "version": "0.1.0",
+  "description": "Compiler-backed style checker and autofixer for Civet codebases",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "clint": "./bin/civet-clint.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "npm run build && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 test/types/public-api.ts",
+    "check": "npm run build && node bin/civet-clint.js src",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "civet",
+    "linter",
+    "autofix",
+    "compiler",
+    "style-checker"
+  ],
+  "author": "shogi-dojo",
+  "license": "MIT",
+  "dependencies": {
+    "@danielx/civet": "0.11.15"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

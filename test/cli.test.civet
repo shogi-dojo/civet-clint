@@ -1,0 +1,69 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { parseCliArgs, findCivetFiles, formatTextReport, runCli } from "../src/cli.civet"
+
+describe "CLI Suite", ->
+  it "publishes the civet-clint package with the clint executable", async ->
+    manifest := JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"))
+    expect(manifest.name).toBe("civet-clint")
+    expect(manifest.bin).toEqual({ clint: "./bin/civet-clint.js" })
+
+  it "parses command line arguments correctly", ->
+    opts := parseCliArgs(["--write", "--config", "./custom.json", "--format=json", "src", "test/file.civet"])
+    expect(opts.write).toBe(true)
+    expect(opts.config).toBe("./custom.json")
+    expect(opts.format).toBe("json")
+    expect(opts.targets).toEqual(["src", "test/file.civet"])
+    expect(opts.errors).toEqual([])
+
+  it "rejects unknown options and missing targets", async ->
+    expect(await runCli(["--wat"])).toBe(2)
+    expect(await runCli(["/definitely/not/a/civet/path"])).toBe(2)
+
+  it "discovers .civet files while ignoring node_modules and dist", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disc-"))
+    await fs.mkdir(path.join(tmpDir, "src"), { recursive: true })
+    await fs.mkdir(path.join(tmpDir, "node_modules", "pkg"), { recursive: true })
+    await fs.mkdir(path.join(tmpDir, "dist"), { recursive: true })
+
+    f1 := path.join(tmpDir, "src", "a.civet")
+    f2 := path.join(tmpDir, "src", "b.civet")
+    ignored1 := path.join(tmpDir, "node_modules", "pkg", "c.civet")
+    ignored2 := path.join(tmpDir, "dist", "d.civet")
+
+    await fs.writeFile(f1, "x := 1")
+    await fs.writeFile(f2, "y := 2")
+    await fs.writeFile(ignored1, "z := 3")
+    await fs.writeFile(ignored2, "w := 4")
+
+    files := await findCivetFiles([tmpDir], tmpDir)
+    expect(files).toContain(f1)
+    expect(files).toContain(f2)
+    expect(files).not.toContain(ignored1)
+    expect(files).not.toContain(ignored2)
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "runs CLI in check and write modes on temporary directories", async ->
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-run-"))
+    testFile := path.join(tmpDir, "sample.civet")
+    await fs.writeFile(testFile, "a === b and () => 123", "utf8")
+
+    // Check mode
+    codeCheck := await runCli(["--check", testFile])
+    expect(codeCheck).toBe(1)
+
+    // Write mode
+    codeWrite := await runCli(["--write", testFile])
+    expect(codeWrite).toBe(0)
+
+    updatedContent := await fs.readFile(testFile, "utf8")
+    expect(updatedContent).toBe("a is b and => 123")
+
+    // Check again after write should be 0
+    codeCheckAfter := await runCli(["--check", testFile])
+    expect(codeCheckAfter).toBe(0)
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
