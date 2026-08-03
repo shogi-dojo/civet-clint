@@ -107,9 +107,20 @@ This setup is already complete and is recorded here for reference:
 3. The protected `npm` environment exists in GitHub repository settings and is
    restricted to `v*` tags.
 
-Because npm points `latest` at the first version published to a new package, the
-`latest` tag was removed after the bootstrap publish: `latest` must not resolve to
-a prerelease. It will be set when the first stable version ships.
+### Known deviation: `latest` currently points at a prerelease
+
+npm points `latest` at the first version published to a new package, regardless of
+the `--tag` used. So `latest` and `next` both resolve to `0.1.0-alpha.1`, and a bare
+`npm install civet-clint` installs the alpha.
+
+This cannot be corrected yet. The registry rejects `npm dist-tag rm civet-clint latest`
+with `400 Bad Request` — `latest` is special-cased and must always resolve to a
+version, so it can only be repointed, never removed. With `0.1.0-alpha.1` as the only
+published version, there is nothing to repoint it to.
+
+It resolves on its own: publishing the first stable release moves `latest` to that
+version, restoring the policy in section 2. Until then, the README directs users to
+`civet-clint@next` explicitly.
 
 ---
 
