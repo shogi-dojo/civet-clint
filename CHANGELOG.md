@@ -5,6 +5,32 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`style/prefer-terse-imports`** (fixable): omits the optional `import` keyword
+  from binding imports and unquotes module paths where the terse form compiles to
+  byte-identical output — `import { t } from "../i18n"` becomes
+  `{ t } from ../i18n`. Enabled at `error` in the `coffee-react` preset; the
+  neutral `default` preset is unchanged.
+
+  Deliberately conservative, because the compiler-equivalence gate validates each
+  rule's edits as one batch per file — a single unsafe edit would discard every
+  terse-import fix in that file. The rule therefore keeps `import` on side-effect
+  imports (where it is not optional), keeps single quotes (Civet echoes the
+  original quote character, but the terse form always emits double quotes), skips
+  declarations whose keyword is followed by irregular whitespace (Civet re-inserts
+  exactly one space), and skips import attributes, dynamic `import()`,
+  `import.meta`, and specifiers containing escape sequences.
+
+### Fixed
+
+- **Changelog accuracy**: the `0.1.0-alpha.1` entry described
+  `style/prefer-jsx-shorthand` as enforcing self-closing elements and empty
+  fragments. It actually converts static `className`/`id` attributes to Civet's
+  `.class`/`#id` shorthands.
+
 ## [0.1.0-alpha.2] - 2026-08-03
 
 Maintenance release. This is the first release published by the automated
@@ -60,7 +86,7 @@ First public alpha release of `civet-clint`, the compiler-backed style checker a
 - **Built-in Style Rules (16 rules)**:
   - `style/prefer-word-operators`: enforce `is`, `isnt`, `and`, `or`, `not` instead of symbol operators `===`, `!==`, `&&`, `||`, `!`. (Fixable)
   - `style/prefer-concise-arrow`: convert empty-parameter `() =>` to concise `=>`. (Fixable)
-  - `style/prefer-jsx-shorthand`: enforce self-closing JSX elements `<Component />` and empty fragment `<></>`. (Fixable)
+  - `style/prefer-jsx-shorthand`: convert static `className="btn"` and `id="main"` attributes to Civet's `.btn` and `#main` shorthands. (Fixable, requires `react`)
   - `style/prefer-bare-assignment`: prefer bare `x = 1` for `let` bindings and `:=` for `CONST_CASE` bindings under `autoLet`. (Fixable)
   - `style/no-null-equality`: disallow null comparisons in favor of truthiness or existential operators.
   - `style/no-is-not`: disallow `is not` in favor of `isnt`.
