@@ -182,9 +182,17 @@ Options:
     return 0
 
   if options.version
-    // Read package.json version
-    console.log("clint v0.1.0")
-    return 0
+    // The manifest is the single source of truth: a hardcoded fallback would
+    // silently report a stale version after the next release bump.
+    try
+      pkgUrl := new URL("../package.json", import.meta.url)
+      rawPkg := await fs.readFile(pkgUrl, "utf8")
+      manifest := JSON.parse(rawPkg)
+      console.log(`clint v${manifest.version}`)
+      return 0
+    catch e
+      console.error(`Unable to determine clint version: ${(e as Error).message}`)
+      return 2
 
   var config: ResolvedConfig
   try

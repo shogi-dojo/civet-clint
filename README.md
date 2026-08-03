@@ -1,25 +1,26 @@
 # civet-clint
 
 [![CI](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml/badge.svg)](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/civet-clint/next)](https://www.npmjs.com/package/civet-clint)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**civet-clint** is an experimental compiler-backed style checker and autofixer for [Civet](https://civet.dev). The package installs the concise `clint` command.
+**civet-clint** is a compiler-backed style checker and autofixer for [Civet](https://civet.dev). The package installs the concise `clint` command line tool and provides a programmatic Node.js API.
 
-Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Each rule's edits and the combined result are recompiled; edits are applied only when the emitted output is byte-identical. This is a strong behavior-preservation guard, while the project remains a proof of concept built on Civet's currently untyped raw AST.
+Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Every autofix edit is compiled and re-verified: changes are applied only when the compiled JavaScript/TypeScript output is byte-for-byte identical to the original output. This provides a behavior-preservation safety guard against accidental semantic breakage.
 
-> **Status:** POC. The package is not published to npm yet. Install it from GitHub or clone the repository while its public API is being validated.
+> **Release Status:** Alpha (`0.1.0-alpha.1` on npm's `next` dist-tag). The tool targets `@danielx/civet` 0.11.15.
 
 ---
 
 ## Features
 
-- 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are discarded without blocking safe batches from other rules.
-- ⚡ **Atomic File Rewrites**: Changes are written atomically via tempfiles, avoiding partial writes, corruption, and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Coffee React Style Rules**: Idiomatic rules designed for modern Civet codebases using CoffeeScript and React syntax styles.
-- 🧩 **Rule Registry & Plugin Architecture**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
+- 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
+- ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
+- 🎯 **Ranked & Coffee-React Style Rules**: 16 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
-- 🧭 **Configuration-Aware**: A compiler/config adapter consumes the project's full `civet.json` (dial + top-level `CompileOptions`). Rules declare the dial keys they require; incompatible rules are skipped and surfaced via `clint --print-config` rather than emitting invalid autofixes.
+- 🧭 **Dial-Aware Capability Checks**: Rules declare the compiler options they require (e.g., `autoLet`, `react`, `coffeeRange`). Incompatible rules are skipped rather than emitting invalid autofixes.
 - 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
 ---
@@ -27,14 +28,14 @@ Unlike a text-only formatter, `civet-clint` uses the official `@danielx/civet` c
 ## Installation
 
 ```bash
-# Install directly from the public GitHub repository
-npm install --save-dev github:shogi-dojo/civet-clint
+# Install the alpha release from npm (@next tag)
+npm install --save-dev civet-clint@next
 
-# Or develop locally
-git clone https://github.com/shogi-dojo/civet-clint.git
-cd civet-clint
-npm ci
-npm test
+# Or with yarn
+yarn add -D civet-clint@next
+
+# Or with pnpm
+pnpm add -D civet-clint@next
 ```
 
 ---
@@ -42,26 +43,26 @@ npm test
 ## CLI Usage
 
 ```bash
-# Check all .civet files in the current workspace
-clint --check
+# Check all .civet files in the current workspace (default: --check)
+npx clint
 
 # Check specific files or folders
-clint src/ components/ app.civet
+npx clint src/ components/ app.civet
 
 # Automatically fix all safe style violations in place
-clint --write
+npx clint --write
 
 # Specify custom configuration file
-clint --write --config ./civet-clint.config.json
+npx clint --write --config ./civet-clint.config.json
 
-# Output diagnostics in JSON for CI/CD pipelines
-clint --check --format json
+# Output diagnostics in JSON format for CI/CD pipelines
+npx clint --check --format json
 
-# Print resolved workspace configuration
-clint --print-config
+# Print resolved workspace configuration and compiler dial
+npx clint --print-config
 
 # Print effective resolved configuration for a specific file (including overrides)
-clint --print-config src/components/Button.civet
+npx clint --print-config src/components/Button.civet
 ```
 
 ### CLI Flags
@@ -80,7 +81,7 @@ clint --print-config src/components/Button.civet
 
 ## Configuration
 
-Create a `civet-clint.config.json` file in your repository root:
+Create a `civet-clint.config.json`, `.civet-clintrc.json`, or `.civet-clint.json` file in your repository root:
 
 ```json
 {
@@ -89,10 +90,10 @@ Create a `civet-clint.config.json` file in your repository root:
   "rules": {
     "style/prefer-word-operators": "error",
     "style/prefer-concise-arrow": "error",
-    "style/prefer-jsx-shorthand": "error",
+    "style/prefer-bare-assignment": "error",
     "style/no-null-equality": "warn",
     "style/no-is-not": "warn",
-    "style/no-mixed-interpolation": "warn"
+    "style/no-trailing-semicolons": "error"
   },
   "overrides": [
     {
@@ -114,21 +115,32 @@ Create a `civet-clint.config.json` file in your repository root:
 ### Presets
 
 #### `default`
-The default when no preset is configured: a neutral starting point that relies only on Civet's vanilla word-operator parsing. The dial is empty `{}`; a project's `civet.json` always overrides it, so a user with a Coffee-flavored `civet.json` still gets Coffee parsing.
+The baseline neutral preset that relies on Civet's standard word-operator parsing without enforcing specific framework or dialect styles:
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- Civet compiler options: `{}`
+- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- Compiler options: `{}`
 
 #### `coffee-react`
-Configured specifically for idiomatic Civet + React codebases. Existing integrations such as Ranked select this preset explicitly:
+Tailored for idiomatic Civet + React codebases (such as the Ranked style guide):
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
+- `style/prefer-bare-assignment`: `"error"` (fixable, requires `autoLet`)
+- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- `style/prefer-existential-check`: `"error"` (diagnostic)
+- `style/prefer-jsx-attr-shorthand`: `"error"` (diagnostic, requires `react`)
+- `style/prefer-ampersand-shorthand`: `"error"` (diagnostic)
+- `style/no-single-param-arrow-without-parens`: `"error"` (diagnostic)
+- `style/prefer-named-export-default`: `"warn"` (diagnostic)
+- `style/no-thin-arrow`: `"error"` (diagnostic)
+- `style/no-pipe-operator`: `"error"` (diagnostic)
+- `style/prefer-range-operator`: `"error"` (diagnostic, requires `coffeeRange`)
 - `style/no-null-equality`: `"warn"` (diagnostic)
-- `style/no-is-not`: `"warn"` (diagnostic, requires `coffeeIsnt` or `coffeeNot`)
+- `style/no-is-not`: `"warn"` (diagnostic)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- Civet compiler options: `{ "coffeeIsnt": true, "react": true }`
+- Compiler options: `{ "autoLet": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
 
 ### Per-file Configuration Overrides
 
@@ -141,71 +153,55 @@ The `overrides` array allows configuring rules, presets, compiler options, or se
       "files": "src/components/**/*.civet",
       "civetOptions": { "react": true },
       "rules": {
-        "style/prefer-jsx-shorthand": "error"
+        "style/prefer-jsx-shorthand": "error",
+        "style/prefer-jsx-attr-shorthand": "error"
       }
     }
   ]
 }
 ```
 
-Inspect effective configurations with `clint --print-config path/to/file.civet`.
+### Compiler Dial & Rule Capabilities
 
-### Configuration-aware rule skipping
-
-Rules declare required dial keys via `meta.capabilities.requires` (all required) and `requiresAny` (at least one required). When the resolved dial does not satisfy a capability, the rule is **skipped** rather than executed, so an autofix whose replacement is invalid under the active dial is never proposed. For example, `style/prefer-jsx-shorthand` requires `react`. `style/no-is-not` runs when `coffeeIsnt` makes `isnt` available or when `coffeeNot` turns `a is not b` into the dangerous `a === !b` footgun. The compiler-equivalence guard remains the final safety net for unsafe edits.
-
-Use `clint --print-config` to inspect the resolved preset, compiler options, rules, and skipped/incompatible rules for your workspace.
-
-`compileOptions` lists only the options Clint actually forwards to the compiler. Execution-mode keys (`sync`, `ast`, `filename`, `parseOptions`, `errors`) are controlled by Clint and stripped from project configuration; any that were present appear under `ignoredCompileOptions`.
+Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`) via `meta.capabilities`. When the active dial does not enable a rule's requirements, the rule is **automatically skipped** rather than executing and emitting diagnostics or fixes that are invalid under the active dial.
 
 ---
 
 ## Rules Catalog
 
+`civet-clint` currently provides 16 built-in style and correctness rules.
+
 ### Fixable Rules
 
-#### `style/prefer-word-operators`
-Replaces standard JavaScript operators with concise Civet word operators:
-- `===` $\to$ `is`
-- `!==` $\to$ `isnt`
-- `&&` $\to$ `and`
-- `||` $\to$ `or`
-- `!flag` $\to$ `not flag`
-
-> **Safety**: Comparisons against `null` (e.g. `x === null`) are excluded because Civet's existential forms require an intentional migration decision. Comparisons against `undefined` can be rewritten normally.
-
-#### `style/prefer-concise-arrow`
-Converts parameterless arrow functions to concise Civet arrow syntax:
-- `() => 42` $\to$ `=> 42`
-- `async () => 42` $\to$ `async => 42`
-- `items.map(() => 0)` $\to$ `items.map(=> 0)`
-- `<button onClick={() => doSomething()} />` $\to$ `<button onClick={=> doSomething()} />`
-
-#### `style/prefer-jsx-shorthand`
-Converts static `className` and `id` attributes into clean JSX tag shorthands:
-- `<div className="btn primary" id="main">` $\to$ `<div .btn.primary #main>`
-- `<Button className="primary" id="btn1" />` $\to$ `<Button .primary #btn1 />`
-
-> **Safety**: Dynamic expressions (e.g. `className={clsx(...)}`), template strings, and invalid CSS identifiers are preserved unchanged.
-
----
+| Rule ID | Description | Required Dial |
+|---|---|---|
+| [`style/prefer-word-operators`](src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
+| [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
+| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. | `react` |
+| [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 
 ### Diagnostic Rules
 
-#### `style/no-null-equality`
-Flags direct comparisons with `null` (`=== null`, `!== null`, `== null`, `is null`, `isnt null`), recommending explicit checks or existential operators.
-
-#### `style/no-is-not`
-Flags the use of `is not` (preferring `isnt`).
-
-#### `style/no-mixed-interpolation`
-Flags the two silent interpolation traps: `${...}` inside double-quoted strings and `#{...}` inside backtick templates. Use backticks with `${...}` for ordinary interpolation; Coffee-style `"#{...}"` remains valid when deliberately needed.
+| Rule ID | Description | Required Dial |
+|---|---|---|
+| [`style/no-trailing-semicolons`](src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
+| [`style/prefer-existential-check`](src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
+| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Prefer `{prop}` for `prop={prop}` and `prop` for `prop={true}`. | `react` |
+| [`style/prefer-ampersand-shorthand`](src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
+| [`style/no-single-param-arrow-without-parens`](src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
+| [`style/prefer-named-export-default`](src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
+| [`style/no-thin-arrow`](src/rules/no-thin-arrow.civet) | Disallow thin arrows `->` in favor of fat arrows `=>`. | — |
+| [`style/no-pipe-operator`](src/rules/no-pipe-operator.civet) | Disallow pipe operator `\|>`. | — |
+| [`style/prefer-range-operator`](src/rules/prefer-range-operator.civet) | Prefer `[0...N].map` range loops over `Array.from({ length: N }, ...)`. | `coffeeRange` |
+| [`style/no-null-equality`](src/rules/no-null-equality.civet) | Disallow direct comparisons with `null`. | — |
+| [`style/no-is-not`](src/rules/no-is-not.civet) | Disallow `is not` in favor of `isnt`. | `coffeeIsnt` or `coffeeNot` |
+| [`style/no-mixed-interpolation`](src/rules/no-mixed-interpolation.civet) | Disallow mixing `${...}` and `#{...}` within the same file. | — |
 
 ---
 
 ## Programmatic API & Plugins
 
-`civet-clint` exports a modular API with support for custom rules and plugins:
+`civet-clint` exports a typed ESM API:
 
 ```typescript
 import {
@@ -217,14 +213,20 @@ import {
   createDefaultRuleRegistry
 } from 'civet-clint';
 
-// Custom rule and isolated registry
 const registry = createDefaultRuleRegistry();
 registry.register({
   id: 'custom/no-debugger',
-  meta: { description: 'Disallow debugger', fixable: false, defaultSeverity: 'error' },
+  meta: {
+    description: 'Disallow debugger statements',
+    fixable: false,
+    defaultSeverity: 'error'
+  },
   check(context) {
     if (context.source.includes('debugger')) {
-      context.report({ ruleId: 'custom/no-debugger', message: 'Avoid debugger statements' });
+      context.report({
+        ruleId: 'custom/no-debugger',
+        message: 'Avoid debugger statements in production code'
+      });
     }
   }
 });
@@ -246,22 +248,28 @@ console.log(result.fixedSource);            // "fn := => a is b"
 
 ```mermaid
 flowchart TD
-    A[Source File] --> B[Parse Raw AST]
-    A --> C[Baseline Compile]
-    B --> D[Execute Rules via RuleRegistry]
+    A[Source File] --> B[Parse Raw AST via @danielx/civet]
+    A --> C[Baseline Compilation]
+    B --> D[Execute Active Rules via RuleRegistry]
     D --> E[Collect Non-overlapping TextEdits]
-    E --> F[Apply Candidate Edits]
-    F --> G[Compile Candidate]
+    E --> F[Apply Candidate Autofixes]
+    F --> G[Compile Fixed Candidate]
     C --> H{Verify Byte-Identical Output}
     G --> H
     H -- Match --> I[Approved: Atomic Write]
-    H -- Mismatch --> J[Rejected: Keep Original]
+    H -- Mismatch --> J[Rejected: Retain Original Source]
 ```
 
-The intended path into the Civet project, including the raw-AST compatibility risk and the supported configuration boundary, is documented in [docs/upstream.md](docs/upstream.md).
+For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](docs/upstream.md).
+
+---
+
+## Releasing
+
+For release policies, SemVer tagging, and npm publishing guidelines, see [docs/releasing.md](docs/releasing.md).
 
 ---
 
 ## License
 
-MIT © shogi-dojo
+MIT © [shogi-dojo](https://github.com/shogi-dojo)

@@ -1,6 +1,6 @@
 {
   "name": "civet-clint",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Compiler-backed style checker and autofixer for Civet codebases",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,13 +24,26 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shogi-dojo/civet-clint.git"
+  },
+  "homepage": "https://github.com/shogi-dojo/civet-clint#readme",
+  "bugs": {
+    "url": "https://github.com/shogi-dojo/civet-clint/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "npm run build && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 test/types/public-api.ts",
     "check": "npm run build && node bin/civet-clint.js src",
+    "smoke-test": "node scripts/smoke-test.mjs",
+    "release:check": "npm run build && npm test && npm run typecheck && npm run check && npm pack --dry-run && npm run smoke-test",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run release:check"
   },
   "keywords": [
     "civet",

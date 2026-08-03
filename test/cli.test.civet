@@ -9,6 +9,19 @@ describe "CLI Suite", ->
     manifest := JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"))
     expect(manifest.name).toBe("civet-clint")
     expect(manifest.bin).toEqual({ clint: "./bin/civet-clint.js" })
+    expect(manifest.version).toBe("0.1.0-alpha.1")
+
+  it "prints version with --version", async ->
+    originalLog := console.log
+    captured: string[] := []
+    console.log = (...args) -> captured.push(args.join(" "))
+    var code = 2
+    try
+      code = await runCli(["--version"])
+    finally
+      console.log = originalLog
+    expect(code).toBe(0)
+    expect(captured.join("\n")).toContain("0.1.0-alpha.1")
 
   it "parses command line arguments correctly", ->
     opts := parseCliArgs(["--write", "--config", "./custom.json", "--format=json", "src", "test/file.civet"])
