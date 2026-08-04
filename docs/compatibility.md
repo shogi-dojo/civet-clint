@@ -14,7 +14,7 @@ This document outlines the supported runtime environments, compiler dependencies
 | **Presets** | `default`, `coffee-react` | `default` (neutral, dial-independent); `coffee-react` (requires `autoLet`, `coffeeIsnt`, `coffeeRange`, `react`). |
 | **Frameworks** | React (JSX) | Validated on React codebases. Solid and other JSX dialects are currently **unvalidated**. |
 | **Config Discovery** | `clint.config.json`, `.clintrc.json`, `.clint.json` | Auto-discovered in order from the repository root. Custom config paths supported via `--config <path>`. |
-| **Civet Config** | `civet.json`, `civetconfig.json`, `.civetconfig.json` | JSON configs only; extracts `parseOptions` as the compiler dial and forwards top-level `CompileOptions`. |
+| **Civet Config Adapter** | `civet.json`, `civetconfig.json`, `.civetconfig.json` | Clint auto-discovers these three static JSON names; broader Civet config formats are not yet supported. |
 | **Interfaces** | CLI (`clint`), Node.js ESM API, Plugin API | Full CLI suite, typed programmatic exports, and modular `RuleRegistry` / `Plugin` interfaces. |
 
 ---
@@ -39,11 +39,11 @@ Clint automatically discovers the following configuration files in order:
 For non-standard paths or names, pass `-c` / `--config <path>`.
 
 ### Civet Project Configuration
-Clint discovers and reads `civet.json`, `civetconfig.json`, or `.civetconfig.json` specified in configuration or discovered in the workspace.
+Clint's current adapter auto-discovers and reads `civet.json`, `civetconfig.json`, or `.civetconfig.json`. The dotted `.civetconfig.json` form is recognized by Civet 0.11.15's official config loader as well as by Clint. `civet.json` remains supported for existing Clint consumers, but it is not one of Civet's standard config names.
 
 > [!NOTE]
 > **Scope of Civet Config Support:**
-> Clint supports static JSON configuration files (`civet.json`, `civetconfig.json`, `.civetconfig.json`).
+> Clint currently supports only these static JSON configuration files. Civet itself supports additional standard names, a `.config` directory, package configuration, and executable or YAML formats; adopting that full discovery/loading surface is future work.
 > The following are currently **out of scope**:
 > - Dynamic JavaScript/TypeScript/YAML config files (`civet.config.js`, `civet.config.ts`, `civet.yaml`).
 > - Automatic expansion of umbrella options like `coffeeCompat` or `esCompat` into their constituent parse options. (Individual flags must be explicitly enabled if required by rules).

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/shogi-dojo/civet-clint/main/docs/assets/clint-logo.png" alt="Clint — the Civet linter" width="512">
+</p>
+
 # civet-clint
 
 [![CI](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml/badge.svg)](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml)

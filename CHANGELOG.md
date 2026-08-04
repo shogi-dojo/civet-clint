@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-04
+
 ### Documentation
 
 - **Public launch readiness**: Updated README with stable npm badge (`latest`), clarified compiler equivalence vs opt-in reference-source verification, and added direct links to documentation artifacts.
 - **Compatibility matrix**: Added `docs/compatibility.md` detailing supported Node.js versions, exact `@danielx/civet@0.11.15` pinning, dial requirements, preset support, and JSON configuration boundaries.
 - **Production case study**: Added `docs/case-study-production.md` documenting the end-to-end rollout and verification across a 266-file production Civet codebase.
 - **Upstream collaboration & roadmap**: Rewrote `docs/upstream.md` to define concrete collaboration points for Civet maintainers (integration directory listing, stable AST source-span APIs, normalized effective-config resolution) and a forward technical roadmap.
+- **Configuration boundary**: Clarified which three static JSON names Clint currently auto-discovers, which names overlap with Civet's official loader, and which broader Civet formats remain future work.
+- **Project identity**: Added the Clint logo to the repository documentation and README.
+
+### Tests
+
+- Added direct discovery coverage for `civet.json`, `civetconfig.json`, and `.civetconfig.json`.
 
 ## [0.1.0] - 2026-08-04
 
