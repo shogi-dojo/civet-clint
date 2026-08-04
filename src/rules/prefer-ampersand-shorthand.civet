@@ -89,6 +89,7 @@ function accessChain(body: any, paramName: string, source: string): string | und
   member := parts[0]
   call := parts[1]
   return undefined unless parts.length is 2 and call?.type is "Call"
+  return undefined unless member?.type is "MemberExpression"
 
   chain := propertyChain member, paramName
   return undefined unless chain?
