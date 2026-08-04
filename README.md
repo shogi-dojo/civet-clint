@@ -16,7 +16,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Ranked & Coffee-React Style Rules**: 16 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Ranked & Coffee-React Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -222,7 +222,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 16 built-in style and correctness rules.
+`civet-clint` currently provides 17 built-in style and correctness rules.
 
 ### Fixable Rules
 
@@ -233,6 +233,18 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
 | [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
+| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
+
+#### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
+
+`prop={prop}` → `{prop}` re-expands to exactly `prop={prop}`, including after a
+`{...spread}`, so compiled output is unchanged and the fix is applied.
+
+`prop={true}` → `prop` is **reported without a fix**. Civet emits the bare attribute
+as `prop`, so the compiled output genuinely differs. React treats both as `true`, but
+that is a render-equivalence claim, and the gate only accepts byte-identical output.
+Note the two forms are not interchangeable in source either: a bare `prop` is the
+*boolean* shorthand, so writing it in place of `prop={prop}` would change meaning.
 
 #### `style/prefer-jsx-shorthand` — what it will and won't rewrite
 
@@ -259,7 +271,7 @@ changes which value wins. Skipped sites are still reported, so they surface for 
 |---|---|---|
 | [`style/no-trailing-semicolons`](src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
 | [`style/prefer-existential-check`](src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
-| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Prefer `{prop}` for `prop={prop}` and `prop` for `prop={true}`. | `react` |
+| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
 | [`style/prefer-ampersand-shorthand`](src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
 | [`style/no-single-param-arrow-without-parens`](src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
 | [`style/prefer-named-export-default`](src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |

@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`style/prefer-jsx-attr-shorthand` is now fixable** for the `attr={attr}` form.
+  Civet re-expands `{attr}` to exactly `attr={attr}` — including after a
+  `{...spread}`, where the attribute keeps its position — so the rewrite is
+  byte-identical in compiled output and passes the equivalence gate unchanged.
+  Applied to a real 266-file codebase it landed **273 fixes with all 266 files
+  byte-identical**, and a second pass was a no-op.
+
+  The `prop={true}` → `prop` form is deliberately **not** fixable: Civet emits the
+  bare attribute as `prop`, not `prop={true}`, so the compiled output genuinely
+  differs. React treats the two as equivalent, but that is a render-equivalence
+  argument the gate does not make, so those sites are reported without a fix.
+
 ### Fixed
+
+- **`style/prefer-ampersand-shorthand` emitted syntactically broken suggestions.**
+  The rule matched with a regex whose trailing character class ran past the end of
+  the callback, so the quoted text absorbed delimiters belonging to the enclosing
+  expression — `Use '&' shorthand '.map &.userId))'` — and pasting it produced a
+  syntax error. Some suggestions were truncated mid-call (`&.id.toString(`).
+
+  The rule is now driven by the AST: the receiver, the accessed chain, and the
+  method are read from parser nodes, so a suggestion can no longer contain
+  anything the rule did not derive. On the same codebase, 13 of 61 suggestions
+  were malformed before; none are now.
+
+  Being AST-driven also removed **27 false positives** the regex produced by
+  matching bodies that are not a bare property access — `(p) => p.a or p.b`,
+  `(u) => u.id is other`. `&` stands in for the whole receiver, so those have no
+  shorthand form. The rule now also reports *each* link of a chained call
+  (`.filter(...).map(...)`), which the old single-match-per-position scan missed.
+
+- **Rules silently found nothing under the engine's AST mode.** The engine parses
+  with `ast: "raw"`, whose tree differs from the plain `ast: true` shape in ways
+  that are invisible until a rule reads the affected node: `Argument.children` is
+  an array rather than the node itself, `Parameter.children` is an array, a
+  `Parameters` node's leading token carries no `$loc`, and a JSX attribute's `=`
+  and braces sit at different indices. Rules now read the fields that are stable
+  across both modes.
 
 - **`style/prefer-jsx-shorthand` was effectively unusable.** Civet lowers the
   `.class`/`#id` shorthand to the front of the tag, on the tag-name line, so rewriting

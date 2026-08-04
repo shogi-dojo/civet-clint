@@ -131,6 +131,49 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
       expect(diags.length).toBe(0)
 
+    it "fixes attr={attr} to {attr} without touching the compiled output", ->
+      source := "x := <C users={users} />\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: { react: true, autoLet: true }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("x := <C {users} />\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    // A lone attribute is stored as the bare entry rather than a one-element
+    // list, and the engine's raw AST puts the `=` and braces at different
+    // indices than the plain tree. Both shapes must resolve.
+    it "flags a single attribute as well as several", ->
+      for source of ["<C a={a} />\n", "<C a={a} b={b} />\n"]
+        res := lintSource(source, {
+          rules: { "style/prefer-jsx-attr-shorthand": "error" }
+          civetOptions: { react: true }
+        })
+        diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
+        expect(diags.length).toBeGreaterThan(0)
+
+    it "leaves attr={other} alone", ->
+      source := "<C a={b} />\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: { react: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
+      expect(diags.length).toBe(0)
+
+    // `prop={true}` lowers to `prop`, which is a different emitted attribute, so
+    // the finding must never carry a fix.
+    it "reports prop={true} without offering a fix", ->
+      source := "<C flag={true} />\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: { react: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
+      expect(diags.length).toBe(1)
+      expect(diags[0].fix).toBeUndefined()
+
   describe "style/prefer-ampersand-shorthand", ->
     it "flags prop access callbacks and suggests & shorthand", ->
       source := "ids = users.map((u) => u.id)\n"
@@ -151,6 +194,51 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
       expect(diags.length).toBe(1)
       expect(diags[0].message).toContain(".map &.trim()")
+
+    // The rule used to match with a regex whose character class ran past the
+    // callback, so the quoted suggestion picked up delimiters belonging to the
+    // enclosing call — `.map &.userId))` — and was a syntax error if pasted.
+    it "never quotes trailing delimiters from the surrounding call", ->
+      source := "ids = getRows().map((u) => u.userId)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain(".map &.userId")
+      expect(diags[0].message).not.toContain("))")
+
+    it "reports each link of a chained call", ->
+      source := "seats = players.filter((p) => p.riichi).map((p) => p.seat)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags.length).toBe(2)
+      expect(diags.some((d) -> d.message.includes(".filter &.riichi"))).toBe(true)
+      expect(diags.some((d) -> d.message.includes(".map &.seat"))).toBe(true)
+
+    // `&` stands in for the whole receiver, so a body that does anything beyond
+    // accessing the parameter has no shorthand form.
+    it "ignores callbacks that are not a bare access on the parameter", ->
+      cases := [
+        "a = users.map((u) => f(u.id))\n"          // parameter is an argument
+        "b = users.map((u) => u.id is other)\n"    // comparison, not an access
+        "c = users.map((u, i) => u.id)\n"          // more than one parameter
+        "d = users.map(({ id }) => id)\n"          // destructured parameter
+        "e = users.map((u) => u)\n"                // no access at all
+        "f = users.map((u) => u.f(u))\n"           // parameter used as an argument
+        "g = users.map((u) => u.a.map fn)\n"       // paren-less trailing call
+      ]
+      for source of cases
+        res := lintSource(source, {
+          rules: { "style/prefer-ampersand-shorthand": "error" }
+          civetOptions: { autoLet: true }
+        })
+        diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+        expect(diags.length).toBe(0)
 
   describe "style/no-single-param-arrow-without-parens", ->
     it "flags unparenthesized single parameter arrow", ->

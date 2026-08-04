@@ -1,38 +1,202 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+import { walkAst } from "../utils.civet"
+
+const SHORTHAND_METHODS = new Set([
+  "map", "filter", "find", "findIndex", "findLast", "findLastIndex"
+  "some", "every", "flatMap", "forEach", "sort"
+])
+
+// The single parameter of an arrow, or undefined when the arrow takes zero or
+// several parameters, or when the parameter is a pattern rather than a plain
+// binding (destructuring has no `&` equivalent).
+function soleParameterName(arrow: any): string | undefined
+  paramsNode := arrow?.parameters ?? arrow?.signature?.parameters
+  params := paramsNode?.parameters
+  return undefined unless Array.isArray(params) and params.length is 1
+  // `binding` is the parameter's target: an `Identifier` for a plain `(u)`, and a
+  // pattern node for destructuring, which has no `&` equivalent. That check alone
+  // is enough — `children` is not usable here because the engine's `ast: "raw"`
+  // tree stores it as an array.
+  binding := params[0]?.binding
+  return undefined unless binding?.type is "Identifier"
+  return undefined unless typeof binding.name is "string"
+  binding.name
+
+// Source offset of an arrow's sole parameter, taken from the binding identifier's
+// own token so it resolves under both AST modes.
+function parameterPos(arrow: any): number | undefined
+  paramsNode := arrow?.parameters ?? arrow?.signature?.parameters
+  binding := paramsNode?.parameters?[0]?.binding
+  return undefined unless binding?
+  kids := binding.children
+  if Array.isArray kids
+    for kid of kids
+      return kid.$loc.pos if kid?.$loc?
+    return undefined
+  kids?.$loc?.pos ?? binding.$loc?.pos
+
+// The sole expression of a bare-block arrow body, or undefined when the body is a
+// real block (multiple statements, or an explicit `return`), which `&` cannot express.
+function soleBodyExpression(arrow: any): any
+  block := arrow?.block
+  return undefined unless block?.type is "BlockStatement" and block.bare
+  exprs := block.expressions
+  return undefined unless Array.isArray(exprs) and exprs.length is 1
+  entry := exprs[0]
+  return undefined unless Array.isArray(entry) and entry.length >= 2
+  entry[1]
+
+// True when `paramName` appears anywhere inside the subtree. Used to reject a
+// trailing call whose arguments mention the parameter: `&` replaces only the
+// receiver, so `(u) => u.f(u)` has no shorthand form.
+function referencesParam(node: any, paramName: string): boolean
+  var found = false
+  walkAst node, (n) ->
+    found = true if n?.type is "Identifier" and n.name is paramName
+  found
+
+// Renders `x.a.b` as the access chain `.a.b`, but only when every link is a plain
+// property access on the parameter itself. Returns undefined for anything else —
+// an index, an optional access, or a chain rooted elsewhere — because `&` stands
+// for the whole receiver and any other shape changes meaning.
+function propertyChain(expr: any, paramName: string): string | undefined
+  return undefined unless expr?.type is "MemberExpression"
+  children := expr.children
+  return undefined unless Array.isArray(children)
+
+  // Leading whitespace tokens carry no type and are skipped.
+  parts := children.filter (c: any) -> c?.type?
+
+  root := parts[0]
+  return undefined unless root?.type is "Identifier" and root.name is paramName
+  return undefined unless parts.length > 1
+
+  var chain = ""
+  for part of parts.slice(1)
+    return undefined unless part?.type is "PropertyAccess"
+    return undefined if part.dot?.optional
+    return undefined unless typeof part.name is "string"
+    chain += `.${part.name}`
+  chain
+
+// Renders the arrow body as an access chain. Handles the plain `u.a.b` member
+// chain and the method-call form `u.trim()`, which lowers to `&.trim()`.
+function accessChain(body: any, paramName: string, source: string): string | undefined
+  return propertyChain(body, paramName) if body?.type is "MemberExpression"
+  return undefined unless body?.type is "CallExpression"
+
+  parts := (body.children ?? []).filter (c: any) -> c?.type?
+  member := parts[0]
+  call := parts[1]
+  return undefined unless parts.length is 2 and call?.type is "Call"
+
+  chain := propertyChain member, paramName
+  return undefined unless chain?
+
+  // The parameter must not appear in the arguments — `&` only stands in for the
+  // receiver.
+  args := call.args ?? []
+  for arg of args
+    return undefined if referencesParam arg, paramName
+
+  // Render the argument list from source so the suggestion reads exactly as
+  // written, rather than being reconstructed. The `Call` node carries no `$loc`
+  // itself, so its span is taken from its positioned descendants.
+  span := nodeSpan call
+  return undefined unless span?
+  return undefined if span.end <= span.start
+
+  callText := source.slice(span.start, span.end)
+  // Only a parenthesized call round-trips. Civet also allows a paren-less call
+  // (`round.map fn`), whose span here would swallow the argument and render a
+  // suggestion that means something else entirely.
+  return undefined unless callText.startsWith("(") and callText.endsWith(")")
+  `${chain}${callText}`
+
+// Source span covering every positioned token beneath a node.
+function nodeSpan(node: any): { start: number, end: number } | undefined
+  var start: number | undefined = undefined
+  var end: number | undefined = undefined
+  walkAst node, (n) ->
+    return unless n?.$loc?
+    from := n.$loc.pos
+    to := from + (n.$loc.length ?? 0)
+    start = from if start is undefined or from < start
+    end = to if end is undefined or to > end
+  return undefined unless start? and end?
+  { start, end }
 
 export const preferAmpersandShorthandRule: Rule = {
   id: "style/prefer-ampersand-shorthand"
   meta: {
-    description: "Prefer '&' block shorthand for single-parameter property/method access callbacks"
+    description: "Prefer '&' block shorthand for single-parameter property access callbacks"
     fixable: false
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
-    source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
-    stringRanges := collectStringRanges(ctx.ast)
-    ignoredRanges := [...commentRanges, ...stringRanges]
+    walkAst ctx.ast, (node) ->
+      return unless node? and typeof node is "object"
+      return unless node.type is "CallExpression"
 
-    re := /\.(map|filter|find|findIndex|some|every)\s*(?:\(\s*(?:\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*=>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z0-9_$.()]+)\s*\)|(?:\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*=>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z0-9_$.()]+))/g
-    var match: RegExpExecArray | null = null
+      children := node.children
+      return unless Array.isArray(children)
 
-    while (match = re.exec(source)) !== null
-      method := match[1]
-      param := match[2] or match[3] or match[6] or match[7]
-      receiver := match[4] or match[8]
-      access := match[5] or match[9]
+      // A whole chain parses as ONE flat CallExpression, not nested ones:
+      //
+      //   xs.filter(f).map(g)  ->  [ws?, MemberExpression, Call, PropertyAccess, Call]
+      //
+      // The leading `MemberExpression` supplies the first method; each later
+      // `PropertyAccess` supplies the next. Every method is paired with the `Call`
+      // that follows it, so each link in the chain is examined on its own and a
+      // nested callback deeper in the subtree is never mistaken for this call's
+      // argument.
+      var pendingMethod: string | undefined = undefined
 
-      continue unless param and receiver and access
-      continue unless param is receiver
+      for part of children
+        if part?.type is "MemberExpression"
+          for inner of (part.children ?? [])
+            if inner?.type is "PropertyAccess" and typeof inner.name is "string"
+              pendingMethod = inner.name
+          continue
 
-      pos := match.index
-      matchEnd := match.index + match[0].length
-      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+        if part?.type is "PropertyAccess" and typeof part.name is "string"
+          pendingMethod = part.name
+          continue
 
-      ctx.report({
-        ruleId: "style/prefer-ampersand-shorthand"
-        message: `Use '&' shorthand '.${method} &.${access}' instead of verbose callback`
-        pos
-      })
+        continue unless part?.type is "Call"
+
+        method := pendingMethod
+        pendingMethod = undefined
+        continue unless method? and SHORTHAND_METHODS.has(method)
+
+        args := part.args
+        continue unless Array.isArray(args) and args.length is 1
+        // `Argument.expression` is the argument node itself under both AST modes.
+        // `children` is not usable here: the engine parses with `ast: "raw"`, where
+        // it is an array, while the plain `ast: true` tree stores the node directly.
+        arrow := args[0]?.expression
+        continue unless arrow?.type is "ArrowFunction"
+
+        paramName := soleParameterName arrow
+        continue unless paramName?
+
+        body := soleBodyExpression arrow
+        continue unless body?
+
+        chain := accessChain body, paramName, ctx.source
+        continue unless chain?
+
+        // Report at the parameter itself. Its identifier token carries a position
+        // under both AST modes, whereas the enclosing `Parameters` node's leading
+        // token has no `$loc` in the engine's `ast: "raw"` tree.
+        pos := parameterPos arrow
+        continue unless pos?
+
+        // The message quotes only what the rule derived from the AST, so it can no
+        // longer pick up trailing delimiters from the surrounding source.
+        ctx.report({
+          ruleId: "style/prefer-ampersand-shorthand"
+          message: `Use '&' shorthand '.${method} &${chain}' instead of verbose callback`
+          pos
+        })
 }
