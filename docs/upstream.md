@@ -1,42 +1,53 @@
-# Upstream path
+# Upstream Civet Collaboration & Technical Roadmap
 
-`civet-clint` is deliberately a standalone proof of concept. Its license and source language match Civet so that successful parts can move into the main project without a license or language migration.
+`civet-clint` is a standalone, compiler-backed style checker and autofixer for [Civet](https://civet.dev). It is authored in Civet and published under the MIT license to align directly with the Civet project and community.
 
-## Candidate integration
+---
 
-- Move the rule engine, `RuleRegistry`, and CLI under a dedicated Civet integration package, alongside the existing ESLint integration.
-- Keep style presets and plugins outside the compiler core. The rewrite engine accepts the project's resolved parse options, modular registries, and opt-in rules.
-- Reuse the standalone behavior fixtures as integration tests, including byte-identical emitted-output checks.
+## Current Status
 
-## Supported configuration boundary
+- **Stable Release:** Published on npm as [`civet-clint`](https://www.npmjs.com/package/civet-clint) under the `latest` dist-tag.
+- **Compiler Version:** Pinned to `@danielx/civet@0.11.15`.
+- **Real-World Validation:** Enforced in production CI across a 266-file Civet codebase with all 17 built-in rules passing at `error` level (see [Production Case Study](case-study-production.md)).
+- **Safety Engine:** Verified byte-for-byte identical output by default, with an opt-in reference compilation mechanism for bounded quote-style transforms.
 
-Clint consumes the project's `civet.json` through a compiler/config adapter (`src/compiler.civet`) that splits it into:
+---
 
-- **The dial** (`parseOptions`): Coffee/React/TS parsing flags such as `coffeeIsnt`, `coffeeEq`, `coffeeComment`, `react`, `ts`, `autoLet`, ... The dial drives raw-AST shape and rule applicability.
-- **Top-level `CompileOptions`** (everything outside `parseOptions`, e.g. `js`, `trace`): retained and threaded through both the baseline and candidate compiles so equivalence is decided under the same emitted-output pipeline the project uses.
+## Maintainer Collaboration Asks
 
-Supported in Civet 0.11.15:
+We seek constructive collaboration and feedback from the Civet maintainers around three concrete areas:
 
-- Presets: `default` (the neutral default, empty dial, only dial-independent rules) and `coffee-react` (`coffeeIsnt` + `react`, explicitly selected by Coffee/React consumers).
-- Rule capabilities: a rule declares `meta.capabilities.requires` and/or `requiresAny` (e.g. `style/prefer-jsx-shorthand` requires `react`; `style/no-is-not` runs with either `coffeeIsnt` or `coffeeNot`). Rules whose requirements are unsatisfied by the resolved dial are **skipped** — reported by `clint --print-config` and never executed — so an autofix whose replacement is invalid under the active dial is never even proposed.
-- Modular `RuleRegistry` and `Plugin` interfaces for clean rule registration, duplicate checking, and isolated testing.
-- Per-file configuration overrides via the `overrides` array with glob patterns, allowing different subdirectories or file types to use distinct presets, dials, and rules.
-- `clint --print-config [file]` prints the resolved preset, compiler options, rules, matching overrides, and skipped/incompatible rules for the workspace or a specific file.
+### 1. Inclusion in Civet Integrations Directory
+Civet's [Integrations documentation](https://civet.dev/integrations) currently lists `eslint-plugin-civet` under Linters. We would like to inquire if `civet-clint` may be listed alongside ESLint as an officially recognized standalone style checker and compiler-backed autofixer for Civet.
 
-Not yet supported (do not claim arbitrary compiler-version or compiler-configuration support):
+### 2. Stable Source Spans and AST Traversal API
+Clint inspects AST nodes and comments by parsing with `compile(source, { ast: "raw" })`. While `{ ast: "raw" }` is a public compiler option, the resulting `CivetAST` tree is typed as `unknown`, and internal node shapes (such as `$loc`, `children`, and `parent`) are treated as internal compiler implementation details rather than a frozen extension contract.
 
-- Pinning is to Civet `0.11.15` exactly. A different Civet version may change dial keys or the raw-AST shape.
-- Clint does not yet prove that *every* enabled rule is valid under the dial beyond the declared `requires` capabilities; the compiler-equivalence guard remains the final safety net.
+We would welcome discussion on:
+- Exposing stable source-location spans on public AST nodes.
+- Providing a supported AST traversal/visitor utility or token stream that allows linters and tooling to reliably locate expressions, declarations, comments, and JSX elements without binding to parser internals.
 
-## Compatibility blocker
+### 3. Normalized Effective Configuration API
+Civet projects configure parsing and compilation using `civet.json`, `civetconfig.json`, or umbrella flags like `coffeeCompat` and `esCompat`. Currently, Clint parses static JSON configuration files and checks rule capabilities against declared `parseOptions`.
 
-The POC obtains source spans from `compile(source, { ast: "raw" })`. The option is public, but `CivetAST` is intentionally typed as `unknown`, and properties such as `$loc`, `children`, and `parent` are not a stable extension API. `src/compiler.civet` now isolates construction of the compiler invocation, but raw node-shape access still exists in rules and `src/utils.civet`; introducing a node/source-range adapter remains required before upstreaming.
+Clint can adopt the existing `@danielx/civet/config` loader for official discovery and loading behavior. A complementary normalization API that resolves effective parse options by expanding umbrella presets and negations would allow Clint to determine the exact active compiler dial under all configuration styles.
 
-Before upstreaming, expose a small supported source-token traversal API—or stable source ranges on public AST nodes—so style rules do not depend on compiler internals. Until then, `civet-clint` pins the exact Civet version and rejects fixes whenever recompilation changes the emitted output.
+---
 
-## Proposed sequence
+## Future Technical Roadmap
 
-1. Validate the POC against several real Civet repositories and collect false-positive and performance data.
-2. Propose the stable source-span API to Civet maintainers with the smallest fixtures that require it.
-3. Move the generic engine and universally useful safety rules upstream; keep project-specific presets configurable.
-4. Publish from the Civet release workflow only after the public CLI and AST contract are accepted.
+The following improvements are planned for subsequent technical PRs:
+
+1. **Adopt `@danielx/civet/config`:**
+   - Migrate Clint's configuration loading to use `@danielx/civet/config` for the officially supported config filenames and dynamic formats.
+2. **Normalize Compiler Options & Dial Expansion:**
+   - Automatically expand umbrella configuration options (`coffeeCompat`, `esCompat`) into their constituent boolean and value flags to ensure precise dial capability matching.
+3. **Extend Rule Capability System:**
+   - Expand `meta.capabilities` beyond `requires` / `requiresAny` to support incompatible dial constraints (e.g., mutually exclusive parsing flags) and value-dependent constraints.
+4. **Expanded Preset Ecosystem:**
+   - `recommended`: Standard, dialect-neutral Civet best practices.
+   - `coffee`: Idiomatic CoffeeScript-style conventions (`coffeeIsnt`, `coffeeRange`, `autoLet`).
+   - `react`: React JSX shorthands and component patterns without requiring CoffeeScript operators.
+   - `coffee-react`: Combined preset for CoffeeScript-style React codebases.
+   - `migration`: Transitional rules designed for incremental migration from JavaScript/TypeScript to Civet.
+   - `solid`: Dialect rules tailored for SolidJS JSX and fine-grained reactivity.

@@ -1,14 +1,14 @@
 # civet-clint
 
 [![CI](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml/badge.svg)](https://github.com/shogi-dojo/civet-clint/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/civet-clint/next)](https://www.npmjs.com/package/civet-clint)
+[![npm version](https://img.shields.io/npm/v/civet-clint)](https://www.npmjs.com/package/civet-clint)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **civet-clint** is a compiler-backed style checker and autofixer for [Civet](https://civet.dev). The package installs the concise `clint` command line tool and provides a programmatic Node.js API.
 
-Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. Every autofix edit is compiled and re-verified: changes are applied only when the compiled JavaScript/TypeScript output is byte-for-byte identical to the original output. This provides a behavior-preservation safety guard against accidental semantic breakage.
+Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. By default, every autofix edit is compiled and verified to produce byte-for-byte identical output to the original source. For opt-in non-byte-identical transforms (such as unquoting single-quoted module paths in `style/prefer-terse-imports`), fixes are validated against a compiler reference source and bounded by engine-enforced output delta checks. Unsafe or semantics-altering edits are rejected by the safety gate.
 
-> **Release Status:** Alpha, published under npm's `next` dist-tag. The tool targets `@danielx/civet` 0.11.15.
+> **Release Status:** `0.1.0` published on npm `latest`. The tool targets `@danielx/civet` 0.11.15. As a pre-1.0 tool relying on Civet's parser and dialect options, compatibility is pinned to this compiler release. See the [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md).
 
 ---
 
@@ -16,7 +16,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Ranked & Coffee-React Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Coffee-React & Idiomatic Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -173,7 +173,7 @@ The baseline neutral preset that relies on Civet's standard word-operator parsin
 - Compiler options: `{}`
 
 #### `coffee-react`
-Tailored for idiomatic Civet + React codebases (such as the Ranked style guide):
+Tailored for idiomatic Civet + React codebases:
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
@@ -226,12 +226,12 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/prefer-word-operators`](src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
-| [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
-| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
-| [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
-| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
-| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
+| [`style/prefer-word-operators`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
+| [`style/prefer-concise-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
+| [`style/prefer-jsx-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
+| [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
+| [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
+| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 
@@ -267,18 +267,18 @@ changes which value wins. Skipped sites are still reported, so they surface for 
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/no-trailing-semicolons`](src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
-| [`style/prefer-existential-check`](src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
-| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
-| [`style/prefer-ampersand-shorthand`](src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
-| [`style/no-single-param-arrow-without-parens`](src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
-| [`style/prefer-named-export-default`](src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
-| [`style/no-thin-arrow`](src/rules/no-thin-arrow.civet) | Disallow thin arrows `->` in favor of fat arrows `=>`. | — |
-| [`style/no-pipe-operator`](src/rules/no-pipe-operator.civet) | Disallow pipe operator `\|>`. | — |
-| [`style/prefer-range-operator`](src/rules/prefer-range-operator.civet) | Prefer `[0...N].map` range loops over `Array.from({ length: N }, ...)`. | `coffeeRange` |
-| [`style/no-null-equality`](src/rules/no-null-equality.civet) | Disallow direct comparisons with `null`. | — |
-| [`style/no-is-not`](src/rules/no-is-not.civet) | Disallow `is not` in favor of `isnt`. | `coffeeIsnt` or `coffeeNot` |
-| [`style/no-mixed-interpolation`](src/rules/no-mixed-interpolation.civet) | Disallow mixing `${...}` and `#{...}` within the same file. | — |
+| [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
+| [`style/prefer-existential-check`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
+| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
+| [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
+| [`style/no-single-param-arrow-without-parens`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
+| [`style/prefer-named-export-default`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
+| [`style/no-thin-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-thin-arrow.civet) | Disallow thin arrows `->` in favor of fat arrows `=>`. | — |
+| [`style/no-pipe-operator`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-pipe-operator.civet) | Disallow pipe operator `\|>`. | — |
+| [`style/prefer-range-operator`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-range-operator.civet) | Prefer `[0...N].map` range loops over `Array.from({ length: N }, ...)`. | `coffeeRange` |
+| [`style/no-null-equality`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-null-equality.civet) | Disallow direct comparisons with `null`. | — |
+| [`style/no-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-is-not.civet) | Disallow `is not` in favor of `isnt`. | `coffeeIsnt` or `coffeeNot` |
+| [`style/no-mixed-interpolation`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-mixed-interpolation.civet) | Disallow mixing `${...}` and `#{...}` within the same file. | — |
 
 ### Style-Guide Coverage
 
@@ -378,13 +378,16 @@ arbitrary rewrite through a broad reference. A rule never inspects, normalizes, 
 approves compiled output. Rules that declare no reference — every rule today by
 default — are governed solely by the strict check against the original.
 
-For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](docs/upstream.md).
+For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](https://github.com/shogi-dojo/civet-clint/blob/main/docs/upstream.md).
 
 ---
 
-## Releasing
+## Documentation
 
-For release policies, SemVer tagging, and npm publishing guidelines, see [docs/releasing.md](docs/releasing.md).
+- 🧭 [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md) — Node.js, Civet version pinning, dialects, and framework support.
+- 📊 [Production Case Study](https://github.com/shogi-dojo/civet-clint/blob/main/docs/case-study-production.md) — Real-world validation on a 266-file production codebase.
+- 🤝 [Upstream Collaboration & Roadmap](https://github.com/shogi-dojo/civet-clint/blob/main/docs/upstream.md) — Civet maintainer asks and integration roadmap.
+- 🚀 [Release Guide](https://github.com/shogi-dojo/civet-clint/blob/main/docs/releasing.md) — Release policies, SemVer tagging, and npm publishing guidelines.
 
 ---
 
