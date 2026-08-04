@@ -28,14 +28,13 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 ## Installation
 
 ```bash
-# Install the alpha release from npm (@next tag)
-npm install --save-dev civet-clint@next
+npm install --save-dev civet-clint
 
 # Or with yarn
-yarn add -D civet-clint@next
+yarn add -D civet-clint
 
 # Or with pnpm
-pnpm add -D civet-clint@next
+pnpm add -D civet-clint
 ```
 
 ---
@@ -53,7 +52,7 @@ npx clint src/ components/ app.civet
 npx clint --write
 
 # Specify custom configuration file
-npx clint --write --config ./civet-clint.config.json
+npx clint --write --config ./config/clint.json
 
 # Output diagnostics in JSON format for CI/CD pipelines
 npx clint --check --format json
@@ -72,7 +71,7 @@ npx clint --print-config src/components/Button.civet
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
-| `-c`, `--config <path>` | Path to a `civet-clint.config.json` configuration file. |
+| `-c`, `--config <path>` | Path to a configuration file. Only needed for names outside the auto-discovered list. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
 | `-v`, `--version` | Print `clint` version and exit. |
 | `-h`, `--help` | Show CLI usage help. |
@@ -82,9 +81,8 @@ npx clint --print-config src/components/Button.civet
 ## Configuration
 
 Create a config file in your repository root. These names are discovered
-automatically, in order: `civet-clint.config.json`, `.civet-clintrc.json`,
-`.civet-clint.json`, `clint.config.json`, `.clintrc.json`, `.clint.json`. Any other
-filename works too, but must be passed explicitly with `--config`.
+automatically, in order: `clint.config.json`, `.clintrc.json`, `.clint.json`. Any
+other filename works too, but must be passed explicitly with `--config`.
 
 ```json
 {

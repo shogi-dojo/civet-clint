@@ -286,9 +286,6 @@ describe "Configuration matrix", ->
     // A config that is present but not discovered is worse than a missing one: the
     // run silently falls back to the default preset instead of failing.
     discoverable := [
-      "civet-clint.config.json"
-      ".civet-clintrc.json"
-      ".civet-clint.json"
       "clint.config.json"
       ".clintrc.json"
       ".clint.json"
@@ -305,14 +302,23 @@ describe "Configuration matrix", ->
         expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
         await fs.rm(tmpDir, { recursive: true, force: true })
 
-    it "prefers civet-clint.config.json over clint.config.json", ->
-      // A project holding both keeps the established name.
+    it "prefers clint.config.json over the dotfile variants", ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco2-"))
-      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({ preset: "coffee-react" }))
-      await fs.writeFile(path.join(tmpDir, "clint.config.json"), JSON.stringify({ preset: "default" }))
-      expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, "civet-clint.config.json"))
+      await fs.writeFile(path.join(tmpDir, "clint.config.json"), JSON.stringify({ preset: "coffee-react" }))
+      await fs.writeFile(path.join(tmpDir, ".clintrc.json"), JSON.stringify({ preset: "default" }))
+      expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, "clint.config.json"))
       expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
       await fs.rm(tmpDir, { recursive: true, force: true })
+
+    // The `civet-clint.*` names were discoverable through 0.1.0-alpha.4 and are
+    // deliberately not any more. They must still work when passed explicitly.
+    for name of ["civet-clint.config.json", ".civet-clintrc.json", ".civet-clint.json"]
+      it `does not auto-discover ${name}`, ->
+        tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco3-"))
+        await fs.writeFile(path.join(tmpDir, name), JSON.stringify({ preset: "coffee-react" }))
+        expect(findConfigFile(tmpDir)).toBeUndefined()
+        expect(loadConfig(name, tmpDir).preset).toBe("coffee-react")
+        await fs.rm(tmpDir, { recursive: true, force: true })
 
     it "returns undefined when no config file is present", ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco3-"))
