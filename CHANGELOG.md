@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Public launch readiness**: Updated README with stable npm badge (`latest`), clarified compiler equivalence vs opt-in reference-source verification, and added direct links to documentation artifacts.
+- **Compatibility matrix**: Added `docs/compatibility.md` detailing supported Node.js versions, exact `@danielx/civet@0.11.15` pinning, dial requirements, preset support, and JSON configuration boundaries.
+- **Production case study**: Added `docs/case-study-production.md` documenting the end-to-end rollout and verification across a 266-file production Civet codebase.
+- **Upstream collaboration & roadmap**: Rewrote `docs/upstream.md` to define concrete collaboration points for Civet maintainers (integration directory listing, stable AST source-span APIs, normalized effective-config resolution) and a forward technical roadmap.
+
 ## [0.1.0] - 2026-08-04
 
 First stable release, promoting the alpha line after validation against a
@@ -237,7 +244,7 @@ First public alpha release of `civet-clint`, the compiler-backed style checker a
   - `--config <path>`: specify explicit path to a Clint configuration file.
 - **Configuration & Compiler Dial Adapter**:
   - Automatic discovery and parsing of `civet-clint.config.json`, `.civet-clintrc.json`, `.civet-clint.json`, and `civet.json` / `civetconfig.json`.
-  - Built-in presets: `default` (neutral Civet rules) and `coffee-react` (Ranked Civet style guide rules with Coffee/React compiler dial).
+  - Built-in presets: `default` (neutral Civet rules) and `coffee-react` (idiomatic Coffee/React style rules with compiler dial).
   - File-specific `overrides` with glob pattern matching (`files`), per-override preset, custom rules, and compiler dials.
   - Capability-based rule skipping (`meta.capabilities.requires` / `requiresAny`) when required compiler dials are not enabled.
 - **Extensible Rule Registry & Plugin System**:

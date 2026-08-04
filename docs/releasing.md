@@ -25,7 +25,7 @@ To ensure stability for consumers, `civet-clint` uses dist-tags:
 
 | Tag | Target Versions | Audience | Install Command |
 |---|---|---|---|
-| `next` | `*-alpha.*`, `*-beta.*`, `*-rc.*` | Early adopters, integration testing in downstream codebases (e.g. Ranked) | `npm i -D civet-clint@next` |
+| `next` | `*-alpha.*`, `*-beta.*`, `*-rc.*` | Early adopters, integration testing in downstream codebases | `npm i -D civet-clint@next` |
 | `latest` | `0.1.0`, `1.0.0`, etc. (stable) | General production usage | `npm i -D civet-clint` |
 
 > **Initial Alpha Releases**: All `0.1.0-alpha.*` releases are published with `--tag next`. `latest` will only be pointed at the first stable release (`0.1.0` or `1.0.0`).

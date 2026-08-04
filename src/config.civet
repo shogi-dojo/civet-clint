@@ -21,7 +21,7 @@ const TOP_LEVEL_COMPILE_OPTIONS = new Set([
 ])
 
 // Presets bundle a default rule set with a default compiler dial. `coffee-react`
-// remains available to existing consumers that select it explicitly (e.g. Ranked);
+// remains available to consumers that select it explicitly;
 // `default` is the actual neutral, Coffee-option-free starting point that relies only
 // on Civet's vanilla word-operator parsing. The dial is only a *default* — a project's
 // `civet.json` always overrides it, so a `default`-preset user with a Coffee-flavored
