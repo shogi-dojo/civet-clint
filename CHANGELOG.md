@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-08-04
+
 ### Changed
 
 - **`style/prefer-jsx-attr-shorthand` is now fixable** for the `attr={attr}` form.
