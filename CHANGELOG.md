@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Production case study**: Added `docs/case-study-production.md` documenting the end-to-end rollout and verification across a 266-file production Civet codebase.
 - **Upstream collaboration & roadmap**: Rewrote `docs/upstream.md` to define concrete collaboration points for Civet maintainers (integration directory listing, stable AST source-span APIs, normalized effective-config resolution) and a forward technical roadmap.
 - **Configuration boundary**: Clarified which three static JSON names Clint currently auto-discovers, which names overlap with Civet's official loader, and which broader Civet formats remain future work.
+- **Project identity**: Added the Clint logo to the repository documentation and README.
 
 ### Tests
 
