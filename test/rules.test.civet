@@ -133,6 +133,51 @@ describe "Rules Test Suite", ->
       expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-jsx-shorthand")).toHaveLength(0)
       expect(res.fixedSource).toBeUndefined()
 
+    // Civet lowers the shorthand to the front of the tag, on the tag-name line.
+    // Anything that would move is skipped, because the gate validates one batch per
+    // file: a single rejected site used to discard every safe rewrite in that file.
+    describe "only rewrites what lowers in place", ->
+      jsxFix := (input: string) ->
+        lintSource(input, {
+          civetOptions: { react: true }
+          rules: { "style/prefer-jsx-shorthand": "error" }
+          fix: true
+        })
+
+      it "skips className that follows another attribute", ->
+        // Rewriting would emit `className` before `size`, reordering the output.
+        input := '<Icon size={16} className="i" />'
+        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+
+      it "skips className that follows a spread", ->
+        // Moving className ahead of the spread inverts precedence — a real
+        // behavior change, not just reordering.
+        input := '<div {...props} className="btn">x</div>'
+        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+
+      it "rewrites className that precedes a spread", ->
+        res := jsxFix '<div className="btn" {...props}>x</div>'
+        expect(res.isEquivalencePreserved).toBe(true)
+        expect(res.fixedSource).toBe('<div .btn {...props}>x</div>')
+
+      it "rewrites a leading run of className and id", ->
+        res := jsxFix '<div className="a" id="b" onClick={f}>x</div>'
+        expect(res.isEquivalencePreserved).toBe(true)
+        expect(res.fixedSource).toBe('<div .a #b onClick={f}>x</div>')
+
+      it "skips an attribute written on its own line", ->
+        // The shorthand collapses onto the tag line, changing emitted whitespace.
+        input := '<button\n  className="a"\n  onClick={f}\n>\n  x\n</button>'
+        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+
+      it "still fixes safe sites when an unsafe one shares the file", ->
+        // The regression that made this rule unusable: one skipped site must not
+        // suppress the safe rewrites around it.
+        input := '<div className="a">x</div>\n<Icon size={16} className="b" />\n'
+        res := jsxFix input
+        expect(res.isEquivalencePreserved).toBe(true)
+        expect(res.fixedSource).toBe('<div .a>x</div>\n<Icon size={16} className="b" />\n')
+
   describe "style/no-null-equality", ->
     it "reports warning diagnostics on null comparisons", ->
       input := "a === null\nb !== null\nc is null\nd isnt null"

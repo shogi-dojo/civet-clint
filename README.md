@@ -230,9 +230,28 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 |---|---|---|
 | [`style/prefer-word-operators`](src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
 | [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
-| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. | `react` |
+| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
 | [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
+
+#### `style/prefer-jsx-shorthand` — what it will and won't rewrite
+
+Civet lowers the `.class`/`#id` shorthand to the **front of the tag, on the tag-name
+line**, wherever it was written. The rule therefore only rewrites attributes that are
+already there — the leading run of `className`/`id` on the tag line:
+
+```civet
+<div className="a" id="b" onClick={f}>   ✅  → <div .a #b onClick={f}>
+<div className="a" {...props}>           ✅  → <div .a {...props}>
+<Icon size={16} className="i" />         ❌  would emit className before size
+<div {...props} className="a">           ❌  would invert spread precedence
+<button                                  ❌  would collapse the line break
+  className="a"
+>
+```
+
+The last two matter beyond formatting: moving `className` ahead of a `{...spread}`
+changes which value wins. Skipped sites are still reported, so they surface for review.
 
 ### Diagnostic Rules
 
@@ -260,6 +279,7 @@ out of scope; their absence is a design boundary, not a missing feature.
 | Convention | Status | Notes |
 |---|---|---|
 | Word operators, existential checks, terse declarations/exports, terse imports, JSX shorthands, arrow style, range loops | **Automated** | See the rule tables above. |
+| JSX class/id shorthand where the attribute is not already first on the tag line | Partially automated | The shorthand lowers to the front of the tag, so rewriting elsewhere reorders emitted attributes — or changes precedence against a `{...spread}`. Reported, not autofixed. |
 | Side-effect import ordering | Not automated | Reordering imports can change evaluation order, so it is not compiler-equivalent. |
 | Single-quoted module paths | Automated, opt-in | Off by default, because unquoting `'./x'` changes the emitted quote character. Set [`unquoteSingleQuotes`](#rule-options) on `style/prefer-terse-imports` to enable it; the fix is then verified against a reference compile so the change is provably confined to specifier quote style. |
 | Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |

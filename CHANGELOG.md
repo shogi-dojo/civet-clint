@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`style/prefer-jsx-shorthand` was effectively unusable.** Civet lowers the
+  `.class`/`#id` shorthand to the front of the tag, on the tag-name line, so rewriting
+  an attribute that was not already there reorders the emitted attribute list or
+  collapses a line break. Because fixes are validated as one batch per file, a single
+  such site discarded every safe rewrite in that file — on a real 266-file codebase the
+  rule landed **0** of its 334 findings, which is why downstream projects had it
+  switched off.
+
+  The rule now emits a fix only where the shorthand lowers in place: the leading run of
+  `className`/`id` attributes, on the tag-name line. Sites that would move are left for
+  review. That same codebase now takes **218 fixes with all 266 files byte-identical**,
+  and a second pass is a no-op.
+
+  This also closes a latent correctness hole: moving `className` ahead of a
+  `{...spread}` inverts precedence, which is a behavior change rather than a
+  reordering. Those sites are now never proposed.
+
 ### Added
 
 - **Per-rule options**: rule entries in a config's `rules` map now accept the array
