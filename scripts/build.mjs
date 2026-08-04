@@ -55,6 +55,10 @@ async function build() {
   // Create TypeScript declarations
   const indexDts = `export type Severity = 'warn' | 'error';
 export type RuleLevel = 'off' | 'warn' | 'error';
+export type RuleOptions = Record<string, any>;
+export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions];
+export type EquivalenceReference = (source: string) => string | undefined;
+export type OutputDelta = 'quote-style';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
 export interface CompileDialOptions {
@@ -91,8 +95,10 @@ export interface RuleContext {
   ast: any;
   filename?: string;
   parseOptions: CompileDial;
+  options: RuleOptions;
   report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
+  declareEquivalenceReference?(delta: OutputDelta, build: EquivalenceReference): void;
 }
 export interface Diagnostic {
   ruleId: string;
@@ -112,6 +118,7 @@ export interface RuleMeta {
   fixable: boolean;
   defaultSeverity: Severity;
   capabilities?: RuleCapability;
+  defaultOptions?: RuleOptions;
 }
 export interface Rule {
   id: string;
@@ -126,7 +133,7 @@ export interface ConfigOverride {
   files: string | string[];
   preset?: string;
   civetConfig?: string;
-  rules?: Record<string, RuleLevel>;
+  rules?: Record<string, RuleEntry>;
   civetOptions?: CompileDial;
   compileOptions?: CompileOptions;
 }
@@ -144,7 +151,7 @@ export interface LintResult {
 export interface ClintConfig {
   preset?: string;
   civetConfig?: string;
-  rules?: Record<string, 'off' | 'warn' | 'error'>;
+  rules?: Record<string, RuleEntry>;
   overrides?: ConfigOverride[];
 }
 export interface SkippedRule {
@@ -154,6 +161,7 @@ export interface SkippedRule {
 export interface ResolvedConfig {
   preset: string;
   rules: Record<string, 'off' | 'warn' | 'error'>;
+  ruleOptions: Record<string, RuleOptions>;
   civetConfigPath?: string;
   civetOptions: CompileDial;
   compileOptions: CompileOptions;
@@ -182,6 +190,7 @@ export interface LintOptions {
   compileOptions?: Record<string, any>;
   fix?: boolean;
   rules?: Record<string, RuleLevel>;
+  ruleOptions?: Record<string, RuleOptions>;
 }
 export interface CliOptions {
   check?: boolean;
@@ -225,11 +234,14 @@ export function loadCivetOptions(civetConfigPath?: string, cwd?: string): Compil
 export function computeSkippedRules(rules: Record<string, RuleLevel>, dial: CompileDial, registry?: RuleRegistry): SkippedRule[];
 export function loadConfig(explicitConfigPath?: string, cwd?: string, registry?: RuleRegistry): ResolvedConfig;
 export function resolveConfigForFile(baseConfig: ResolvedConfig, filePath: string, cwd?: string, registry?: RuleRegistry): ResolvedConfig;
+export function normalizeRuleEntry(ruleId: string, entry: RuleEntry, context: string, registry?: RuleRegistry): { level: RuleLevel; options?: RuleOptions };
+export function resolveRuleOptions(ruleId: string, configured: RuleOptions | undefined, registry?: RuleRegistry): RuleOptions;
 export function globToRegex(glob: string): RegExp;
 export function matchesFilePattern(filePath: string, pattern: string, configBaseDir?: string): boolean;
 export function parseRawAst(source: string, options: RawAstOptions): CompileResult;
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
+export function normalizeQuoteStyle(code: string): string;
 export function lintSource(source: string, options?: LintOptions): LintResult;
 export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;
 export function createLineColumnIndex(source: string): (pos: number) => { line: number; column: number };

@@ -5,6 +5,116 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`style/prefer-jsx-attr-shorthand` is now fixable** for the `attr={attr}` form.
+  Civet re-expands `{attr}` to exactly `attr={attr}` — including after a
+  `{...spread}`, where the attribute keeps its position — so the rewrite is
+  byte-identical in compiled output and passes the equivalence gate unchanged.
+  Applied to a real 266-file codebase it landed **273 fixes with all 266 files
+  byte-identical**, and a second pass was a no-op.
+
+  The `prop={true}` → `prop` form is deliberately **not** fixable: Civet emits the
+  bare attribute as `prop`, not `prop={true}`, so the compiled output genuinely
+  differs. React treats the two as equivalent, but that is a render-equivalence
+  argument the gate does not make, so those sites are reported without a fix.
+
+### Fixed
+
+- **`style/prefer-ampersand-shorthand` emitted syntactically broken suggestions.**
+  The rule matched with a regex whose trailing character class ran past the end of
+  the callback, so the quoted text absorbed delimiters belonging to the enclosing
+  expression — `Use '&' shorthand '.map &.userId))'` — and pasting it produced a
+  syntax error. Some suggestions were truncated mid-call (`&.id.toString(`).
+
+  The rule is now driven by the AST: the receiver, the accessed chain, and the
+  method are read from parser nodes, so a suggestion can no longer contain
+  anything the rule did not derive. On the same codebase, 13 of 61 suggestions
+  were malformed before; none are now.
+
+  Being AST-driven also removed **27 false positives** the regex produced by
+  matching bodies that are not a bare property access — `(p) => p.a or p.b`,
+  `(u) => u.id is other`. `&` stands in for the whole receiver, so those have no
+  shorthand form. The rule now also reports *each* link of a chained call
+  (`.filter(...).map(...)`), which the old single-match-per-position scan missed.
+
+- **Rules silently found nothing under the engine's AST mode.** The engine parses
+  with `ast: "raw"`, whose tree differs from the plain `ast: true` shape in ways
+  that are invisible until a rule reads the affected node: `Argument.children` is
+  an array rather than the node itself, `Parameter.children` is an array, a
+  `Parameters` node's leading token carries no `$loc`, and a JSX attribute's `=`
+  and braces sit at different indices. Rules now read the fields that are stable
+  across both modes.
+
+- **`style/prefer-jsx-shorthand` was effectively unusable.** Civet lowers the
+  `.class`/`#id` shorthand to the front of the tag, on the tag-name line, so rewriting
+  an attribute that was not already there reorders the emitted attribute list or
+  collapses a line break. Because fixes are validated as one batch per file, a single
+  such site discarded every safe rewrite in that file — on a real 266-file codebase the
+  rule landed **0** of its 334 findings, which is why downstream projects had it
+  switched off.
+
+  The rule now emits a fix only where the shorthand lowers in place: the leading run of
+  `className`/`id` attributes, on the tag-name line. Sites that would move are left for
+  review. That same codebase now takes **218 fixes with all 266 files byte-identical**,
+  and a second pass is a no-op.
+
+  This also closes a latent correctness hole: moving `className` ahead of a
+  `{...spread}` inverts precedence, which is a behavior change rather than a
+  reordering. Those sites are now never proposed.
+
+### Added
+
+- **Per-rule options**: rule entries in a config's `rules` map now accept the array
+  form `["error", { ...options }]` alongside the bare level. Options are threaded
+  through presets and glob `overrides` into each rule, and `clint --print-config`
+  reports the effective options — including defaults not set explicitly. Validation
+  is strict: an unknown option key, a wrong-typed value, or options passed to a rule
+  that declares none is a load-time error, so a typo cannot silently disable a
+  setting a user believes is active.
+
+- **Config auto-discovery for `clint.config.json`**, `.clintrc.json`, and
+  `.clint.json`, matching the CLI's own name. The existing `civet-clint.*` names are
+  still checked first, so a project holding both keeps its current file. Previously a
+  config under any of the shorter names was silently ignored and the run fell back to
+  the `default` preset — a failure mode worse than a missing config, because it looks
+  like a pass.
+
+- **`style/prefer-terse-imports` option `unquoteSingleQuotes`** (default `false`):
+  unquotes single-quoted module specifiers as well as double-quoted ones. Previously
+  single-quoted paths kept their quotes and only lost the `import` keyword, so
+  adopting terse imports in a single-quoted codebase required an external codemod
+  first.
+
+  Enabling it takes the rule off the strictly byte-identical path, because Civet
+  echoes the original quote character while the terse form always emits double
+  quotes. Rather than weaken the equivalence gate, two checks replace the single
+  byte comparison, and a fix must pass both:
+
+  1. The rule declares a *reference source* — the original with exactly those
+     specifiers requoted, and nothing else — which the engine compiles and requires
+     the fixed output to match byte-for-byte.
+  2. The rule declares the kind of emitted difference it may cause (`quote-style`),
+     which the engine verifies independently by normalizing string-literal quoting in
+     both outputs.
+
+  The second check is what makes the first safe: a reference source is authored by
+  the rule, so alone it would let a rule authorize its own rewrite, whereas the delta
+  bound is engine-owned and cannot be widened by a rule. A rule never inspects,
+  normalizes, or approves compiled output. The strict check against the original
+  output is unchanged for every other rule and for this rule's default path.
+
+  Because the rewrite is driven by parser-identified specifier spans rather than
+  text matching, ordinary strings that resemble module paths — such as
+  `x := 'plain from ./str'` — are provably unaffected.
+
+  Validated against the same 266-file Civet codebase that previously required the
+  codemod: 300 fixes in one pass, 206 files byte-identical and 60 differing only in
+  specifier quote style with zero other differences, a second pass a no-op, and the
+  project's 1233 tests, typecheck, and build all passing.
+
 ## [0.1.0-alpha.3] - 2026-08-03
 
 ### Added

@@ -16,7 +16,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Ranked & Coffee-React Style Rules**: 16 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Ranked & Coffee-React Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -81,7 +81,10 @@ npx clint --print-config src/components/Button.civet
 
 ## Configuration
 
-Create a `civet-clint.config.json`, `.civet-clintrc.json`, or `.civet-clint.json` file in your repository root:
+Create a config file in your repository root. These names are discovered
+automatically, in order: `civet-clint.config.json`, `.civet-clintrc.json`,
+`.civet-clint.json`, `clint.config.json`, `.clintrc.json`, `.clint.json`. Any other
+filename works too, but must be passed explicitly with `--config`.
 
 ```json
 {
@@ -111,6 +114,55 @@ Create a `civet-clint.config.json`, `.civet-clintrc.json`, or `.civet-clint.json
   ]
 }
 ```
+
+### Rule Options
+
+A rule entry is normally a bare level (`"error"`). Rules that accept options also
+support the array form `[level, options]`:
+
+```json
+{
+  "rules": {
+    "style/prefer-terse-imports": ["error", { "unquoteSingleQuotes": true }]
+  }
+}
+```
+
+Options are validated when the config loads: an unknown option key, a value of the
+wrong type, or options given to a rule that declares none is a hard error rather than
+a silently ignored setting. `clint --print-config` prints the effective options for
+every active rule, including defaults you did not set. Overrides accept the same array
+form, so options can be scoped to a glob.
+
+#### `style/prefer-terse-imports`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `unquoteSingleQuotes` | boolean | `false` | Also unquote single-quoted module specifiers. |
+
+By default the rule only unquotes double-quoted specifiers, because that rewrite is
+byte-identical: Civet echoes the original quote character, and the terse form emits
+double quotes. Unquoting `'./x'` therefore changes the emitted literal to `"./x"` —
+a quote-style change, but still a change, so it stays opt-in.
+
+When enabled, these fixes are **not** validated against the original compiled output.
+Two checks replace that one, and a fix must pass both:
+
+1. **Reference source.** The rule hands the engine the original file with exactly
+   those specifiers rewritten to double quotes, and nothing else. The engine compiles
+   it and requires the fixed file's output to match byte-for-byte. Because the rewrite
+   is driven by parser-identified specifier spans rather than text matching, a string
+   that merely looks like a path (`x := 'plain from ./str'`) is never touched.
+2. **Output-delta bound.** The rule also declares *how* its output may differ — here,
+   `quote-style`. The engine independently verifies that the two compiled outputs are
+   identical once string-literal quoting is normalized, so the change is provably
+   confined to quote characters and cannot alter identifiers, structure, or string
+   contents.
+
+The second check is what makes the first safe to trust. A reference source is supplied
+by the rule, so on its own it would let a rule authorize its own rewrite; the
+engine-owned delta bound is not something a rule can widen. The strict byte-identity
+check is unchanged for every other rule and for this rule's default path.
 
 ### Presets
 
@@ -170,7 +222,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 16 built-in style and correctness rules.
+`civet-clint` currently provides 17 built-in style and correctness rules.
 
 ### Fixable Rules
 
@@ -178,9 +230,40 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 |---|---|---|
 | [`style/prefer-word-operators`](src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
 | [`style/prefer-concise-arrow`](src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
-| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. | `react` |
+| [`style/prefer-jsx-shorthand`](src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
 | [`style/prefer-bare-assignment`](src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
-| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). | — |
+| [`style/prefer-terse-imports`](src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
+| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
+
+#### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
+
+`prop={prop}` → `{prop}` re-expands to exactly `prop={prop}`, including after a
+`{...spread}`, so compiled output is unchanged and the fix is applied.
+
+`prop={true}` → `prop` is **reported without a fix**. Civet emits the bare attribute
+as `prop`, so the compiled output genuinely differs. React treats both as `true`, but
+that is a render-equivalence claim, and the gate only accepts byte-identical output.
+Note the two forms are not interchangeable in source either: a bare `prop` is the
+*boolean* shorthand, so writing it in place of `prop={prop}` would change meaning.
+
+#### `style/prefer-jsx-shorthand` — what it will and won't rewrite
+
+Civet lowers the `.class`/`#id` shorthand to the **front of the tag, on the tag-name
+line**, wherever it was written. The rule therefore only rewrites attributes that are
+already there — the leading run of `className`/`id` on the tag line:
+
+```civet
+<div className="a" id="b" onClick={f}>   ✅  → <div .a #b onClick={f}>
+<div className="a" {...props}>           ✅  → <div .a {...props}>
+<Icon size={16} className="i" />         ❌  would emit className before size
+<div {...props} className="a">           ❌  would invert spread precedence
+<button                                  ❌  would collapse the line break
+  className="a"
+>
+```
+
+The last two matter beyond formatting: moving `className` ahead of a `{...spread}`
+changes which value wins. Skipped sites are still reported, so they surface for review.
 
 ### Diagnostic Rules
 
@@ -188,7 +271,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 |---|---|---|
 | [`style/no-trailing-semicolons`](src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
 | [`style/prefer-existential-check`](src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
-| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Prefer `{prop}` for `prop={prop}` and `prop` for `prop={true}`. | `react` |
+| [`style/prefer-jsx-attr-shorthand`](src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
 | [`style/prefer-ampersand-shorthand`](src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
 | [`style/no-single-param-arrow-without-parens`](src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
 | [`style/prefer-named-export-default`](src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
@@ -208,8 +291,9 @@ out of scope; their absence is a design boundary, not a missing feature.
 | Convention | Status | Notes |
 |---|---|---|
 | Word operators, existential checks, terse declarations/exports, terse imports, JSX shorthands, arrow style, range loops | **Automated** | See the rule tables above. |
+| JSX class/id shorthand where the attribute is not already first on the tag line | Partially automated | The shorthand lowers to the front of the tag, so rewriting elsewhere reorders emitted attributes — or changes precedence against a `{...spread}`. Reported, not autofixed. |
 | Side-effect import ordering | Not automated | Reordering imports can change evaluation order, so it is not compiler-equivalent. |
-| Single-quoted module paths | Partially automated | The `import` keyword is dropped, but quotes are kept: Civet echoes the original quote character while the terse form emits double quotes, so unquoting would change the compiled output. |
+| Single-quoted module paths | Automated, opt-in | Off by default, because unquoting `'./x'` changes the emitted quote character. Set [`unquoteSingleQuotes`](#rule-options) on `style/prefer-terse-imports` to enable it; the fix is then verified against a reference compile so the change is provably confined to specifier quote style. |
 | Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |
 | Comment quality, naming, file/layer organization, architectural policy (i18n via `t()`, no `fetch` in components) | Not automated | Qualitative judgments with no mechanical rewrite. Enforce in review. |
 
@@ -273,8 +357,28 @@ flowchart TD
     C --> H{Verify Byte-Identical Output}
     G --> H
     H -- Match --> I[Approved: Atomic Write]
-    H -- Mismatch --> J[Rejected: Retain Original Source]
+    H -- Mismatch --> K{Rule declared a reference source?}
+    K -- No --> J[Rejected: Retain Original Source]
+    K -- Yes --> L[Compile Reference Source]
+    L --> M{Byte-Identical to Reference?}
+    M -- No --> J
+    M -- Yes --> N{Within Declared Output Delta?}
+    N -- No --> J
+    N -- Yes --> I
 ```
+
+Fixes are validated per rule, one batch per file, so a rejected rule never discards
+another rule's approved edits.
+
+The reference-source branch is the single, opt-in exception to comparing against the
+original file's output, currently used only by
+[`unquoteSingleQuotes`](#styleprefer-terse-imports). It does not relax the gate,
+because it is paired with an engine-owned bound on the emitted difference. A rule
+supplies the reference *source*; the engine defines what each delta kind permits and
+verifies it separately, so a rule cannot widen its own allowance or launder an
+arbitrary rewrite through a broad reference. A rule never inspects, normalizes, or
+approves compiled output. Rules that declare no reference — every rule today by
+default — are governed solely by the strict check against the original.
 
 For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](docs/upstream.md).
 

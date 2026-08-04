@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ClintConfig, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleLevel, SkippedRule } from "./types.civet"
+import type { ClintConfig, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleEntry, RuleLevel, RuleOptions, SkippedRule } from "./types.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 
 const TOP_LEVEL_COMPILE_OPTIONS = new Set([
@@ -77,10 +77,16 @@ export const PRESETS: Record<string, PresetDefinition> = {
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined
+  // Ordered by specificity. The `civet-clint.*` names come first so an existing
+  // project that has both keeps its current file; the shorter `clint.*` names match
+  // the CLI's own name and are what new projects reach for.
   candidates := [
     "civet-clint.config.json"
     ".civet-clintrc.json"
     ".civet-clint.json"
+    "clint.config.json"
+    ".clintrc.json"
+    ".clint.json"
   ]
   for candidate of candidates
     p := path.resolve(cwd, candidate)
@@ -154,6 +160,58 @@ export function loadCivetConfig(civetConfigPath?: string, cwd: string = process.
 // API keep working; new code reads `loadCivetConfig` for the full split.
 export function loadCivetOptions(civetConfigPath?: string, cwd: string = process.cwd()): CompileDial
   loadCivetConfig(civetConfigPath, cwd).dial
+
+// Split a config rule entry into its level and its options. Accepts the bare
+// `"error"` form and the `["error", { ...options }]` pair.
+//
+// `context` names the site being validated ("rule" / "override rule") so the
+// existing error wording is preserved exactly for the bare form.
+export function normalizeRuleEntry(
+  ruleId: string
+  entry: RuleEntry
+  context: string
+  registry: RuleRegistry = defaultRuleRegistry
+): { level: RuleLevel, options?: RuleOptions }
+  var level: any = entry
+  var options: RuleOptions | undefined = undefined
+
+  if Array.isArray(entry)
+    unless entry.length is 1 or entry.length is 2
+      throw new Error(`Invalid entry for ${context} "${ruleId}": expected [level] or [level, options]`)
+    level = entry[0]
+    if entry.length is 2
+      candidate := entry[1]
+      unless candidate? and typeof candidate is "object" and not Array.isArray(candidate)
+        throw new Error(`Invalid options for ${context} "${ruleId}": expected a JSON object`)
+      options = candidate as RuleOptions
+
+  unless level is "off" or level is "warn" or level is "error"
+    throw new Error(`Invalid level for ${context} "${ruleId}": expected off, warn, or error`)
+  if (level is "warn" or level is "error") and not registry.has(ruleId)
+    throw new Error(`Unknown rule ID${context is "override rule" ? " in override" : ""}: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+
+  // Reject options a rule does not declare. A silently ignored typo in a config is
+  // worse than a hard failure: the user believes a setting is active when it is not.
+  if options?
+    rule := registry.get(ruleId)
+    if rule
+      known := rule.meta.defaultOptions
+      unless known?
+        throw new Error(`Rule "${ruleId}" does not accept options`)
+      for key of Object.keys(options)
+        unless Object.hasOwn(known, key)
+          throw new Error(`Unknown option "${key}" for rule "${ruleId}". Available options: ${Object.keys(known).join(", ") or "(none)"}`)
+        expected := typeof known[key]
+        actual := typeof options[key]
+        unless actual is expected
+          throw new Error(`Invalid value for option "${key}" of rule "${ruleId}": expected ${expected}, received ${actual}`)
+
+  { level: level as RuleLevel, options }
+
+// Merge a rule's declared default options with the config-supplied overrides.
+export function resolveRuleOptions(ruleId: string, configured: RuleOptions | undefined, registry: RuleRegistry = defaultRuleRegistry): RuleOptions
+  defaults := registry.get(ruleId)?.meta.defaultOptions
+  { ...(defaults or {}), ...(configured or {}) }
 
 // Compute which enabled rules cannot run under the resolved dial. A rule is skipped
 // when any key in `meta.capabilities.requires` is falsy on the dial. Skipped rules
@@ -256,14 +314,16 @@ export function loadConfig(
   if not presetDef
     throw new Error(`Unknown preset: "${presetName}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
 
-  mergedRules: Record<string, RuleLevel> := { ...presetDef.rules, ...(userConfig.rules or {}) }
+  // Presets declare bare levels; user entries may carry options. Normalize both into
+  // parallel level/options maps so downstream consumers keep seeing plain levels.
+  mergedEntries: Record<string, RuleEntry> := { ...presetDef.rules, ...(userConfig.rules or {}) }
 
-  for ruleId of Object.keys(mergedRules)
-    level := mergedRules[ruleId]
-    unless level is "off" or level is "warn" or level is "error"
-      throw new Error(`Invalid level for rule "${ruleId}": expected off, warn, or error`)
-    if (level is "warn" or level is "error") and not registry.has(ruleId)
-      throw new Error(`Unknown rule ID: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+  mergedRules: Record<string, RuleLevel> := {}
+  ruleOptions: Record<string, RuleOptions> := {}
+  for ruleId of Object.keys(mergedEntries)
+    { level, options } := normalizeRuleEntry(ruleId, mergedEntries[ruleId], "rule", registry)
+    mergedRules[ruleId] = level
+    ruleOptions[ruleId] = options if options?
 
   if userConfig.overrides?
     unless Array.isArray(userConfig.overrides)
@@ -277,11 +337,7 @@ export function loadConfig(
         throw new Error(`Unknown preset in override: "${override.preset}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
       if override.rules?
         for ruleId of Object.keys(override.rules)
-          level := override.rules[ruleId]
-          unless level is "off" or level is "warn" or level is "error"
-            throw new Error(`Invalid level for override rule "${ruleId}": expected off, warn, or error`)
-          if (level is "warn" or level is "error") and not registry.has(ruleId)
-            throw new Error(`Unknown rule ID in override: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+          normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
 
   configBase := configPath ? path.dirname(configPath) : cwd
   explicitCivetConfigPath := userConfig.civetConfig
@@ -296,6 +352,7 @@ export function loadConfig(
   {
     preset: presetName
     rules: mergedRules
+    ruleOptions
     civetConfigPath: resolvedCivetConfigPath
     civetOptions
     compileOptions
@@ -319,6 +376,7 @@ export function resolveConfigForFile(
   var effectiveCivetOptions: CompileDial = { ...baseConfig.civetOptions }
   var effectiveCompileOptions: CompileOptions = { ...baseConfig.compileOptions }
   var effectiveRules: Record<string, RuleLevel> = { ...baseConfig.rules }
+  var effectiveRuleOptions: Record<string, RuleOptions> = { ...(baseConfig.ruleOptions or {}) }
   matchingOverrides: string[] := []
 
   for override of overrides
@@ -352,18 +410,21 @@ export function resolveConfigForFile(
 
     if override.rules
       for ruleId of Object.keys(override.rules)
-        level := override.rules[ruleId]
-        unless level is "off" or level is "warn" or level is "error"
-          throw new Error(`Invalid level for override rule "${ruleId}": expected off, warn, or error`)
-        if (level is "warn" or level is "error") and not registry.has(ruleId)
-          throw new Error(`Unknown rule ID in override: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+        { level, options } := normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
         effectiveRules[ruleId] = level
+        // An override that restates a rule without options replaces the inherited
+        // options too, so a glob-scoped entry fully describes that rule's behavior.
+        if options?
+          effectiveRuleOptions[ruleId] = options
+        else
+          delete effectiveRuleOptions[ruleId]
 
   skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
 
   {
     preset: effectivePreset
     rules: effectiveRules
+    ruleOptions: effectiveRuleOptions
     civetConfigPath: effectiveCivetConfigPath
     civetOptions: effectiveCivetOptions
     compileOptions: effectiveCompileOptions

@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
-import { loadConfig, loadCivetConfig, computeSkippedRules, PRESETS } from "../src/config.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, PRESETS } from "../src/config.civet"
 import { parseRawAst, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -282,6 +282,127 @@ describe "Configuration matrix", ->
         expect(candidate.ok).toBe(true)
         expect(candidate.output).toBe(baseline.output)
 
+  describe "config file auto-discovery", ->
+    // A config that is present but not discovered is worse than a missing one: the
+    // run silently falls back to the default preset instead of failing.
+    discoverable := [
+      "civet-clint.config.json"
+      ".civet-clintrc.json"
+      ".civet-clint.json"
+      "clint.config.json"
+      ".clintrc.json"
+      ".clint.json"
+    ]
+
+    for name of discoverable
+      it `discovers ${name}`, ->
+        tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco-"))
+        await fs.writeFile(path.join(tmpDir, name), JSON.stringify({
+          preset: "coffee-react"
+        }))
+        expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, name))
+        // Discovery must actually feed loadConfig, not just resolve a path.
+        expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
+        await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "prefers civet-clint.config.json over clint.config.json", ->
+      // A project holding both keeps the established name.
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco2-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({ preset: "coffee-react" }))
+      await fs.writeFile(path.join(tmpDir, "clint.config.json"), JSON.stringify({ preset: "default" }))
+      expect(findConfigFile(tmpDir)).toBe(path.join(tmpDir, "civet-clint.config.json"))
+      expect(loadConfig(undefined, tmpDir).preset).toBe("coffee-react")
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "returns undefined when no config file is present", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-disco3-"))
+      expect(findConfigFile(tmpDir)).toBeUndefined()
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+  describe "per-rule options", ->
+    writeConfig := (rules: any) ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-opts-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+        preset: "default"
+        rules
+      }))
+      tmpDir
+
+    it "accepts the [level, options] array form", ->
+      tmpDir := await writeConfig({
+        "style/prefer-terse-imports": ["error", { unquoteSingleQuotes: true }]
+      })
+      config := loadConfig("civet-clint.config.json", tmpDir)
+      expect(config.rules["style/prefer-terse-imports"]).toBe("error")
+      expect(config.ruleOptions["style/prefer-terse-imports"]).toEqual({ unquoteSingleQuotes: true })
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "keeps the bare level form working", ->
+      tmpDir := await writeConfig({ "style/prefer-terse-imports": "error" })
+      config := loadConfig("civet-clint.config.json", tmpDir)
+      expect(config.rules["style/prefer-terse-imports"]).toBe("error")
+      expect(config.ruleOptions["style/prefer-terse-imports"]).toBeUndefined()
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "rejects an unknown option key", ->
+      tmpDir := await writeConfig({
+        "style/prefer-terse-imports": ["error", { unquoteSingleQuote: true }]
+      })
+      expect(-> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/Unknown option/)
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "rejects an option of the wrong type", ->
+      tmpDir := await writeConfig({
+        "style/prefer-terse-imports": ["error", { unquoteSingleQuotes: "yes" }]
+      })
+      expect(-> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/expected boolean/)
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "rejects options for a rule that declares none", ->
+      tmpDir := await writeConfig({
+        "style/prefer-word-operators": ["error", { whatever: true }]
+      })
+      expect(-> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/does not accept options/)
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "rejects a non-object options container", ->
+      tmpDir := await writeConfig({
+        "style/prefer-terse-imports": ["error", "nope"]
+      })
+      expect(-> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/expected a JSON object/)
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "still validates the level inside the array form", ->
+      tmpDir := await writeConfig({
+        "style/prefer-terse-imports": ["loud", { unquoteSingleQuotes: true }]
+      })
+      expect(-> loadConfig("civet-clint.config.json", tmpDir)).toThrow(/expected off, warn, or error/)
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "resolves options declared in a glob override", ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-optov-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+        preset: "default"
+        rules: { "style/prefer-terse-imports": "error" }
+        overrides: [{
+          files: "legacy/**/*.civet"
+          rules: { "style/prefer-terse-imports": ["error", { unquoteSingleQuotes: true }] }
+        }]
+      }))
+      base := loadConfig("civet-clint.config.json", tmpDir)
+      expect(base.ruleOptions["style/prefer-terse-imports"]).toBeUndefined()
+
+      scoped := resolveConfigForFile(base, path.join(tmpDir, "legacy", "a.civet"), tmpDir)
+      expect(scoped.ruleOptions["style/prefer-terse-imports"]).toEqual({ unquoteSingleQuotes: true })
+
+      other := resolveConfigForFile(base, path.join(tmpDir, "src", "a.civet"), tmpDir)
+      expect(other.ruleOptions["style/prefer-terse-imports"]).toBeUndefined()
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "merges declared defaults for options the config omits", ->
+      expect(resolveRuleOptions("style/prefer-terse-imports", undefined))
+        .toEqual({ unquoteSingleQuotes: false })
+
 // Helper: a ResolvedConfig built from the default preset with an empty dial, so tests
 // can pass it to lintSource without relying on the coffee-react default.
 function neutralConfig(): ResolvedConfig
@@ -289,6 +410,7 @@ function neutralConfig(): ResolvedConfig
   {
     preset: "default"
     rules: { ...preset.rules }
+    ruleOptions: {}
     civetOptions: {}
     compileOptions: {}
     skippedRules: computeSkippedRules({ ...preset.rules }, {})

@@ -1,6 +1,16 @@
 export type Severity = "warn" | "error"
 export type RuleLevel = "off" | "warn" | "error"
 
+// Per-rule options, supplied in a config's rules map with the array form
+// `["error", { ...options }]`. Options are rule-defined; Clint only validates that
+// the container is a plain object and hands it to the rule as-is.
+export type RuleOptions = Record<string, any>
+
+// A rule entry as written in a config file: either a bare level or a
+// `[level, options]` pair. The bare form stays the canonical spelling — options are
+// opt-in, and a rule that declares none never needs the array form.
+export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions]
+
 // The Civet compiler "dial" — the `parseOptions` object that selects Coffee/React/TS
 // parsing behaviors. Civet reserves the right to change these keys; Clint treats the
 // dial opaquely and only inspects the handful of option keys declared in
@@ -27,10 +37,25 @@ export interface Diagnostic
   pos?: number
   fix?: Fix
 
+// A rule may declare that a batch of its fixes is not byte-identical, but is
+// nonetheless equivalent, by supplying the source that the fixed output should be
+// compared against. The engine compiles this *reference source* and requires the
+// fixed source to match it byte-for-byte — so the comparison stays exact and the
+// rule never gets to inspect or massage compiled output. See `src/engine.civet`.
+export type EquivalenceReference = (source: string) => string | undefined
+
+// The kinds of emitted-output difference a rule may declare. The engine, not the
+// rule, defines what each kind permits, so a rule cannot widen its own allowance.
+// `quote-style`: outputs must be identical once string-literal quoting is normalized.
+export type OutputDelta = "quote-style"
+
 export interface RuleContext
   source: string
   ast: any
   filename?: string
+  // Options for the currently executing rule, already merged over the rule's
+  // declared defaults. Empty when the config supplies none.
+  options: RuleOptions
   // The resolved compiler dial for the current file. Rules consult this to avoid
   // emitting rewrites whose replacement is invalid under the active dial — e.g. the
   // `isnt` rewrite is only valid when `coffeeIsnt` is enabled.
@@ -45,6 +70,13 @@ export interface RuleContext
     fix?: Fix
   }) => void
   getLineColumn: (pos: number) => { line: number, column: number }
+  // Registers a reference-source builder for this rule's fix batch (see
+  // `EquivalenceReference`) together with the kind of emitted-output difference the
+  // rule is permitted to cause. Both are required: the reference says what the
+  // output should be, and the delta bounds how far it may move. Only consulted when
+  // the strict byte comparison against the original output fails, so the default
+  // path is unaffected.
+  declareEquivalenceReference?: (delta: OutputDelta, build: EquivalenceReference) => void
 
 // Declares what a rule needs from the compiler dial. When a key in `requires` is not
 // truthy under the resolved dial, the rule is explicitly skipped (see
@@ -60,6 +92,10 @@ export interface RuleMeta
   fixable: boolean
   defaultSeverity: Severity
   capabilities?: RuleCapability
+  // Default values for every option the rule understands. Config-supplied options
+  // are merged over these, and any key absent here is rejected as unknown — so a
+  // typo in a config is a hard error rather than a silently ignored setting.
+  defaultOptions?: RuleOptions
 
 export interface Rule
   id: string
@@ -74,14 +110,14 @@ export interface ConfigOverride
   files: string | string[]
   preset?: string
   civetConfig?: string
-  rules?: Record<string, RuleLevel>
+  rules?: Record<string, RuleEntry>
   civetOptions?: CompileDial
   compileOptions?: CompileOptions
 
 export interface ClintConfig
   preset?: string
   civetConfig?: string
-  rules?: Record<string, RuleLevel>
+  rules?: Record<string, RuleEntry>
   overrides?: ConfigOverride[]
 
 export interface SkippedRule
@@ -90,7 +126,13 @@ export interface SkippedRule
 
 export interface ResolvedConfig
   preset: string
+  // Levels stay separate from options so every existing consumer of `rules`
+  // (severity lookups, `computeSkippedRules`, `--print-config`) is unaffected by
+  // the introduction of options.
   rules: Record<string, RuleLevel>
+  // Config-supplied options per rule, before merging with the rule's defaults.
+  // Absent entries mean the rule runs on its declared defaults.
+  ruleOptions: Record<string, RuleOptions>
   civetConfigPath?: string
   // The compiler dial (`parseOptions`). Backward-compatible field name.
   civetOptions: CompileDial

@@ -1,10 +1,21 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { loadConfig, resolveConfigForFile } from "./config.civet"
+import { loadConfig, resolveConfigForFile, resolveRuleOptions } from "./config.civet"
 import { pipelineOptions, controlledOptionKeys } from "./compiler.civet"
 import { lintFile } from "./engine.civet"
 import { defaultRuleRegistry } from "./registry.civet"
 import type { LintResult, ResolvedConfig } from "./types.civet"
+
+// Report the options each active rule will actually run with — the rule's declared
+// defaults merged with anything the config supplied. Rules that take no options are
+// omitted so the payload stays readable.
+function effectiveRuleOptions(config: ResolvedConfig): Record<string, Record<string, any>>
+  out: Record<string, Record<string, any>> := {}
+  for ruleId of Object.keys(config.rules)
+    continue if config.rules[ruleId] is "off"
+    resolved := resolveRuleOptions(ruleId, config.ruleOptions?[ruleId], defaultRuleRegistry)
+    out[ruleId] = resolved if Object.keys(resolved).length > 0
+  out
 
 const IGNORED_DIRS = new Set([
   "node_modules"
@@ -218,6 +229,7 @@ Options:
         compileOptions: pipelineOptions(fileConfig.compileOptions)
         ignoredCompileOptions: ignored
         rules: fileConfig.rules
+        ruleOptions: effectiveRuleOptions(fileConfig)
         skippedRules: fileConfig.skippedRules
         matchingOverrides: fileConfig.matchingOverrides or []
       }
@@ -233,6 +245,7 @@ Options:
         compileOptions: pipelineOptions(config.compileOptions)
         ignoredCompileOptions: ignored
         rules: config.rules
+        ruleOptions: effectiveRuleOptions(config)
         skippedRules: config.skippedRules
         matchingOverrides: []
       }

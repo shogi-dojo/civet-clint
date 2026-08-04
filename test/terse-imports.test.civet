@@ -1,17 +1,44 @@
 import { describe, it, expect } from "vitest"
-import { lintSource, compileSource } from "../src/engine.civet"
+import { lintSource, compileSource, normalizeQuoteStyle } from "../src/engine.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
 
 RULE := "style/prefer-terse-imports"
 
 function fix(source: string, civetOptions: Record<string, any> = {})
   lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions })
 
-// The safety contract for every rewrite: emitted output must not change.
+// Same, with `unquoteSingleQuotes` turned on.
+function fixUnquoted(source: string, civetOptions: Record<string, any> = {})
+  lintSource(source, {
+    rules: { [RULE]: "error" }
+    ruleOptions: { [RULE]: { unquoteSingleQuotes: true } }
+    fix: true
+    civetOptions
+  })
+
+// The safety contract for every rewrite on the DEFAULT path: emitted output must
+// not change, byte for byte.
 function expectEquivalent(source: string, civetOptions: Record<string, any> = {})
   res := fix(source, civetOptions)
   fixed := res.fixedSource ?? source
   expect(res.isEquivalencePreserved).toBe(true)
   expect(compileSource(fixed, civetOptions)).toBe(compileSource(source, civetOptions))
+  fixed
+
+// The safety contract with `unquoteSingleQuotes` enabled: emitted output may differ
+// from the original ONLY in the quote characters of module specifiers. This is
+// asserted by comparing against a reference compile of the same source with its
+// single-quoted specifiers rewritten to double quotes — the identical property the
+// engine enforces, verified here independently.
+function expectQuoteOnlyDelta(
+  source: string
+  reference: string
+  civetOptions: Record<string, any> = {}
+)
+  res := fixUnquoted(source, civetOptions)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, civetOptions)).toBe(compileSource(reference, civetOptions))
   fixed
 
 describe "style/prefer-terse-imports", ->
@@ -65,13 +92,140 @@ describe "style/prefer-terse-imports", ->
       expect(expectEquivalent('import "./style.scss"\n'))
         .toBe("import ./style.scss\n")
 
-  describe "single-quoted specifiers keep their quotes", ->
+  describe "single-quoted specifiers keep their quotes by default", ->
     it "drops the keyword but preserves single quotes", ->
       // Civet echoes the original quote character, but the terse unquoted form
       // always emits double quotes, so unquoting here would change the output
-      // bytes and the equivalence gate would reject the whole file's batch.
+      // bytes. Off by default, the rule stays strictly byte-identical.
       expect(expectEquivalent("import { t } from '../i18n'\n"))
         .toBe("{ t } from '../i18n'\n")
+
+    it "leaves single quotes alone when the option is explicitly false", ->
+      res := lintSource("import { t } from '../i18n'\n", {
+        rules: { [RULE]: "error" }
+        ruleOptions: { [RULE]: { unquoteSingleQuotes: false } }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("{ t } from '../i18n'\n")
+
+    it "keeps double-quote unquoting working while single quotes are preserved", ->
+      source := 'import { a } from "./a"\nimport { b } from \'./b\'\n'
+      expect(expectEquivalent(source)).toBe("{ a } from ./a\n{ b } from './b'\n")
+
+  describe "unquoteSingleQuotes option", ->
+    it "unquotes a single-quoted specifier when enabled", ->
+      expect(expectQuoteOnlyDelta("import { t } from '../i18n'\n", 'import { t } from "../i18n"\n'))
+        .toBe("{ t } from ../i18n\n")
+
+    it "unquotes a single-quoted side-effect import path", ->
+      // The keyword still stays; only the quotes go.
+      expect(expectQuoteOnlyDelta("import './style.scss'\n", 'import "./style.scss"\n'))
+        .toBe("import ./style.scss\n")
+
+    it "handles mixed single and double quotes in one file", ->
+      source := "import { a } from './a'\nimport { b } from \"./b\"\nimport Foo from './foo'\n"
+      reference := 'import { a } from "./a"\nimport { b } from "./b"\nimport Foo from "./foo"\n'
+      expect(expectQuoteOnlyDelta(source, reference))
+        .toBe("{ a } from ./a\n{ b } from ./b\nFoo from ./foo\n")
+
+    it "does not touch ordinary strings that look like specifiers", ->
+      // The reference source is built from parser-identified specifier spans, so a
+      // plain string containing `from ./x` must survive with its quotes intact.
+      source := "import { t } from '../i18n'\nx := 'plain from ./str'\n"
+      fixed := expectQuoteOnlyDelta(source, 'import { t } from "../i18n"\nx := \'plain from ./str\'\n')
+      expect(fixed).toBe("{ t } from ../i18n\nx := 'plain from ./str'\n")
+      expect(compileSource(fixed)).toContain("'plain from ./str'")
+
+    // In each of these the specifier must keep its quotes. The keyword is still
+    // removed — that edit is independent and byte-identical on its own.
+    it "keeps quotes on a single-quoted specifier containing a double quote", ->
+      // It has no double-quoted reference form without escaping, so it is left alone.
+      source := "import x from './a\"b'\n"
+      expect(fixUnquoted(source).fixedSource ?? source).toBe("x from './a\"b'\n")
+
+    it "keeps quotes on a single-quoted specifier with an escape sequence", ->
+      source := "import x from './a\\u0062c'\n"
+      expect(fixUnquoted(source).fixedSource ?? source).toBe("x from './a\\u0062c'\n")
+
+    it "keeps quotes on an unsafe single-quoted specifier", ->
+      source := "import x from 'has space'\n"
+      expect(fixUnquoted(source).fixedSource ?? source).toBe("x from 'has space'\n")
+
+    it "is idempotent when enabled", ->
+      once := expectQuoteOnlyDelta("import { t } from '../i18n'\n", 'import { t } from "../i18n"\n')
+      twice := fixUnquoted(once).fixedSource ?? once
+      expect(twice).toBe(once)
+
+    it "composes with other fixable rules when enabled", ->
+      source := "import { t } from '../i18n'\nx = a === b\n"
+      res := lintSource(source, {
+        rules: { [RULE]: "error", "style/prefer-word-operators": "error" }
+        ruleOptions: { [RULE]: { unquoteSingleQuotes: true } }
+        fix: true
+      })
+      fixed := res.fixedSource ?? source
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(fixed).toContain("{ t } from ../i18n")
+      expect(fixed).toContain("a is b")
+      // Combined output must still match the reference exactly.
+      expect(compileSource(fixed)).toBe(compileSource('import { t } from "../i18n"\nx = a is b\n'))
+
+    it "rejects a rule whose reference source claims an arbitrary rewrite", ->
+      // The reference is supplied by the rule, so on its own it would authorize
+      // whatever the rule declared. The engine's independent output-delta bound is
+      // what stops that: an identifier change is not a quote-style difference.
+      sneaky := {
+        id: "test/sneaky-reference"
+        meta: { description: "test", fixable: true, defaultSeverity: "error" }
+        check: (ctx: any) ->
+          ctx.declareEquivalenceReference?("quote-style", -> ctx.source.replace("VALUE", "CHANGED"))
+          i := ctx.source.indexOf "VALUE"
+          if i >= 0
+            ctx.report({
+              ruleId: "test/sneaky-reference"
+              message: "sneaky"
+              pos: i
+              fix: { start: i, end: i + 5, replacement: "CHANGED" }
+            })
+      }
+      registry := defaultRuleRegistry.clone()
+      registry.register sneaky as any
+      res := lintSource("y := VALUE\n", {
+        registry
+        rules: { "test/sneaky-reference": "error" }
+        fix: true
+      })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(false)
+
+    it "still rejects a fix that changes more than specifier quotes", ->
+      // The option must not become a hole in the gate: a co-running rule whose
+      // edit alters real semantics is rejected while terse imports still apply.
+      evil := {
+        id: "test/evil-quote"
+        meta: { description: "test", fixable: true, defaultSeverity: "error" }
+        check: (ctx: any) ->
+          i := ctx.source.indexOf "VALUE"
+          if i >= 0
+            ctx.report({
+              ruleId: "test/evil-quote"
+              message: "evil"
+              pos: i
+              fix: { start: i, end: i + 5, replacement: "CHANGED" }
+            })
+      }
+      registry := defaultRuleRegistry.clone()
+      registry.register evil as any
+      source := "import { t } from '../i18n'\ny := VALUE\n"
+      res := lintSource(source, {
+        registry
+        rules: { [RULE]: "error", "test/evil-quote": "error" }
+        ruleOptions: { [RULE]: { unquoteSingleQuotes: true } }
+        fix: true
+      })
+      expect(res.fixedSource).not.toContain("CHANGED")
+      expect(res.fixedSource).toContain("{ t } from ../i18n")
+      expect(res.diagnostics.some((d) -> d.ruleId is "compiler-equivalence-mismatch")).toBe(true)
 
   describe "unsupported shapes are left untouched", ->
     it "skips import attributes", ->
@@ -136,6 +290,30 @@ describe "style/prefer-terse-imports", ->
       fixed := expectEquivalent(source)
       expect(fixed).toContain("{ t } from ../i18n")
       expect(fixed).toContain('import d from "./d.json" with { type: "json" }')
+
+  describe "normalizeQuoteStyle (output-delta bound)", ->
+    it "requotes a plain single-quoted literal", ->
+      expect(normalizeQuoteStyle("a='b'")).toBe('a="b"')
+
+    it "leaves a literal containing a double quote alone", ->
+      // Requoting would need new escaping, so it fails closed and stays visible.
+      expect(normalizeQuoteStyle("b='say \"hi\"'")).toBe("b='say \"hi\"'")
+
+    it "does not touch apostrophes inside a double-quoted literal", ->
+      expect(normalizeQuoteStyle('a="it\'s"')).toBe('a="it\'s"')
+
+    it "copies template literals verbatim", ->
+      expect(normalizeQuoteStyle("c=`t ${x} '`")).toBe("c=`t ${x} '`")
+
+    it "ignores quotes inside comments", ->
+      expect(normalizeQuoteStyle("// don't\nd='e'")).toBe("// don't\nd=\"e\"")
+      expect(normalizeQuoteStyle("/* 'x' */ f='g'")).toBe("/* 'x' */ f=\"g\"")
+
+    it "treats identifier changes as a real difference", ->
+      expect(normalizeQuoteStyle("const VALUE = 1")).not.toBe(normalizeQuoteStyle("const CHANGED = 1"))
+
+    it "sees quote-only specifier changes as equal", ->
+      expect(normalizeQuoteStyle("import 'a'\n")).toBe(normalizeQuoteStyle('import "a"\n'))
 
   describe "under the coffee-react dial", ->
     dial := { autoLet: true, coffeeIsnt: true, coffeeRange: true, react: true }

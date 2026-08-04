@@ -1,9 +1,9 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { parseRawAst, compileForOutput } from "./compiler.civet"
-import type { CompileDial, CompileOptions, Diagnostic, Fix, LintResult, ResolvedConfig, RuleContext, RuleLevel, Severity } from "./types.civet"
+import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, Severity } from "./types.civet"
 import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, collectCommentRanges, intersectsRange } from "./utils.civet"
-import { loadConfig, computeSkippedRules, resolveConfigForFile } from "./config.civet"
+import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 
 export interface LintOptions
@@ -16,6 +16,73 @@ export interface LintOptions
   compileOptions?: Record<string, any>
   fix?: boolean
   rules?: Record<string, RuleLevel>
+  // Per-rule options, merged over the resolved config's options and the rule's own
+  // declared defaults. Mirrors `rules` for programmatic callers and tests.
+  ruleOptions?: Record<string, RuleOptions>
+
+// Rewrites every single-quoted string literal in emitted JS to the equivalent
+// double-quoted literal, leaving all other bytes alone. Used only to compare two
+// compiled outputs for quote-style-only difference; the result is never written
+// anywhere.
+//
+// This scans the output rather than pattern-matching it, so a quote character inside
+// a string, comment, or template literal cannot be mistaken for a delimiter. A
+// literal that cannot be requoted without escaping is emitted verbatim, which makes
+// the two sides differ and the comparison fail closed.
+export function normalizeQuoteStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`"
+      // Template literals are copied verbatim, including any nested `${}`.
+      var j = i + 1
+      while j < code.length
+        break if code[j] is "`" and code[j - 1] isnt "\\"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      var body = ""
+      var closed = false
+      while j < code.length
+        c := code[j]
+        if c is "\\"
+          body += code.slice(j, j + 2)
+          j += 2
+          continue
+        if c is quote
+          closed = true
+          break
+        if c is "\n"
+          break
+        body += c
+        j++
+      unless closed
+        out += ch
+        i++
+        continue
+      // Only requote when the result needs no new escaping; otherwise keep it as-is
+      // so a genuine difference stays visible to the caller.
+      if quote is "'" and not body.includes('"')
+        out += '"' + body + '"'
+      else
+        out += quote + body + quote
+      i = j + 1
+      continue
+    out += ch
+    i++
+  out
 
 // Backward-compatible single-dial entry point used by the POC API and tests. Prefer
 // the adapter directly for new code; this helper keeps the old signature working.
@@ -34,6 +101,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     : loadConfig(undefined, process.cwd(), registry)
 
   mergedRules := { ...resolvedConfig.rules, ...(options.rules or {}) }
+  mergedRuleOptions := { ...(resolvedConfig.ruleOptions or {}), ...(options.ruleOptions or {}) }
   civetOptions: CompileDial := { ...resolvedConfig.civetOptions, ...(options.civetOptions or {}) }
   compileOptions: CompileOptions := { ...resolvedConfig.compileOptions, ...(options.compileOptions or {}) }
 
@@ -104,12 +172,35 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
   commentRanges := collectCommentRanges(ast)
 
   // Step 2: Run active rules
+  //
+  // `options` and `declareEquivalenceReference` are per-rule, so they are rebound
+  // immediately before each rule's `check` call rather than fixed here.
+  equivalenceReferences := new Map<string, EquivalenceReference>()
+  outputDeltas := new Map<string, OutputDelta>()
+  var currentRuleId = ""
+
+  // Independent bound on how far a reference-declaring rule may move the emitted
+  // output. The rule names a delta kind; the engine — not the rule — decides what
+  // that kind permits. Today the only kind is `quote-style`: the two outputs must be
+  // identical once every JS string literal's quoting is normalized, which means the
+  // change is confined to quote characters and cannot alter identifiers, structure,
+  // or string contents.
+  outputDeltaAllowed := (ruleId: string, before: string, after: string): boolean ->
+    kind := outputDeltas.get(ruleId)
+    return false unless kind is "quote-style"
+    normalizeQuoteStyle(before) is normalizeQuoteStyle(after)
+
   context: RuleContext := {
     source
     ast
     filename
     parseOptions: civetOptions
+    options: {}
     getLineColumn
+    declareEquivalenceReference: (delta, build) ->
+      if currentRuleId
+        equivalenceReferences.set(currentRuleId, build)
+        outputDeltas.set(currentRuleId, delta)
     report: (d) ->
       ruleLevel := mergedRules[d.ruleId] or "off"
       return if ruleLevel is "off"
@@ -155,6 +246,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     rule := registry.get(ruleId)
     if rule
       try
+        currentRuleId = ruleId
+        context.options = resolveRuleOptions(ruleId, mergedRuleOptions[ruleId], registry)
         rule.check(context)
       catch err: any
         diagnostics.push({
@@ -164,6 +257,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           line: 1
           column: 1
         })
+      finally
+        currentRuleId = ""
 
   // Sort diagnostics by line, then column
   diagnostics.sort (a, b) ->
@@ -188,6 +283,37 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       ruleFixes.push(diag.fix!)
       fixesByRule.set(diag.ruleId, ruleFixes)
 
+    // Accepts a candidate's compiled output. The strict rule is unchanged: it must
+    // equal the original file's output byte-for-byte.
+    //
+    // A rule may additionally declare a *reference source* (see
+    // `EquivalenceReference`) — a rewrite of the ORIGINAL Civet source expressing the
+    // same normalization its fixes perform. When the strict check fails, the
+    // candidate's output must instead equal that reference source's compiled output,
+    // byte-for-byte.
+    //
+    // Trust boundary: the reference is supplied by the rule, so this check confirms
+    // that a rule's fixes agree with its OWN declared normalization — it does not
+    // independently prove the normalization is meaning-preserving. A reference broad
+    // enough to describe an arbitrary rewrite would authorize that rewrite. The
+    // safety of an opt-in reference therefore rests on it being narrow, and on review
+    // of the rule that declares it; `declareOutputDelta` below bounds the blast radius
+    // mechanically. Rules that declare no reference — every rule today except opt-in
+    // terse imports — are governed solely by the strict check.
+    acceptCandidate := (ruleId: string, candidateOutput: string): boolean ->
+      return true if candidateOutput is originalCompiled
+      build := equivalenceReferences.get(ruleId)
+      return false unless build?
+      referenceSource := build(source)
+      return false unless referenceSource? and referenceSource isnt source
+      referenceRes := compileForOutput(referenceSource, { dial: civetOptions, compileOptions, filename })
+      return false unless referenceRes.ok and referenceRes.output is candidateOutput
+      // The reference may only move the emitted output within the delta the rule
+      // declared. A rule whose reference changes anything else is rejected even
+      // though its own reference agreed, so a broad reference cannot launder an
+      // arbitrary rewrite.
+      outputDeltaAllowed(ruleId, originalCompiled!, candidateOutput)
+
     approvedFixes: Fix[] := []
     for [ruleId, ruleFixes] of fixesByRule
       { output: ruleCandidate, appliedEdits: ruleApplied } := applyEdits(source, ruleFixes)
@@ -195,7 +321,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
 
       candidateRes := compileForOutput(ruleCandidate, { dial: civetOptions, compileOptions, filename })
       if candidateRes.ok
-        if candidateRes.output is originalCompiled
+        if acceptCandidate(ruleId, candidateRes.output!)
           approvedFixes.push(...ruleApplied)
         else
           isEquivalencePreserved = false
@@ -219,8 +345,33 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     { output: combinedCandidate, appliedEdits } := applyEdits(source, approvedFixes)
     if combinedCandidate isnt source
       combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
+      // The combined reference applies every declared normalization in turn, so a
+      // file mixing a reference-declaring rule with ordinary ones is still checked
+      // against one exact compiled baseline.
+      combinedReference := ->
+        var acc = source
+        for build of equivalenceReferences.values()
+          next := build(acc)
+          acc = next if next?
+        acc
+      combinedAccepted := combinedRes.ok and (
+        combinedRes.output is originalCompiled or (
+          equivalenceReferences.size > 0 and do
+            reference := combinedReference()
+            if reference is source
+              false
+            else
+              referenceRes := compileForOutput(reference, { dial: civetOptions, compileOptions, filename })
+              referenceRes.ok and
+                referenceRes.output is combinedRes.output and
+                // Every declared delta must permit the combined difference, so
+                // mixing rules cannot widen what any one of them allows.
+                Array.from(outputDeltas.keys()).every (id) ->
+                  outputDeltaAllowed(id, originalCompiled!, combinedRes.output!)
+        )
+      )
       if combinedRes.ok
-        if combinedRes.output is originalCompiled
+        if combinedAccepted
           fixedSource = combinedCandidate
           appliedFixesCount = appliedEdits.length
 
