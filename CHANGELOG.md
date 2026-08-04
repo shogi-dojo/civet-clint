@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-04
+
+First stable release, promoting the alpha line after validation against a
+real-world consumer.
+
+### Changed
+
+- **BREAKING (auto-discovery):** only the short `clint.*` filenames are discovered
+  automatically — `clint.config.json`, `.clintrc.json`, `.clint.json`. The three
+  `civet-clint.*` variants (`civet-clint.config.json`, `.civet-clintrc.json`,
+  `.civet-clint.json`) that were discoverable in `0.1.0-alpha.4` are not. They keep
+  working when passed explicitly with `--config`, so the fix for an affected project
+  is to rename the file or add the flag. One discovery name per shape, matching the
+  CLI's own name, rather than six.
+
+### Validation
+
+Exercised end-to-end on a production 266-file Civet codebase with **all 17 rules
+enforced at `error` and zero findings**. Every rule was cleared either by autofix
+under the byte-identity gate or by hand with structural verification of the
+compiled output. Notable results from that rollout:
+
+- `style/prefer-jsx-attr-shorthand` — 273 autofixes, all 266 files byte-identical.
+- `style/prefer-jsx-shorthand` — 218 sites; the 116 false positives reported by
+  `0.1.0-alpha.3` are gone as of `0.1.0-alpha.4`.
+- `style/prefer-ampersand-shorthand` — 36 hand conversions, each verified by
+  AST comparison with parameters alpha-renamed.
+- `style/no-trailing-semicolons` — the final 5 findings were load-bearing only
+  because the handlers used JS-style braced bodies; de-bracing them (letting
+  indentation delimit the block) cleared the rule without changing behaviour.
+
+### Notes
+
+- Config auto-discovery (added in `0.1.0-alpha.4`) is verified working from a
+  published tarball: a bare `clint` run resolves `clint.config.json` and
+  `civet.json` identically to an explicit `--config`. The flag is now optional.
+
 ## [0.1.0-alpha.4] - 2026-08-04
 
 ### Changed
