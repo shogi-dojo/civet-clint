@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
-import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, PRESETS } from "../src/config.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
 import { parseRawAst, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -210,6 +210,20 @@ describe "Configuration matrix", ->
       await fs.rm(tmpDir, { recursive: true, force: true })
 
   describe "loadCivetConfig splits parseOptions and top-level options", ->
+    for name of ["civet.json", "civetconfig.json", ".civetconfig.json"]
+      it `discovers ${name}`, ->
+        tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-civet-disco-"))
+        await fs.writeFile(path.join(tmpDir, name), JSON.stringify({
+          parseOptions: { coffeeEq: true }
+        }))
+
+        expect(findCivetConfigFile(tmpDir)).toBe(path.join(tmpDir, name))
+        { dial, resolvedPath } := loadCivetConfig(undefined, tmpDir)
+        expect(dial.coffeeEq).toBe(true)
+        expect(resolvedPath).toBe(path.join(tmpDir, name))
+
+        await fs.rm(tmpDir, { recursive: true, force: true })
+
     it "extracts the dial and retains top-level CompileOptions", ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-split-"))
       await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({

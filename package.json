@@ -1,6 +1,6 @@
 {
   "name": "civet-clint",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Compiler-backed style checker and autofixer for Civet codebases",
   "type": "module",
   "main": "./dist/index.js",
