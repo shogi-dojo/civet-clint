@@ -33,7 +33,7 @@ function soleBodyExpression(arrow: any): any
 
 function referencesParam(node: any, paramName: string, tree: SyntaxTree): boolean
   var found = false
-  tree.visit (n) ->
+  tree.visit node, (n) ->
     found = true if n?.type is "Identifier" and n.name is paramName
   found
 

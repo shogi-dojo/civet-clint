@@ -56,9 +56,9 @@ export const preferWordOperatorsRule: Rule = {
         wordOp := REPLACEMENT_MAP.get(actualSlice)
 
         if wordOp and not reportedStarts.has(pos)
-          return if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
-          return if actualSlice is "==" and not ctx.parseOptions.coffeeEq
-          return if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
+          continue if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
+          continue if actualSlice is "==" and not ctx.parseOptions.coffeeEq
+          continue if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
 
           normalizedOp := REPLACEMENT_MAP.get(tok.value)
           if normalizedOp

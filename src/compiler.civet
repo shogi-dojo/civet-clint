@@ -47,7 +47,7 @@ export function parseSyntax(source: string, options: SyntaxParseOptions): Compil
       filename: options.filename
       parseOptions: options.dial
     }) as any
-    syntax := new SyntaxTree(ast, source, "true")
+    syntax := new SyntaxTree(ast, source)
     { ok: true, syntax }
   catch err: any
     {

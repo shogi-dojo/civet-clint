@@ -27,7 +27,7 @@ export const noMixedInterpolationRule: Rule = {
 
     tree.visit "TemplateLiteral", (node) ->
       tickPositions: number[] := []
-      tree.visit (part) ->
+      tree.visit node, (part) ->
         span := tree.range(part)
         if span
           actual := source.slice(span.start, span.end)

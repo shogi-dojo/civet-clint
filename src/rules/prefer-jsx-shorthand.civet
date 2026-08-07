@@ -1,58 +1,12 @@
 import type { Rule, RuleContext } from "../types.civet"
-import type { SyntaxTree } from "../syntax.civet"
+import type { JsxAttribute } from "../syntax.civet"
 
 const VALID_IDENTIFIER = /^[a-zA-Z_-][a-zA-Z0-9_-]*$/
 
-function isAttributeEntry(value: any): boolean
-  return false unless Array.isArray(value) and value.length >= 2
-  body := value[1]
-  return false unless Array.isArray(body) and body.length >= 2
-  namePart := body[0]
-  (Array.isArray(namePart) and typeof namePart[0] is "string") or typeof namePart is "string"
-
-function asAttributeList(value: any): any[] | undefined
-  return undefined unless Array.isArray(value) and value.length > 0
-  return [value] if isAttributeEntry value
-  if value.some((entry: any) -> isAttributeEntry entry)
-    return value.filter (entry: any) -> isAttributeEntry entry
-  undefined
-
-function extractAttributes(jsxElement: any, tree: SyntaxTree): any[]
-  children := tree.children(jsxElement)
-  return [] unless children.length > 0
-
-  isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
-
-  for child of children
-    if Array.isArray(child) and child.some isOpenAngle
-      for slot of child
-        nested := asAttributeList slot
-        return nested if nested?
-
-  for child of children
-    if Array.isArray(child)
-      list := asAttributeList child
-      return list if list?
-
-  []
-
-function attributeName(attr: any): string | undefined
-  return undefined unless Array.isArray(attr) and attr.length >= 2
-  attrBody := attr[1]
-  return undefined unless Array.isArray(attrBody) and attrBody.length >= 2
-  namePart := attrBody[0]
-  if Array.isArray(namePart) and typeof namePart[0] is "string"
-    namePart[0]
-  else if typeof namePart is "string"
-    namePart
-  else
-    undefined
-
-function leadingShorthandRunEnd(attrs: any[]): number
+function leadingShorthandRunEnd(attrs: JsxAttribute[]): number
   var end = -1
   for attr, i of attrs
-    name := attributeName attr
-    break unless name is "className" or name is "id"
+    break unless attr.name is "className" or attr.name is "id"
     end = i
   end
 
@@ -72,30 +26,14 @@ export const preferJsxShorthandRule: Rule = {
     reportedStarts := new Set<number>()
 
     tree.visit "JSXElement", (node) ->
-      attrs := extractAttributes(node, tree)
+      attrs := tree.jsxAttributes(node, { requireOpeningAtStart: true })
       runEnd := leadingShorthandRunEnd(attrs)
 
       for attr, attrIndex of attrs
         continue unless attrIndex <= runEnd
-        continue unless Array.isArray(attr) and attr.length >= 2
-        leadingWs := attr[0]
-        attrBody := attr[1]
-        continue unless Array.isArray(attrBody) and attrBody.length >= 2
-
-        namePart := attrBody[0]
-        valuePart := attrBody[1]
-
-        var attrName: string | undefined = undefined
-        if Array.isArray(namePart) and typeof namePart[0] is "string"
-          attrName = namePart[0]
-        else if typeof namePart is "string"
-          attrName = namePart
-
+        attrName := attr.name
         continue unless attrName is "className" or attrName is "id"
-        continue unless Array.isArray(valuePart)
-
-        val := valuePart.find (v: any) ->
-          typeof v is "string" and ((v.startsWith('"') and v.endsWith('"')) or (v.startsWith("'") and v.endsWith("'")))
+        val := attr.quotedValue
         continue unless val?
 
         rawVal := val.slice(1, -1).trim()
@@ -114,15 +52,7 @@ export const preferJsxShorthandRule: Rule = {
 
         continue unless shorthand
 
-        var startPos: number | undefined = undefined
-        wsSpan := tree.range(leadingWs)
-        if wsSpan
-          startPos = wsSpan.start
-        else
-          valSpan := tree.range(valuePart[1])
-          if valSpan
-            startPos = source.lastIndexOf(attrName, valSpan.start)
-
+        startPos := attr.start
         continue if startPos is undefined or reportedStarts.has(startPos)
 
         slice := source.slice(startPos)

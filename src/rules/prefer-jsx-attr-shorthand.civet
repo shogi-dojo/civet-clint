@@ -1,50 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import type { SyntaxTree } from "../syntax.civet"
-
-function isAttributeEntry(value: any): boolean
-  return false unless Array.isArray(value) and value.length >= 2
-  body := value[1]
-  return false unless Array.isArray(body) and body.length >= 2
-  namePart := body[0]
-  (Array.isArray(namePart) and typeof namePart[0] is "string") or typeof namePart is "string"
-
-function asAttributeList(value: any): any[] | undefined
-  return undefined unless Array.isArray(value) and value.length > 0
-  return [value] if isAttributeEntry value
-  if value.some((entry: any) -> isAttributeEntry entry)
-    return value.filter (entry: any) -> isAttributeEntry entry
-  undefined
-
-function extractAttributes(jsxElement: any, tree: SyntaxTree): any[]
-  children := tree.children(jsxElement)
-  return [] unless children.length > 0
-
-  isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
-
-  for child of children
-    if Array.isArray(child) and child.some isOpenAngle
-      for slot of child
-        nested := asAttributeList slot
-        return nested if nested?
-
-  for child of children
-    if Array.isArray(child)
-      list := asAttributeList child
-      return list if list?
-
-  []
-
-function attributeName(attr: any): string | undefined
-  return undefined unless Array.isArray(attr) and attr.length >= 2
-  attrBody := attr[1]
-  return undefined unless Array.isArray(attrBody) and attrBody.length >= 2
-  namePart := attrBody[0]
-  if Array.isArray(namePart) and typeof namePart[0] is "string"
-    namePart[0]
-  else if typeof namePart is "string"
-    namePart
-  else
-    undefined
 
 export const preferJsxAttrShorthandRule: Rule = {
   id: "style/prefer-jsx-attr-shorthand"
@@ -61,31 +15,16 @@ export const preferJsxAttrShorthandRule: Rule = {
     tree := ctx.syntax
 
     tree.visit "JSXElement", (node) ->
-      for attr of extractAttributes(node, tree)
-        name := attributeName attr
+      for attr of tree.jsxAttributes(node)
+        name := attr.name
         continue unless name?
-
-        attrBody := attr[1]
-        valuePart := attrBody[1]
-        continue unless Array.isArray(valuePart)
-
-        eqToken := valuePart.find (v: any) -> v?.token is "="
-        braced := valuePart.find (v: any) ->
-          Array.isArray(v) and v[0]?.token is "{"
-        eqSpan := tree.range(eqToken)
-        continue unless eqSpan and braced?
-
-        openBrace := braced[0]
-        closeBrace := braced[braced.length - 1]
-        continue unless closeBrace?.token is "}"
-
-        inner := braced.slice(1, -1).find (v: any) -> v? and v isnt "" and typeof v isnt "string"
+        eqSpan := tree.range(attr.equals)
+        continue unless eqSpan and attr.bracedRange?
 
         eqPos := eqSpan.start
         start := eqPos - name.length
-        closeSpan := tree.range(closeBrace)
-        continue unless closeSpan?
-        end := closeSpan.end
+        end := attr.bracedRange.end
+        inner := attr.expression
 
         if inner?.type is "Literal" and inner.raw is "true"
           ctx.report({

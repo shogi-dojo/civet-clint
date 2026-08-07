@@ -74,28 +74,33 @@ export interface SourceToken {
 export interface JsxAttribute {
   name?: string;
   value?: any;
-  rawNode: any;
   range?: SourceRange;
+  start?: number;
+  equals?: any;
+  quotedValue?: string;
+  expression?: any;
+  bracedRange?: SourceRange;
   isSpread: boolean;
 }
+export interface JsxAttributeOptions {
+  requireOpeningAtStart?: boolean;
+}
 export interface SyntaxNode {
-  type: string;
+  type?: string;
   range?: SourceRange;
-  rawNode: any;
   [key: string]: any;
 }
 export class SyntaxTree {
   source: string;
-  root: any;
-  mode: 'raw' | 'true';
-  constructor(ast: any, source: string, mode?: 'raw' | 'true');
+  root: SyntaxNode;
+  constructor(ast: SyntaxNode, source: string);
   range(node: any): SourceRange | undefined;
   text(nodeOrRange: any): string;
   children(node: any): any[];
   tokens(node?: any): SourceToken[];
   findToken(node: any, tokenValue: string): SourceToken | undefined;
   visit(targetOrType: any, typeOrCallback?: any, callback?: any): void;
-  jsxAttributes(jsxElementNode: any): JsxAttribute[];
+  jsxAttributes(jsxElementNode: any, options?: JsxAttributeOptions): JsxAttribute[];
   commentRanges(): SourceRange[];
   stringRanges(): SourceRange[];
 }

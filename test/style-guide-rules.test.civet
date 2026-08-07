@@ -195,6 +195,16 @@ describe "Style Guide Rules Coverage", ->
       expect(diags.length).toBe(1)
       expect(diags[0].message).toContain(".map &.trim()")
 
+    it "allows method arguments that do not reference the callback parameter", ->
+      source := "trimmed = lines.map((l) => l.slice(1))\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags).toHaveLength(1)
+      expect(diags[0].message).toContain(".map &.slice(1)")
+
     // The rule used to match with a regex whose character class ran past the
     // callback, so the quoted suggestion picked up delimiters belonging to the
     // enclosing call — `.map &.userId))` — and was a syntax error if pasted.

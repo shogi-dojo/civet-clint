@@ -1,4 +1,3 @@
-import type { Fix } from "./types.civet"
 import { walkAst, collectCommentRanges, collectStringRanges } from "./utils.civet"
 
 export interface SourceRange
@@ -14,19 +13,26 @@ export interface SourceToken
 export interface JsxAttribute
   name?: string
   value?: any
-  rawNode: any
   range?: SourceRange
+  start?: number
+  equals?: any
+  quotedValue?: string
+  expression?: any
+  bracedRange?: SourceRange
   isSpread: boolean
+
+export interface JsxAttributeOptions
+  // Preserve the old class/id shorthand rule's behavior: leading source trivia
+  // before the opening tag made that rule leave the element untouched.
+  requireOpeningAtStart?: boolean
 
 export class SyntaxTree
   source: string
   root: any
-  mode: "raw" | "true"
 
-  constructor(ast: any, source: string, mode: "raw" | "true" = "raw")
+  constructor(ast: any, source: string)
     @source = source
     @root = ast
-    @mode = mode
 
   // Source span of a node or token.
   range(node: any): SourceRange | undefined
@@ -99,7 +105,7 @@ export class SyntaxTree
         range: SourceRange := { start: pos, end: pos + len }
         raw := source.slice(pos, pos + len)
         value := n.token
-        synthetic := raw !== value or len === 0
+        synthetic := raw isnt value or len is 0
         tokensList.push({ value, raw, range, synthetic })
 
     tokensList.sort (a, b) -> a.range.start - b.range.start
@@ -107,7 +113,7 @@ export class SyntaxTree
 
   findToken(node: any, tokenValue: string): SourceToken | undefined
     for tok of @tokens(node)
-      return tok if tok.value === tokenValue
+      return tok if tok.value is tokenValue
     undefined
 
   // Traverses AST calling callback for matching node type or all nodes beneath target (or root).
@@ -116,14 +122,14 @@ export class SyntaxTree
     var type: any = undefined
     var cb: any = undefined
 
-    if typeof targetOrType === "function"
+    if typeof targetOrType is "function"
       cb = targetOrType
-    else if typeof targetOrType === "string" or Array.isArray(targetOrType)
+    else if typeof targetOrType is "string" or Array.isArray(targetOrType)
       type = targetOrType
       cb = typeOrCallback
-    else if targetOrType and typeof targetOrType === "object"
+    else if targetOrType and typeof targetOrType is "object"
       target = targetOrType
-      if typeof typeOrCallback === "function"
+      if typeof typeOrCallback is "function"
         cb = typeOrCallback
       else
         type = typeOrCallback
@@ -132,10 +138,10 @@ export class SyntaxTree
     return unless cb
     if not type
       walkAst target, cb
-    else if typeof type === "string"
+    else if typeof type is "string"
       targetType := type
       walkAst target, (node, parent) ->
-        if node?.type === targetType
+        if node?.type is targetType
           cb(node, parent)
     else if Array.isArray(type)
       typeSet := new Set(type)
@@ -143,43 +149,81 @@ export class SyntaxTree
         if typeSet.has(node?.type)
           cb(node, parent)
 
-  // Extract JSX attributes from a JSXElement node
-  jsxAttributes(jsxElementNode: any): JsxAttribute[]
+  // Extract JSX attributes from a JSXElement node while preserving every entry's
+  // source order, including spreads and Civet's `{name}` shorthand.
+  jsxAttributes(jsxElementNode: any, options: JsxAttributeOptions = {}): JsxAttribute[]
     attrs: JsxAttribute[] := []
-    return attrs unless jsxElementNode?.type === "JSXElement"
+    return attrs unless jsxElementNode?.type is "JSXElement"
 
-    rawList := @extractRawAttributes(jsxElementNode)
+    rawList := @extractRawAttributes(jsxElementNode, options.requireOpeningAtStart is true)
     for attr of rawList
       name := @extractAttributeName(attr)
       range := @range(attr)
-      isSpread := not name? and Array.isArray(attr)
-      attrs.push({ name, value: attr, rawNode: attr, range, isSpread })
+      body := if Array.isArray(attr) then attr[1] else undefined
+      value := if Array.isArray(body) then body[1] else undefined
+      var equals: any = undefined
+      var quotedValue: string | undefined = undefined
+      var braced: any = undefined
+      if Array.isArray(value)
+        equals = value.find (part: any) -> part?.token is "="
+        quotedValue = value.find (part: any) ->
+          typeof part is "string" and (
+            (part.startsWith('"') and part.endsWith('"')) or
+            (part.startsWith("'") and part.endsWith("'"))
+          )
+        braced = value.find (part: any) -> Array.isArray(part) and part[0]?.token is "{"
+      var expression: any = undefined
+      if Array.isArray(braced)
+        expression = braced.slice(1, -1).find (part: any) -> part? and part isnt "" and typeof part isnt "string"
+      openBrace := if Array.isArray(braced) then braced[0] else undefined
+      closeBrace := if Array.isArray(braced) then braced[braced.length - 1] else undefined
+      openSpan := @range(openBrace)
+      closeSpan := @range(closeBrace)
+      var bracedRange: SourceRange | undefined = undefined
+      if openSpan and closeSpan
+        bracedRange = { start: openSpan.start, end: closeSpan.end }
+      leadingSpan := if Array.isArray(attr) then @range(attr[0]) else undefined
+      equalsSpan := @range(equals)
+      var start: number | undefined = leadingSpan?.start
+      start ?= equalsSpan.start - name.length if equalsSpan and name?
+      rawTokens := @tokens(attr)
+      isSpread := not name? and rawTokens.some (token) -> token.value is "..."
+      attrs.push({ name, value, range, start, equals, quotedValue, expression, bracedRange, isSpread })
     attrs
 
-  private extractRawAttributes(jsxElement: any): any[]
+  private extractRawAttributes(jsxElement: any, requireOpeningAtStart: boolean): any[]
     children := jsxElement?.children
     return [] unless Array.isArray(children)
 
     isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
-    isAttr := (v: any) -> Array.isArray(v) and v.length >= 2 and Array.isArray(v[1])
+    extractName := @extractAttributeName.bind(this)
+    isAttr := (v: any) -> extractName(v)?
 
     asAttributeList := (value: any): any[] | undefined ->
       return undefined unless Array.isArray(value) and value.length > 0
       return [value] if isAttr value
       if value.some isAttr
-        return value.filter isAttr
+        // Keep non-named entries. They are ordering barriers for `.class`/`#id`
+        // lowering even though another rule may not inspect them directly.
+        return value
       undefined
 
-    for child of children
-      if Array.isArray(child) and child.some isOpenAngle
-        for slot of child
-          nested := asAttributeList slot
-          return nested if nested?
+    var opening: any[] | undefined = undefined
+    if isOpenAngle(children[0])
+      opening = children
+    else if Array.isArray(children[0]) and children[0].some(isOpenAngle)
+      opening = children[0]
+    else
+      return [] if requireOpeningAtStart
+      if children.some(isOpenAngle)
+        opening = children
+      else
+        opening = children.find (child: any) -> Array.isArray(child) and child.some(isOpenAngle)
 
-    for child of children
-      if Array.isArray(child)
-        list := asAttributeList child
-        return list if list?
+    return [] unless opening?
+    for slot of opening
+      list := asAttributeList slot
+      return list if list?
 
     []
 
