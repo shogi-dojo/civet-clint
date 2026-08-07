@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
+import type { SyntaxTree } from "../syntax.civet"
 
 function isAttributeEntry(value: any): boolean
   return false unless Array.isArray(value) and value.length >= 2
@@ -58,7 +58,7 @@ export const preferJsxAttrShorthandRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
 
     tree.visit "JSXElement", (node) ->
       for attr of extractAttributes(node, tree)

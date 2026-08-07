@@ -1,6 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
-import { parseRawAst } from "../compiler.civet"
+import type { SyntaxTree } from "../syntax.civet"
+import { parseSyntax } from "../compiler.civet"
 
 const SAFE_SPECIFIER = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._:/-]+$/
 
@@ -40,9 +40,9 @@ function collectParts(node: any, tree: SyntaxTree)
   { importKeywordTok, specifierNode, hasBindings }
 
 function parseSpecifierSpans(input: string, dial: Record<string, any>): { pos: number, length: number }[]
-  res := parseRawAst input, { dial }
+  res := parseSyntax input, { dial }
   return [] unless res.ok
-  tree := new SyntaxTree(res.ast, input)
+  tree := res.syntax!
   spans: { pos: number, length: number }[] := []
 
   tree.visit "ImportDeclaration", (node) ->
@@ -71,7 +71,7 @@ export const preferTerseImportsRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
     allowSingle := ctx.options.unquoteSingleQuotes is true
     seen := new Set<number>()
 

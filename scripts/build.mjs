@@ -61,16 +61,54 @@ export type EquivalenceReference = (source: string) => string | undefined;
 export type OutputDelta = 'quote-style';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
+export interface SourceRange {
+  start: number;
+  end: number;
+}
+export interface SourceToken {
+  value: string;
+  raw: string;
+  range: SourceRange;
+  synthetic: boolean;
+}
+export interface JsxAttribute {
+  name?: string;
+  value?: any;
+  rawNode: any;
+  range?: SourceRange;
+  isSpread: boolean;
+}
+export interface SyntaxNode {
+  type: string;
+  range?: SourceRange;
+  rawNode: any;
+  [key: string]: any;
+}
+export class SyntaxTree {
+  source: string;
+  root: any;
+  mode: 'raw' | 'true';
+  constructor(ast: any, source: string, mode?: 'raw' | 'true');
+  range(node: any): SourceRange | undefined;
+  text(nodeOrRange: any): string;
+  children(node: any): any[];
+  tokens(node?: any): SourceToken[];
+  findToken(node: any, tokenValue: string): SourceToken | undefined;
+  visit(targetOrType: any, typeOrCallback?: any, callback?: any): void;
+  jsxAttributes(jsxElementNode: any): JsxAttribute[];
+  commentRanges(): SourceRange[];
+  stringRanges(): SourceRange[];
+}
 export interface CompileDialOptions {
   dial: CompileDial;
   compileOptions?: CompileOptions;
   filename?: string;
 }
-export interface RawAstOptions extends CompileDialOptions {}
+export interface SyntaxParseOptions extends CompileDialOptions {}
 export interface CompileResult {
   ok: boolean;
   output?: string;
-  ast?: any;
+  syntax?: SyntaxTree;
   error?: string;
   line?: number;
   column?: number;
@@ -92,7 +130,7 @@ export interface RuleReport {
 }
 export interface RuleContext {
   source: string;
-  ast: any;
+  syntax: SyntaxTree;
   filename?: string;
   parseOptions: CompileDial;
   options: RuleOptions;
@@ -238,7 +276,7 @@ export function normalizeRuleEntry(ruleId: string, entry: RuleEntry, context: st
 export function resolveRuleOptions(ruleId: string, configured: RuleOptions | undefined, registry?: RuleRegistry): RuleOptions;
 export function globToRegex(glob: string): RegExp;
 export function matchesFilePattern(filePath: string, pattern: string, configBaseDir?: string): boolean;
-export function parseRawAst(source: string, options: RawAstOptions): CompileResult;
+export function parseSyntax(source: string, options: SyntaxParseOptions): CompileResult;
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
 export function normalizeQuoteStyle(code: string): string;

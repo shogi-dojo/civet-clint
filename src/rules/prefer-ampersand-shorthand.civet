@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
+import type { SyntaxTree } from "../syntax.civet"
 
 const SHORTHAND_METHODS = new Set([
   "map", "filter", "find", "findIndex", "findLast", "findLastIndex"
@@ -87,7 +87,7 @@ export const preferAmpersandShorthandRule: Rule = {
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
-    tree := new SyntaxTree(ctx.ast, ctx.source)
+    tree := ctx.syntax
 
     tree.visit "CallExpression", (node) ->
       children := tree.children(node)

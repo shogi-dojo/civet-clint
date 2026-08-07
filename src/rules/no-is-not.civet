@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
 
 export const noIsNotRule: Rule = {
   id: "style/no-is-not"
@@ -13,7 +12,7 @@ export const noIsNotRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
     tree.visit (node) ->

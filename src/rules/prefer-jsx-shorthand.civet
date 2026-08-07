@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
+import type { SyntaxTree } from "../syntax.civet"
 
 const VALID_IDENTIFIER = /^[a-zA-Z_-][a-zA-Z0-9_-]*$/
 
@@ -68,7 +68,7 @@ export const preferJsxShorthandRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
     tree.visit "JSXElement", (node) ->
@@ -92,11 +92,11 @@ export const preferJsxShorthandRule: Rule = {
           attrName = namePart
 
         continue unless attrName is "className" or attrName is "id"
-        continue unless Array.isArray(valuePart) and valuePart.length >= 4
+        continue unless Array.isArray(valuePart)
 
-        val := valuePart[3]
-        continue unless typeof val is "string"
-        continue unless (val.startsWith('"') and val.endsWith('"')) or (val.startsWith("'") and val.endsWith("'"))
+        val := valuePart.find (v: any) ->
+          typeof v is "string" and ((v.startsWith('"') and v.endsWith('"')) or (v.startsWith("'") and v.endsWith("'")))
+        continue unless val?
 
         rawVal := val.slice(1, -1).trim()
         continue if rawVal is ""

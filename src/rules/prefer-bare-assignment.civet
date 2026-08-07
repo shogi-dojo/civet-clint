@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
 import { intersectsRange } from "../utils.civet"
 
 function isConstCase(name: string): boolean
@@ -17,7 +16,7 @@ export const preferBareAssignmentRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
     commentRanges := tree.commentRanges()
     stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]

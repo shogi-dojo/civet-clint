@@ -31,7 +31,7 @@ export class SyntaxTree
   // Source span of a node or token.
   range(node: any): SourceRange | undefined
     return undefined unless node?
-    if typeof node.start === "number" and typeof node.end === "number"
+    if typeof node.start is "number" and typeof node.end is "number"
       return { start: node.start, end: node.end }
     if Array.isArray(node.range) and node.range.length >= 2
       return { start: node.range[0], end: node.range[1] }

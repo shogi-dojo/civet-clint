@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { SyntaxTree } from "../syntax.civet"
 
 const EQUALITY_TOKENS = new Set(["===", "!==", "==", "!=", "is", "isnt"])
 
@@ -12,7 +11,7 @@ export const noNullEqualityRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    tree := new SyntaxTree(ctx.ast, source)
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
     for tok of tree.tokens()
