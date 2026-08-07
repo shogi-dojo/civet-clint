@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
 
 export const preferConciseArrowRule: Rule = {
   id: "style/prefer-concise-arrow"
@@ -10,20 +10,17 @@ export const preferConciseArrowRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := new SyntaxTree(ctx.ast, source)
     reportedStarts := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
-
-      if node.type is "ArrowFunction"
-        params := node.parameters
-        if params and Array.isArray(params.parameters) and params.parameters.length is 0
-          // Locate the empty parens in source
-          var openParenPos: number | undefined = undefined
-          if Array.isArray(params.children) and params.children[1]?.$loc
-            openParenPos = params.children[1].$loc.pos
-
-          if openParenPos isnt undefined and not reportedStarts.has(openParenPos)
+    tree.visit "ArrowFunction", (node) ->
+      params := node.parameters
+      if params and Array.isArray(params.parameters) and params.parameters.length is 0
+        paramTokens := tree.tokens(params)
+        openParenTok := paramTokens.find (t) -> t.value is "("
+        if openParenTok
+          openParenPos := openParenTok.range.start
+          if not reportedStarts.has(openParenPos)
             sliceFromParen := source.slice(openParenPos)
             match := sliceFromParen.match(/^\(\)\s*/)
             if match

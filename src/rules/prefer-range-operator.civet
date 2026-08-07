@@ -1,5 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
+import { intersectsRange } from "../utils.civet"
 
 export const preferRangeOperatorRule: Rule = {
   id: "style/prefer-range-operator"
@@ -13,8 +14,9 @@ export const preferRangeOperatorRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
-    stringRanges := collectStringRanges(ctx.ast)
+    tree := new SyntaxTree(ctx.ast, source)
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]
 
     re := /Array\.from\(\s*\{\s*length:\s*([a-zA-Z0-9_$]+)\s*\}\s*,\s*(?:\(\s*(?:_|[^,)]+)\s*,\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*=>/g

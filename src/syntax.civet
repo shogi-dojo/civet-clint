@@ -11,11 +11,12 @@ export interface SourceToken
   range: SourceRange
   synthetic: boolean
 
-export interface SyntaxNode
-  type: string
-  range?: SourceRange
+export interface JsxAttribute
+  name?: string
+  value?: any
   rawNode: any
-  [key: string]: any
+  range?: SourceRange
+  isSpread: boolean
 
 export class SyntaxTree
   source: string
@@ -30,7 +31,7 @@ export class SyntaxTree
   // Source span of a node or token.
   range(node: any): SourceRange | undefined
     return undefined unless node?
-    if node.start? and node.end?
+    if typeof node.start === "number" and typeof node.end === "number"
       return { start: node.start, end: node.end }
     if Array.isArray(node.range) and node.range.length >= 2
       return { start: node.range[0], end: node.range[1] }
@@ -104,20 +105,95 @@ export class SyntaxTree
     tokensList.sort (a, b) -> a.range.start - b.range.start
     tokensList
 
-  // Traverses AST calling callback for matching node type or all nodes.
-  visit(typeOrCallback: string | string[] | ((node: any, parent: any) => void), callback?: (node: any, parent: any) => void): void
-    if typeof typeOrCallback === "function"
-      walkAst @root, typeOrCallback
-    else if typeof typeOrCallback === "string" and callback
-      targetType := typeOrCallback
-      walkAst @root, (node, parent) ->
+  findToken(node: any, tokenValue: string): SourceToken | undefined
+    for tok of @tokens(node)
+      return tok if tok.value === tokenValue
+    undefined
+
+  // Traverses AST calling callback for matching node type or all nodes beneath target (or root).
+  visit(targetOrType: any, typeOrCallback?: any, callback?: any): void
+    var target = @root
+    var type: any = undefined
+    var cb: any = undefined
+
+    if typeof targetOrType === "function"
+      cb = targetOrType
+    else if typeof targetOrType === "string" or Array.isArray(targetOrType)
+      type = targetOrType
+      cb = typeOrCallback
+    else if targetOrType and typeof targetOrType === "object"
+      target = targetOrType
+      if typeof typeOrCallback === "function"
+        cb = typeOrCallback
+      else
+        type = typeOrCallback
+        cb = callback
+
+    return unless cb
+    if not type
+      walkAst target, cb
+    else if typeof type === "string"
+      targetType := type
+      walkAst target, (node, parent) ->
         if node?.type === targetType
-          callback(node, parent)
-    else if Array.isArray(typeOrCallback) and callback
-      typeSet := new Set(typeOrCallback)
-      walkAst @root, (node, parent) ->
+          cb(node, parent)
+    else if Array.isArray(type)
+      typeSet := new Set(type)
+      walkAst target, (node, parent) ->
         if typeSet.has(node?.type)
-          callback(node, parent)
+          cb(node, parent)
+
+  // Extract JSX attributes from a JSXElement node
+  jsxAttributes(jsxElementNode: any): JsxAttribute[]
+    attrs: JsxAttribute[] := []
+    return attrs unless jsxElementNode?.type === "JSXElement"
+
+    rawList := @extractRawAttributes(jsxElementNode)
+    for attr of rawList
+      name := @extractAttributeName(attr)
+      range := @range(attr)
+      isSpread := not name? and Array.isArray(attr)
+      attrs.push({ name, value: attr, rawNode: attr, range, isSpread })
+    attrs
+
+  private extractRawAttributes(jsxElement: any): any[]
+    children := jsxElement?.children
+    return [] unless Array.isArray(children)
+
+    isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
+    isAttr := (v: any) -> Array.isArray(v) and v.length >= 2 and Array.isArray(v[1])
+
+    asAttributeList := (value: any): any[] | undefined ->
+      return undefined unless Array.isArray(value) and value.length > 0
+      return [value] if isAttr value
+      if value.some isAttr
+        return value.filter isAttr
+      undefined
+
+    for child of children
+      if Array.isArray(child) and child.some isOpenAngle
+        for slot of child
+          nested := asAttributeList slot
+          return nested if nested?
+
+    for child of children
+      if Array.isArray(child)
+        list := asAttributeList child
+        return list if list?
+
+    []
+
+  private extractAttributeName(attr: any): string | undefined
+    return undefined unless Array.isArray(attr) and attr.length >= 2
+    attrBody := attr[1]
+    return undefined unless Array.isArray(attrBody) and attrBody.length >= 2
+    namePart := attrBody[0]
+    if Array.isArray(namePart) and typeof namePart[0] is "string"
+      namePart[0]
+    else if typeof namePart is "string"
+      namePart
+    else
+      undefined
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]

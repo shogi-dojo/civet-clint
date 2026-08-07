@@ -1,24 +1,41 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
 
 const VALID_IDENTIFIER = /^[a-zA-Z_-][a-zA-Z0-9_-]*$/
 
-function extractAttributes(jsxElement: any): any[]
-  if not jsxElement.children
-    return []
+function isAttributeEntry(value: any): boolean
+  return false unless Array.isArray(value) and value.length >= 2
+  body := value[1]
+  return false unless Array.isArray(body) and body.length >= 2
+  namePart := body[0]
+  (Array.isArray(namePart) and typeof namePart[0] is "string") or typeof namePart is "string"
 
-  // Check opening tag in paired element <div ...>...</div>
-  if Array.isArray(jsxElement.children[0]) and Array.isArray(jsxElement.children[0][3])
-    return jsxElement.children[0][3]
+function asAttributeList(value: any): any[] | undefined
+  return undefined unless Array.isArray(value) and value.length > 0
+  return [value] if isAttributeEntry value
+  if value.some((entry: any) -> isAttributeEntry entry)
+    return value.filter (entry: any) -> isAttributeEntry entry
+  undefined
 
-  // Check self-closing element <div ... />
-  if Array.isArray(jsxElement.children[3])
-    return jsxElement.children[3]
+function extractAttributes(jsxElement: any, tree: SyntaxTree): any[]
+  children := tree.children(jsxElement)
+  return [] unless children.length > 0
+
+  isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
+
+  for child of children
+    if Array.isArray(child) and child.some isOpenAngle
+      for slot of child
+        nested := asAttributeList slot
+        return nested if nested?
+
+  for child of children
+    if Array.isArray(child)
+      list := asAttributeList child
+      return list if list?
 
   []
 
-// Reads an attribute's name out of the raw AST shape, or undefined when the entry
-// is not a plain named attribute (e.g. a `{...spread}`).
 function attributeName(attr: any): string | undefined
   return undefined unless Array.isArray(attr) and attr.length >= 2
   attrBody := attr[1]
@@ -31,10 +48,6 @@ function attributeName(attr: any): string | undefined
   else
     undefined
 
-// Index of the last attribute in the leading run of `className`/`id` attributes.
-// Civet lowers the shorthand to the front of the tag, so only this run can be
-// rewritten without reordering the emitted attribute list. Returns -1 when the tag
-// does not start with one.
 function leadingShorthandRunEnd(attrs: any[]): number
   var end = -1
   for attr, i of attrs
@@ -49,115 +62,87 @@ export const preferJsxShorthandRule: Rule = {
     description: "Prefer JSX class and id shorthands (.class and #id) over className and id attributes"
     fixable: true
     defaultSeverity: "error"
-    // The `.class`/`#id` JSX shorthand syntax is a React-parsing feature; without
-    // `react` enabled the rewrite is invalid Civet.
     capabilities: {
       requires: ["react"]
     }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := new SyntaxTree(ctx.ast, source)
     reportedStarts := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
+    tree.visit "JSXElement", (node) ->
+      attrs := extractAttributes(node, tree)
+      runEnd := leadingShorthandRunEnd(attrs)
 
-      if node.type is "JSXElement"
-        attrs := extractAttributes(node)
-        for attr, attrIndex of attrs
-          continue unless Array.isArray(attr) and attr.length >= 2
-          leadingWs := attr[0]
-          attrBody := attr[1]
-          continue unless Array.isArray(attrBody) and attrBody.length >= 2
+      for attr, attrIndex of attrs
+        continue unless attrIndex <= runEnd
+        continue unless Array.isArray(attr) and attr.length >= 2
+        leadingWs := attr[0]
+        attrBody := attr[1]
+        continue unless Array.isArray(attrBody) and attrBody.length >= 2
 
-          namePart := attrBody[0]
-          valuePart := attrBody[1]
+        namePart := attrBody[0]
+        valuePart := attrBody[1]
 
-          var attrName: string | undefined = undefined
-          if Array.isArray(namePart) and typeof namePart[0] is "string"
-            attrName = namePart[0]
-          else if typeof namePart is "string"
-            attrName = namePart
+        var attrName: string | undefined = undefined
+        if Array.isArray(namePart) and typeof namePart[0] is "string"
+          attrName = namePart[0]
+        else if typeof namePart is "string"
+          attrName = namePart
 
-          continue unless attrName is "className" or attrName is "id"
+        continue unless attrName is "className" or attrName is "id"
+        continue unless Array.isArray(valuePart) and valuePart.length >= 4
 
-          // Civet emits the lowered shorthand as the FIRST attribute on the tag,
-          // regardless of where it was written. For an attribute that is already
-          // first that is a no-op, but anywhere else it reorders the emitted
-          // attribute list:
-          //
-          //   <div onClick={f} className="btn">  ->  <div className="btn" onClick={f}>
-          //
-          // For ordinary sibling attributes that is render-equivalent but not
-          // byte-identical, so the gate rejects it — and because fixes are validated
-          // as one batch per file, a single such site discards every safe rewrite in
-          // that file. Worse, moving `className` ahead of a `{...spread}` inverts
-          // precedence and is a real behavior change.
-          //
-          // Emitting only the leading run keeps the batch clean and leaves the
-          // reordering sites to review. A contiguous run of shorthand-eligible
-          // attributes starting at index 0 is safe as a whole — `className id` both
-          // lower in place — because no member of the run jumps over an attribute
-          // that stays put.
-          continue unless attrIndex <= leadingShorthandRunEnd(attrs)
+        val := valuePart[3]
+        continue unless typeof val is "string"
+        continue unless (val.startsWith('"') and val.endsWith('"')) or (val.startsWith("'") and val.endsWith("'"))
 
-          continue unless Array.isArray(valuePart) and valuePart.length >= 4
+        rawVal := val.slice(1, -1).trim()
+        continue if rawVal is ""
+        continue if rawVal.includes("#{") or rawVal.includes("${")
 
-          val := valuePart[3]
-          // Must be a static string literal
-          continue unless typeof val is "string"
-          continue unless (val.startsWith('"') and val.endsWith('"')) or (val.startsWith("'") and val.endsWith("'"))
+        var shorthand: string | undefined = undefined
+        if attrName is "className"
+          classes := rawVal.split(/\s+/)
+          allValid := classes.every (c) -> VALID_IDENTIFIER.test(c)
+          continue unless allValid and classes.length > 0
+          shorthand = ` .${classes.join(".")}`
+        else if attrName is "id"
+          continue unless VALID_IDENTIFIER.test(rawVal)
+          shorthand = ` #${rawVal}`
 
-          rawVal := val.slice(1, -1).trim()
-          continue if rawVal is ""
-          continue if rawVal.includes("#{") or rawVal.includes("${")
+        continue unless shorthand
 
-          var shorthand: string | undefined = undefined
-          if attrName is "className"
-            classes := rawVal.split(/\s+/)
-            allValid := classes.every (c) -> VALID_IDENTIFIER.test(c)
-            continue unless allValid and classes.length > 0
-            shorthand = ` .${classes.join(".")}`
-          else if attrName is "id"
-            continue unless VALID_IDENTIFIER.test(rawVal)
-            shorthand = ` #${rawVal}`
+        var startPos: number | undefined = undefined
+        wsSpan := tree.range(leadingWs)
+        if wsSpan
+          startPos = wsSpan.start
+        else
+          valSpan := tree.range(valuePart[1])
+          if valSpan
+            startPos = source.lastIndexOf(attrName, valSpan.start)
 
-          continue unless shorthand
+        continue if startPos is undefined or reportedStarts.has(startPos)
 
-          // Calculate start position including leading whitespace
-          var startPos: number | undefined = undefined
-          if leadingWs?.$loc
-            startPos = leadingWs.$loc.pos
-          else if valuePart[1]?.$loc
-            // Fallback: search backwards for attrName
-            startPos = source.lastIndexOf(attrName, valuePart[1].$loc.pos)
+        slice := source.slice(startPos)
+        regex := attrName is "className"
+          ? /^\s*className\s*=\s*(?:"[^"]*"|'[^']*')/
+          : /^\s*id\s*=\s*(?:"[^"]*"|'[^']*')/
 
-          continue if startPos is undefined or reportedStarts.has(startPos)
-
-          // Match the exact attribute syntax from startPos
-          slice := source.slice(startPos)
-          regex := attrName is "className"
-            ? /^\s*className\s*=\s*(?:"[^"]*"|'[^']*')/
-            : /^\s*id\s*=\s*(?:"[^"]*"|'[^']*')/
-
-          match := slice.match(regex)
-          if match
-            matchLen := match[0].length
-
-            // Civet lowers the shorthand onto the tag-name line. When the attribute
-            // was written on its own line, that collapses the line break and changes
-            // the emitted whitespace, so the gate rejects it — and takes the file's
-            // whole batch with it. Only rewrite attributes already on the tag line.
-            continue if match[0].includes("\n")
-            reportedStarts.add(startPos)
-            ctx.report({
-              ruleId: "style/prefer-jsx-shorthand"
-              message: `Use JSX shorthand '${shorthand.trim()}' instead of '${match[0].trim()}'`
-              pos: startPos
-              fix: {
-                start: startPos
-                end: startPos + matchLen
-                replacement: shorthand
-              }
-            })
+        match := slice.match(regex)
+        if match
+          matchLen := match[0].length
+          continue if match[0].includes("\n")
+          reportedStarts.add(startPos)
+          ctx.report({
+            ruleId: "style/prefer-jsx-shorthand"
+            message: `Use JSX shorthand '${shorthand.trim()}' instead of '${match[0].trim()}'`
+            pos: startPos
+            fix: {
+              start: startPos
+              end: startPos + matchLen
+              replacement: shorthand
+            }
+          })
 }

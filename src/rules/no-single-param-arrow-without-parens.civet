@@ -1,5 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, intersectsRange } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
+import { intersectsRange } from "../utils.civet"
 
 const RESERVED_MODIFIERS = new Set<string>([
   "async"
@@ -14,20 +15,13 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
   meta: {
     description: "Flag unparenthesized single parameter arrows (n => ...) that may parse as function calls"
     fixable: false
-    // Advisory, not an error: `ident =>` is ambiguous from source. `f = x => x + 1`
-    // is the footgun, but `[a, b] = useState => init()` is a correct zero-arg lazy
-    // initializer, and both lower to `ident(() => …)`. At "error" this rule is
-    // unsatisfiable on real code — it fires on every `useState =>` with no valid
-    // rewrite available.
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
+    tree := new SyntaxTree(ctx.ast, source)
+    commentRanges := tree.commentRanges()
 
-    // `[^\S\n]` not `\s`: the arrow must be on the identifier's own line. Otherwise
-    // `ro.observe board` followed by a cleanup `=>` on the next line reads as
-    // `board =>` and is falsely flagged.
     re := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)[^\S\n]*=>/g
     var match: RegExpExecArray | null = null
 
@@ -38,12 +32,6 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
       identPos := match.index + match[0].indexOf(ident)
       continue if intersectsRange(commentRanges, identPos, identPos + ident.length)
 
-      // The footgun needs an arrow BODY on the same line: `f = x => x + 1` and
-      // `xs.map n => n + 1` both bind `x`/`n` as a callee and lower to `x(() => …)`.
-      // The style guide's mandated zero-arg form puts its body on the next line
-      // (`beforeEach =>` / `await runMut =>` + indented block), which is correct and
-      // has no parenthesized alternative. Without this check the rule fires on every
-      // `useEffect =>` in a codebase and cannot be satisfied.
       arrowEnd := match.index + match[0].length
       restOfLine := source.slice(arrowEnd, source.indexOf("\n", arrowEnd) is -1 ? source.length : source.indexOf("\n", arrowEnd))
       continue unless restOfLine.trim().length > 0
@@ -51,17 +39,7 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
       lineStart := source.lastIndexOf("\n", identPos - 1) + 1
       before := source.slice(lineStart, identPos)
 
-      // A TypeScript return-type annotation puts a type where a parameter would be:
-      // `(o: unknown): unknown => …` and the type-predicate form `(v): v is Foo => …`.
-      // Both are preceded by the parameter list's `)` plus a `:`, so the identifier is
-      // a type name, not an arrow parameter.
       continue if /\)\s*:[^)]*$/.test(before)
-
-      // `ident =>` with a same-line body is genuinely ambiguous and NOT decidable from
-      // source: `f = x => x + 1` is the footgun (`x(() => x + 1)`), while
-      // `[a, b] = useState => init()` is a correct zero-arg lazy initializer. Both
-      // lower to `ident(() => …)`; only the author knows which was meant. The rule
-      // therefore reports for human review and is deliberately not fixable.
 
       ctx.report({
         ruleId: "style/no-single-param-arrow-without-parens"

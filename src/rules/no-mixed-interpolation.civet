@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
 
 export const noMixedInterpolationRule: Rule = {
   id: "style/no-mixed-interpolation"
@@ -9,18 +9,16 @@ export const noMixedInterpolationRule: Rule = {
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := new SyntaxTree(ctx.ast, source)
     findings: { pos: number, message: string }[] := []
     reported := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
-
-      if node.type is "StringLiteral" and node.token and node.$loc
-        pos: number := node.$loc.pos
-        raw := ctx.source.slice(pos, pos + node.$loc.length)
-
-        // Double-quoted `${}` looks like JavaScript interpolation but Civet
-        // emits it literally. Ignore escaped sequences intended as text.
+    tree.visit "StringLiteral", (node) ->
+      span := tree.range(node)
+      if span and node.token
+        pos := span.start
+        raw := source.slice(pos, span.end)
         if raw.startsWith('"') and /(^|[^\\])\$\{[^}]+\}/.test(raw) and not reported.has(pos)
           reported.add(pos)
           findings.push({
@@ -28,24 +26,24 @@ export const noMixedInterpolationRule: Rule = {
             message: '${...} does not interpolate inside double-quoted strings; use a backtick template'
           })
 
-      if node.type is "TemplateLiteral"
-        tickPositions: number[] := []
-        walkAst node, (part) ->
-          if part?.$loc
-            actual := ctx.source.slice(part.$loc.pos, part.$loc.pos + part.$loc.length)
-            tickPositions.push(part.$loc.pos) if actual is "`"
+    tree.visit "TemplateLiteral", (node) ->
+      tickPositions: number[] := []
+      tree.visit (part) ->
+        span := tree.range(part)
+        if span
+          actual := source.slice(span.start, span.end)
+          tickPositions.push(span.start) if actual is "`"
 
-        if tickPositions.length >= 2
-          minPos := Math.min(...tickPositions)
-          maxPos := Math.max(...tickPositions) + 1
-          raw := ctx.source.slice(minPos, maxPos)
-          // Backtick `#{}` is the inverse trap: it also emits literally.
-          if raw.startsWith("`") and /(^|[^\\])#\{/.test(raw) and not reported.has(minPos)
-            reported.add(minPos)
-            findings.push({
-              pos: minPos
-              message: '#{...} does not interpolate inside backtick templates; use ${...}'
-            })
+      if tickPositions.length >= 2
+        minPos := Math.min(...tickPositions)
+        maxPos := Math.max(...tickPositions) + 1
+        raw := source.slice(minPos, maxPos)
+        if raw.startsWith("`") and /(^|[^\\])#\{/.test(raw) and not reported.has(minPos)
+          reported.add(minPos)
+          findings.push({
+            pos: minPos
+            message: '#{...} does not interpolate inside backtick templates; use ${...}'
+          })
 
     for item of findings
       ctx.report({

@@ -1,5 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
+import { intersectsRange } from "../utils.civet"
 
 export const noTrailingSemicolonsRule: Rule = {
   id: "style/no-trailing-semicolons"
@@ -10,8 +11,9 @@ export const noTrailingSemicolonsRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
-    stringRanges := collectStringRanges(ctx.ast)
+    tree := new SyntaxTree(ctx.ast, source)
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]
 
     lines := source.split("\n")

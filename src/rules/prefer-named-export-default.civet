@@ -1,5 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, intersectsRange, walkAst } from "../utils.civet"
+import { SyntaxTree } from "../syntax.civet"
+import { intersectsRange } from "../utils.civet"
 
 export const preferNamedExportDefaultRule: Rule = {
   id: "style/prefer-named-export-default"
@@ -10,9 +11,9 @@ export const preferNamedExportDefaultRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
+    tree := new SyntaxTree(ctx.ast, source)
+    commentRanges := tree.commentRanges()
 
-    // Check for anonymous default export pattern: `export default (` or `export default =>` or `export default function(`
     re := /export\s+default\s+(?:(?:\((?:[^)]*)\)\s*=>)|(?:=>)|(?:function\s*\())/g
     var match: RegExpExecArray | null = null
 
