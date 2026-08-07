@@ -1,0 +1,128 @@
+import type { Fix } from "./types.civet"
+import { walkAst, collectCommentRanges, collectStringRanges } from "./utils.civet"
+
+export interface SourceRange
+  start: number
+  end: number
+
+export interface SourceToken
+  value: string
+  raw: string
+  range: SourceRange
+  synthetic: boolean
+
+export interface SyntaxNode
+  type: string
+  range?: SourceRange
+  rawNode: any
+  [key: string]: any
+
+export class SyntaxTree
+  source: string
+  root: any
+  mode: "raw" | "true"
+
+  constructor(ast: any, source: string, mode: "raw" | "true" = "raw")
+    @source = source
+    @root = ast
+    @mode = mode
+
+  // Source span of a node or token.
+  range(node: any): SourceRange | undefined
+    return undefined unless node?
+    if node.start? and node.end?
+      return { start: node.start, end: node.end }
+    if Array.isArray(node.range) and node.range.length >= 2
+      return { start: node.range[0], end: node.range[1] }
+    if node.range?.start? and node.range?.end?
+      return { start: node.range.start, end: node.range.end }
+    if node.$loc
+      pos := node.$loc.pos
+      len := node.$loc.length or 0
+      return { start: pos, end: pos + len }
+
+    var lo = Infinity
+    var hi = -Infinity
+    walkAst node, (child) ->
+      return unless child?.$loc
+      pos := child.$loc.pos
+      len := child.$loc.length or 0
+      lo = Math.min(lo, pos)
+      hi = Math.max(hi, pos + len)
+
+    return undefined unless hi > lo
+    { start: lo, end: hi }
+
+  // Slice of source text corresponding to a node or range.
+  text(nodeOrRange: any): string
+    return "" unless nodeOrRange?
+    if typeof nodeOrRange.start is "number" and typeof nodeOrRange.end is "number"
+      return @source.slice(nodeOrRange.start, nodeOrRange.end)
+    span := @range(nodeOrRange)
+    return "" unless span?
+    @source.slice(span.start, span.end)
+
+  // Direct child nodes of a node, normalizing tuple and array structures.
+  children(node: any): any[]
+    return [] unless node? and typeof node is "object"
+    res: any[] := []
+
+    if Array.isArray(node)
+      for item of node
+        if item? and typeof item is "object"
+          res.push(item)
+    else
+      for key of Object.keys(node)
+        continue if key is "parent" or key is "$loc" or key is "type"
+        val := node[key]
+        if val? and typeof val is "object"
+          if Array.isArray(val)
+            for item of val
+              if item? and typeof item is "object"
+                res.push(item)
+          else
+            res.push(val)
+    res
+
+  // All source tokens beneath a node (or root if omitted).
+  tokens(node?: any): SourceToken[]
+    target := node or @root
+    tokensList: SourceToken[] := []
+    source := @source
+
+    walkAst target, (n) ->
+      return unless n? and typeof n is "object"
+      if n.$loc and typeof n.token is "string"
+        pos := n.$loc.pos
+        len := n.$loc.length or 0
+        range: SourceRange := { start: pos, end: pos + len }
+        raw := source.slice(pos, pos + len)
+        value := n.token
+        synthetic := raw !== value or len === 0
+        tokensList.push({ value, raw, range, synthetic })
+
+    tokensList.sort (a, b) -> a.range.start - b.range.start
+    tokensList
+
+  // Traverses AST calling callback for matching node type or all nodes.
+  visit(typeOrCallback: string | string[] | ((node: any, parent: any) => void), callback?: (node: any, parent: any) => void): void
+    if typeof typeOrCallback === "function"
+      walkAst @root, typeOrCallback
+    else if typeof typeOrCallback === "string" and callback
+      targetType := typeOrCallback
+      walkAst @root, (node, parent) ->
+        if node?.type === targetType
+          callback(node, parent)
+    else if Array.isArray(typeOrCallback) and callback
+      typeSet := new Set(typeOrCallback)
+      walkAst @root, (node, parent) ->
+        if typeSet.has(node?.type)
+          callback(node, parent)
+
+  // Ranges of all comments.
+  commentRanges(): SourceRange[]
+    collectCommentRanges(@root)
+
+  // Ranges of all string/template literals.
+  stringRanges(): SourceRange[]
+    collectStringRanges(@root)
