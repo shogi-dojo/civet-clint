@@ -1,0 +1,90 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+describe "style/prefer-bare-jsx-values", ->
+  it "rewrites differing identifiers, non-string literals, and member expressions to bare values", ->
+    input := '<Button onClick={handleClick} size={16} disabled={false} cancelText={null} value={option.value} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+      fix: true
+    })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe('<Button onClick=handleClick size=16 disabled=false cancelText=null value=option.value />')
+
+    origOut := compileForOutput(input, { dial: { react: true } })
+    fixedOut := compileForOutput(res.fixedSource!, { dial: { react: true } })
+    expect(origOut.output).toBe(fixedOut.output)
+
+  it "skips same-name identifiers, boolean true, string literals, calls, objects, arrays, arrows, and templates", ->
+    input := '<C name={name} disabled={true} label={"hello"} call={f()} t={`s`} obj={{a: 1}} arr={[1]} arrow={() => 1} header={<H />} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+
+  it "skips multiline braced values", ->
+    input := '<div onClick={\n  handleClick\n} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+
+  it "is skipped when react dial is disabled", ->
+    input := '<Button onClick={handleClick} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: {}
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+
+describe "style/prefer-hash-comments", ->
+  it "rewrites // comments to # comments", ->
+    input := "// leading comment\nx := 1 // trailing comment\n"
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "warn" }
+      civetOptions: { coffeeComment: true, autoLet: true }
+      fix: true
+    })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("# leading comment\nx := 1 # trailing comment\n")
+
+    origOut := compileForOutput(input, { dial: { coffeeComment: true, autoLet: true } })
+    fixedOut := compileForOutput(res.fixedSource!, { dial: { coffeeComment: true, autoLet: true } })
+    expect(origOut.output).toBe(fixedOut.output)
+
+  it "preserves CRLF line endings", ->
+    input := "// line 1\r\n// line 2\r\n"
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "warn" }
+      civetOptions: { coffeeComment: true }
+      fix: true
+    })
+    expect(res.fixedSource).toBe("# line 1\r\n# line 2\r\n")
+
+  it "skips directives and triple-slash comments", ->
+    input := "// @ts-check\n// eslint-disable-next-line\n// prettier-ignore\n// c8 ignore next\n// istanbul ignore next\n//# sourceMappingURL=foo.map\n/// <reference path=\"./types\" />\n"
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "warn" }
+      civetOptions: { coffeeComment: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-hash-comments")).toHaveLength(0)
+
+  it "ignores existing # comments, strings containing //, and comments inside JSX", ->
+    input := '# existing hash\nurl := "http://example.com"\n<div className="box">\n  // comment inside JSX\n</div>\n'
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "warn" }
+      civetOptions: { coffeeComment: true, react: true, autoLet: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-hash-comments")).toHaveLength(0)
+
+  it "is skipped when coffeeComment dial is disabled", ->
+    input := "// regular comment"
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "warn" }
+      civetOptions: {}
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-hash-comments")).toHaveLength(0)

@@ -24,6 +24,8 @@ import {
   noThinArrowRule,
   noPipeOperatorRule,
   preferRangeOperatorRule,
+  preferBareJsxValuesRule,
+  preferHashCommentsRule,
   type ClintConfig,
   type CompileDialOptions,
   type CompileResult,

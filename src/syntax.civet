@@ -206,8 +206,6 @@ export class SyntaxTree
       return undefined unless Array.isArray(value) and value.length > 0
       return [value] if isAttr value
       if value.some isAttr
-        // Keep non-named entries. They are ordering barriers for `.class`/`#id`
-        // lowering even though another rule may not inspect them directly.
         return value
       undefined
 
@@ -241,6 +239,15 @@ export class SyntaxTree
       namePart
     else
       undefined
+
+  // Ranges of all JSX elements and fragments.
+  jsxRanges(): SourceRange[]
+    ranges: SourceRange[] := []
+    @visit ["JSXElement", "JSXFragment"], (node) ->
+      span := @range(node)
+      ranges.push(span) if span
+    ranges.sort (a, b) -> a.start - b.start
+    ranges
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]

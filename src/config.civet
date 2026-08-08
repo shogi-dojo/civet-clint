@@ -62,14 +62,16 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-ampersand-shorthand": "warn"
       "style/no-single-param-arrow-without-parens": "warn"
       "style/prefer-named-export-default": "warn"
-      "style/no-thin-arrow": "warn"
       "style/prefer-range-operator": "warn"
       "style/prefer-terse-imports": "error"
+      "style/prefer-bare-jsx-values": "error"
+      "style/prefer-hash-comments": "error"
     }
     civetOptions: {
       autoLet: true
       coffeeIsnt: true
       coffeeRange: true
+      coffeeComment: true
       react: true
     }
     compileOptions: {}
