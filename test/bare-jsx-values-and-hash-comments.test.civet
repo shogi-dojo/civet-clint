@@ -1,0 +1,43 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+describe "style/prefer-bare-jsx-values", ->
+  it "rewrites differing identifiers, non-string literals, and member expressions to bare values", ->
+    input := '<Button onClick={handleClick} size={16} disabled={false} cancelText={null} value={option.value} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+      fix: true
+    })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe('<Button onClick=handleClick size=16 disabled=false cancelText=null value=option.value />')
+
+    // Verify byte-for-byte compiled output equality
+    origOut := compileForOutput(input, { dial: { react: true } })
+    fixedOut := compileForOutput(res.fixedSource!, { dial: { react: true } })
+    expect(origOut.output).toBe(fixedOut.output)
+
+  it "skips same-name identifiers, boolean true, string literals, calls, objects, arrays, arrows, and templates", ->
+    input := '<C name={name} disabled={true} label={"hello"} call={f()} t={`s`} obj={{a: 1}} arr={[1]} arrow={() => 1} header={<H />} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+
+  it "skips multiline braced values", ->
+    input := '<div onClick={\n  handleClick\n} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+
+  it "is skipped when react dial is disabled", ->
+    input := '<Button onClick={handleClick} />'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: {}
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)

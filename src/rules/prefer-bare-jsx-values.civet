@@ -1,0 +1,60 @@
+import type { Rule, RuleContext } from "../types.civet"
+
+export const preferBareJsxValuesRule: Rule = {
+  id: "style/prefer-bare-jsx-values"
+  meta: {
+    description: "Prefer bare JSX attribute values (attr=value) over braced values (attr={value})"
+    fixable: true
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["react"]
+    }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+
+    tree.visit "JSXElement", (node) ->
+      for attr of tree.jsxAttributes(node)
+        continue unless attr.name? and attr.expression? and attr.bracedRange?
+
+        span := attr.bracedRange
+        bracedText := source.slice(span.start, span.end)
+        continue if bracedText.includes("\n") or bracedText.includes("\r")
+
+        expr := attr.expression
+        exprType := expr?.type
+
+        var replacement: string | undefined = undefined
+
+        switch exprType
+          when "Identifier"
+            // Skip prop={prop} (same-name shorthand, handled by prefer-jsx-attr-shorthand)
+            continue if expr.name is attr.name
+            replacement = expr.name
+          when "Literal"
+            raw := expr.raw or tree.text(expr)
+            // Skip boolean true (prop={true} -> prop changes JS emission) and string literals (quotes vs braces)
+            continue if raw is "true" or raw.startsWith('"') or raw.startsWith("'")
+            replacement = tree.text(expr)
+          when "MemberExpression"
+            replacement = tree.text(expr)
+          else
+            continue
+
+        continue unless replacement and replacement.length > 0
+
+        innerText := bracedText.slice(1, bracedText.length - 1).trim()
+        continue unless innerText is replacement
+
+        ctx.report({
+          ruleId: "style/prefer-bare-jsx-values"
+          message: `Use bare JSX value '${attr.name}=${replacement}' instead of '${attr.name}={${innerText}}'`
+          pos: span.start
+          fix: {
+            start: span.start
+            end: span.end
+            replacement
+          }
+        })
+}

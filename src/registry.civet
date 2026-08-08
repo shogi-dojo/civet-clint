@@ -16,6 +16,7 @@ import { noThinArrowRule } from "./rules/no-thin-arrow.civet"
 import { noPipeOperatorRule } from "./rules/no-pipe-operator.civet"
 import { preferRangeOperatorRule } from "./rules/prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./rules/prefer-terse-imports.civet"
+import { preferBareJsxValuesRule } from "./rules/prefer-bare-jsx-values.civet"
 
 export class RuleRegistry
   private rules: Map<string, Rule>
@@ -90,6 +91,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(noPipeOperatorRule)
   registry.register(preferRangeOperatorRule)
   registry.register(preferTerseImportsRule)
+  registry.register(preferBareJsxValuesRule)
   registry
 
 export const defaultRuleRegistry: RuleRegistry = createDefaultRuleRegistry()
