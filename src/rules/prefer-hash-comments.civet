@@ -1,0 +1,47 @@
+import type { Rule, RuleContext } from "../types.civet"
+import type { SourceRange } from "../syntax.civet"
+
+const DIRECTIVE_REGEX = /^\/\/\s*(?:@ts-|eslint|prettier|c8\b|istanbul\b|#\s*sourceURL|#\s*sourceMappingURL)/i
+
+function isInsideJsx(pos: number, jsxRanges: SourceRange[]): boolean
+  for range of jsxRanges
+    if pos > range.start and pos < range.end
+      return true
+  false
+
+export const preferHashCommentsRule: Rule = {
+  id: "style/prefer-hash-comments"
+  meta: {
+    description: "Prefer CoffeeScript-style '#' comments over '//' comments"
+    fixable: true
+    defaultSeverity: "warn"
+    capabilities: {
+      requires: ["coffeeComment"]
+    }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    jsxRanges := tree.jsxRanges()
+
+    for commentRange of tree.commentRanges()
+      pos := commentRange.start
+      slice := source.slice(pos, commentRange.end)
+
+      continue unless slice.startsWith("//")
+      continue if slice.startsWith("///")
+      continue if DIRECTIVE_REGEX.test(slice)
+      continue if isInsideJsx(pos, jsxRanges)
+
+      ctx.report({
+        ruleId: "style/prefer-hash-comments"
+        message: "Prefer CoffeeScript-style '#' comment over '//' comment"
+        pos
+        severity: "warn"
+        fix: {
+          start: pos
+          end: pos + 2
+          replacement: "#"
+        }
+      })
+}

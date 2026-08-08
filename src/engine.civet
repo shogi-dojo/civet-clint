@@ -170,7 +170,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       ruleLevel := mergedRules[d.ruleId] or "off"
       return if ruleLevel is "off"
 
-      if d.fix and intersectsRange(commentRanges, d.fix.start, d.fix.end)
+      if d.fix and d.ruleId isnt "style/prefer-hash-comments" and intersectsRange(commentRanges, d.fix.start, d.fix.end)
         return
 
       severity: Severity := (ruleLevel is "error" or ruleLevel is "warn")

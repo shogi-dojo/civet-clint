@@ -22,6 +22,7 @@ import { noPipeOperatorRule } from "./no-pipe-operator.civet"
 import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./prefer-bare-jsx-values.civet"
+import { preferHashCommentsRule } from "./prefer-hash-comments.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -46,5 +47,6 @@ export {
   noPipeOperatorRule,
   preferRangeOperatorRule,
   preferTerseImportsRule,
-  preferBareJsxValuesRule
+  preferBareJsxValuesRule,
+  preferHashCommentsRule
 }
