@@ -183,6 +183,8 @@ Tailored for idiomatic Civet + React codebases:
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/prefer-bare-assignment`: `"error"` (fixable, requires `autoLet`)
 - `style/prefer-terse-imports`: `"error"` (fixable)
+- `style/prefer-bare-jsx-values`: `"warn"` (fixable, requires `react`)
+- `style/prefer-hash-comments`: `"warn"` (fixable, requires `coffeeComment`)
 - `style/no-trailing-semicolons`: `"error"` (diagnostic)
 - `style/prefer-existential-check`: `"warn"` (diagnostic)
 - `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
@@ -236,6 +238,8 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
+| [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
+| [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 
