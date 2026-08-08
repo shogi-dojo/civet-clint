@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
 
 const EQUALITY_TOKENS = new Set(["===", "!==", "==", "!=", "is", "isnt"])
 
@@ -12,14 +11,13 @@ export const noNullEqualityRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
-
-      if node.$loc and node.token and EQUALITY_TOKENS.has(node.token)
-        pos := node.$loc.pos
-        len := node.$loc.length
+    for tok of tree.tokens()
+      if EQUALITY_TOKENS.has(tok.value)
+        pos := tok.range.start
+        len := tok.range.end - pos
 
         if not reportedStarts.has(pos)
           beforeSlice := source.slice(Math.max(0, pos - 30), pos)

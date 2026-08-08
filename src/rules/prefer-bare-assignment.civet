@@ -1,5 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, collectStringRanges, intersectsRange } from "../utils.civet"
+import { intersectsRange } from "../utils.civet"
 
 function isConstCase(name: string): boolean
   /^[A-Z][A-Z0-9_]*$/.test(name) and name.length > 1
@@ -16,8 +16,9 @@ export const preferBareAssignmentRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
-    stringRanges := collectStringRanges(ctx.ast)
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]
 
     re := /(?:^|[\n;])([ \t]*)(export[ \t]+)?(const|let|var)[ \t]+([a-zA-Z_$][a-zA-Z0-9_$]*)[ \t]*(=)/g

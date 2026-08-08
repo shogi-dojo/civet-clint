@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
 
 const REPLACEMENT_MAP = new Map<string, string>([
   ["===", "is"]
@@ -22,24 +21,18 @@ export const preferWordOperatorsRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
-
-      // Check UnaryExpression with '!'
-      if node.type is "UnaryExpression" and Array.isArray(node.pre)
+    tree.visit "UnaryExpression", (node) ->
+      if Array.isArray(node.pre)
         for preItem of node.pre
-          if preItem?.$loc and preItem.token is "!"
-            pos := preItem.$loc.pos
-            // `unless` is normalized to a synthetic `!` in the raw AST, with
-            // its location pointing at the `u`. Only rewrite a literal bang.
-            // Preserve adjacent bangs: Civet supports `!!value` as the
-            // conventional, compact boolean-coercion form.
+          span := tree.range(preItem)
+          if span and preItem.token is "!"
+            pos := span.start
             adjacentBang := source[pos - 1] is "!" or source[pos + 1] is "!"
             if source[pos] is "!" and not adjacentBang and not reportedStarts.has(pos)
               reportedStarts.add(pos)
-              // Determine if trailing space is needed
               nextChar := source[pos + 1]
               replacement := (nextChar is " " or nextChar is "\t" or nextChar is "\n")
                 ? "not"
@@ -55,29 +48,21 @@ export const preferWordOperatorsRule: Rule = {
                 }
               })
 
-      // Civet normalizes `==`/`!=` into strict tokens in the raw AST when
-      // coffeeEq is enabled, so choose the rewrite from the original slice.
-      if node.$loc and node.token
-        pos := node.$loc.pos
-        len := node.$loc.length
+    for tok of tree.tokens()
+      if tok.value
+        pos := tok.range.start
+        len := tok.range.end - pos
         actualSlice := source.slice(pos, pos + len)
         wordOp := REPLACEMENT_MAP.get(actualSlice)
 
         if wordOp and not reportedStarts.has(pos)
-          // Some source spellings only lower equivalently under Coffee options.
-          // Skip those individual operators instead of letting one unsafe edit make
-          // the equivalence gate reject an otherwise-safe rule batch.
-          return if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
-          return if actualSlice is "==" and not ctx.parseOptions.coffeeEq
-          return if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
+          continue if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
+          continue if actualSlice is "==" and not ctx.parseOptions.coffeeEq
+          continue if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
 
-          // Only rewrite real compiler operator tokens, never coincidental
-          // operator-looking text in a string, comment, or JSX text node.
-          normalizedOp := REPLACEMENT_MAP.get(node.token)
+          normalizedOp := REPLACEMENT_MAP.get(tok.value)
           if normalizedOp
-            // Null comparisons need an intentional `x?`/`not x?` decision.
             if actualSlice is "===" or actualSlice is "!==" or actualSlice is "==" or actualSlice is "!="
-              // Inspect surrounding tokens/words
               beforeSlice := source.slice(Math.max(0, pos - 30), pos)
               afterSlice := source.slice(pos + len, Math.min(source.length, pos + len + 30))
 
@@ -85,8 +70,7 @@ export const preferWordOperatorsRule: Rule = {
               afterMatch := afterSlice.match(/^\s*([a-zA-Z0-9_$]+)/)
 
               if (beforeMatch and isNull(beforeMatch[1])) or (afterMatch and isNull(afterMatch[1]))
-                // Skip null comparisons
-                return
+                continue
 
             reportedStarts.add(pos)
             ctx.report({

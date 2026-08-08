@@ -1,0 +1,20 @@
+import { describe, it, expect } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+
+describe "Structural AST Guard Test", ->
+  it "prevents raw AST property access ($loc, ctx.ast, parent) in src/rules/", async ->
+    rulesDir := path.resolve(__dirname, "../src/rules")
+    entries := await fs.readdir(rulesDir)
+    ruleFiles := entries.filter (f) -> f.endsWith(".civet") and f !== "index.civet"
+
+    for file of ruleFiles
+      content := await fs.readFile(path.join(rulesDir, file), "utf8")
+      expect(content).not.toContain("$loc")
+      expect(content).not.toContain("ctx.ast")
+      expect(content).not.toMatch(/\bparent\b/)
+
+    for file of ["prefer-jsx-shorthand.civet", "prefer-jsx-attr-shorthand.civet"]
+      content := await fs.readFile(path.join(rulesDir, file), "utf8")
+      expect(content).not.toContain("rawNode")
+      expect(content).not.toMatch(/\b(?:attr|attrBody|valuePart|braced)\s*\[\d+\]/)

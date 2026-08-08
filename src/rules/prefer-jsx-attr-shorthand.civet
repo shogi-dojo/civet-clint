@@ -1,71 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
-
-// A single attribute is `[leadingWhitespace, [name, [eqToken, value]]]` — a
-// two-entry array whose second entry is itself an array starting with the name.
-function isAttributeEntry(value: any): boolean
-  return false unless Array.isArray(value) and value.length >= 2
-  body := value[1]
-  return false unless Array.isArray(body) and body.length >= 2
-  namePart := body[0]
-  (Array.isArray(namePart) and typeof namePart[0] is "string") or typeof namePart is "string"
-
-// Normalizes the attribute slot to a list. Civet stores a lone attribute as the
-// bare entry rather than a one-element list, so both shapes reach this.
-function asAttributeList(value: any): any[] | undefined
-  return undefined unless Array.isArray(value) and value.length > 0
-  return [value] if isAttributeEntry value
-  // A multi-attribute list may also hold `{...spread}` entries, which have no
-  // name; requiring at least one real attribute keeps unrelated arrays out.
-  if value.some((entry: any) -> isAttributeEntry entry)
-    return value.filter (entry: any) -> isAttributeEntry entry
-  undefined
-
-// Reads the attribute list off a JSXElement's raw AST shape, covering both the
-// paired `<div ...>...</div>` and self-closing `<div ... />` forms.
-//
-// The slot is not at a fixed index — leading whitespace shifts everything after
-// it — so it is located by shape rather than by position.
-function extractAttributes(jsxElement: any): any[]
-  children := jsxElement?.children
-  return [] unless Array.isArray(children)
-
-  // Paired element: the opening tag is nested as its own array, holding the
-  // attributes. The `<` marker is a bare string in the raw AST the engine uses and
-  // a token object in the plain tree, so both spellings are accepted.
-  isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
-
-  for child of children
-    if Array.isArray(child) and child.some isOpenAngle
-      for slot of child
-        nested := asAttributeList slot
-        return nested if nested?
-
-  for child of children
-    if Array.isArray(child)
-      list := asAttributeList child
-      return list if list?
-
-  []
-
-// A named attribute is `[leadingWhitespace, [name, [eqToken, value]]]`. Anything
-// else — notably a `{...spread}` — has no name and is skipped.
-function attributeName(attr: any): string | undefined
-  return undefined unless Array.isArray(attr) and attr.length >= 2
-  attrBody := attr[1]
-  return undefined unless Array.isArray(attrBody) and attrBody.length >= 2
-  namePart := attrBody[0]
-  if Array.isArray(namePart) and typeof namePart[0] is "string"
-    namePart[0]
-  else if typeof namePart is "string"
-    namePart
-  else
-    undefined
-
-// End offset of a raw token or node, or undefined when it carries no position.
-function tokenEnd(tok: any): number | undefined
-  return undefined unless tok?.$loc?
-  tok.$loc.pos + (tok.$loc.length ?? 0)
 
 export const preferJsxAttrShorthandRule: Rule = {
   id: "style/prefer-jsx-attr-shorthand"
@@ -79,48 +12,20 @@ export const preferJsxAttrShorthandRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := ctx.syntax
 
-    walkAst ctx.ast, (node) ->
-      return unless node? and typeof node is "object"
-      return unless node.type is "JSXElement"
-
-      for attr of extractAttributes(node)
-        name := attributeName attr
+    tree.visit "JSXElement", (node) ->
+      for attr of tree.jsxAttributes(node)
+        name := attr.name
         continue unless name?
+        eqSpan := tree.range(attr.equals)
+        continue unless eqSpan and attr.bracedRange?
 
-        attrBody := attr[1]
-        valuePart := attrBody[1]
-        continue unless Array.isArray(valuePart)
-
-        // The `=` token and the braced value are at different indices depending on
-        // the AST mode — the engine's `ast: "raw"` tree carries extra empty slots —
-        // so both are located by shape.
-        eqToken := valuePart.find (v: any) -> v?.token is "="
-        braced := valuePart.find (v: any) ->
-          Array.isArray(v) and v[0]?.token is "{"
-        continue unless eqToken?.$loc? and braced?
-
-        openBrace := braced[0]
-        closeBrace := braced[braced.length - 1]
-        continue unless closeBrace?.token is "}"
-
-        // Between the braces sits the value, plus possible empty-string padding.
-        inner := braced.slice(1, -1).find (v: any) -> v? and v isnt "" and typeof v isnt "string"
-
-        // The rewrite replaces the whole `name={value}` run, so it needs the start
-        // of the name. The name itself carries no `$loc`, but it sits immediately
-        // before the `=` token, so its start is derivable and then verified against
-        // the source text below.
-        eqPos := eqToken.$loc.pos
+        eqPos := eqSpan.start
         start := eqPos - name.length
-        end := tokenEnd closeBrace
-        continue unless end?
+        end := attr.bracedRange.end
+        inner := attr.expression
 
-        // `prop={true}` -> `prop`. Civet emits the bare form as `prop`, not
-        // `prop={true}`, so this changes the compiled output and cannot pass the
-        // byte-identity gate. React treats both as `true`, but that is a
-        // render-equivalence argument the gate deliberately does not make, so the
-        // finding is reported without a fix and left to review.
         if inner?.type is "Literal" and inner.raw is "true"
           ctx.report({
             ruleId: "style/prefer-jsx-attr-shorthand"
@@ -129,20 +34,9 @@ export const preferJsxAttrShorthandRule: Rule = {
           })
           continue
 
-        // `prop={prop}` -> `{prop}`. Civet re-expands the shorthand to exactly
-        // `prop={prop}` — verified against the compiler, including after a
-        // `{...spread}`, where the attribute keeps its position and precedence is
-        // unchanged. The rewrite is therefore byte-identical in compiled output.
         continue unless inner?.type is "Identifier"
         continue unless inner.name is name
 
-        // Guard the source text as well. This both validates the derived start
-        // offset and rejects any interior comment or irregular whitespace, which
-        // the rewrite would otherwise silently drop.
-        //
-        // Note the replacement is `{name}`, not a bare `name`: a bare attribute is
-        // Civet's *boolean* shorthand and compiles to `name={true}`, which would be
-        // a semantic change rather than a reformat.
         continue unless source.slice(start, end) is `${name}={${name}}`
 
         ctx.report({

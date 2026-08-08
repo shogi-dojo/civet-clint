@@ -8,7 +8,10 @@ import {
   lintSource,
   loadConfig,
   resolveConfigForFile,
-  parseRawAst,
+  parseSyntax,
+  SyntaxTree,
+  type SourceRange,
+  type SourceToken,
   parseCliArgs,
   RuleRegistry,
   noTrailingSemicolonsRule,
@@ -66,7 +69,7 @@ const options: LintOptions = { config: resolved, registry: defaultReg, fix: true
 const result: LintResult = lintSource('fn := () => a === b', options)
 const compileOptions: CompileDialOptions = { dial: {}, compileOptions: { js: true } }
 const compiled: CompileResult = compileForOutput('x := 1', compileOptions)
-const parsed: CompileResult = parseRawAst('x := 1', { dial: {} })
+const parsed: CompileResult = parseSyntax('x := 1', { dial: {} })
 const rule: Rule | undefined = allRules['style/prefer-word-operators']
 
 void userConfig

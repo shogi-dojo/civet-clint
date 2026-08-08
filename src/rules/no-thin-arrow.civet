@@ -1,16 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, intersectsRange, walkAst } from "../utils.civet"
-
-function collectStringRanges(ast: any): { start: number, end: number }[]
-  ranges: { start: number, end: number }[] := []
-  walkAst ast, (node) ->
-    return unless node? and typeof node is "object"
-    if (node.type is "StringLiteral" or node.type is "TemplateLiteral" or node.type is "Literal") and node.$loc
-      ranges.push({
-        start: node.$loc.pos
-        end: node.$loc.pos + (node.$loc.length or 0)
-      })
-  ranges
+import { intersectsRange } from "../utils.civet"
 
 export const noThinArrowRule: Rule = {
   id: "style/no-thin-arrow"
@@ -21,8 +10,9 @@ export const noThinArrowRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
-    stringRanges := collectStringRanges(ctx.ast)
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]
 
     var i = 0

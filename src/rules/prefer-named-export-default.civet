@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { collectCommentRanges, intersectsRange, walkAst } from "../utils.civet"
 
 export const preferNamedExportDefaultRule: Rule = {
   id: "style/prefer-named-export-default"
@@ -10,9 +9,9 @@ export const preferNamedExportDefaultRule: Rule = {
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
-    commentRanges := collectCommentRanges(ctx.ast)
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
 
-    // Check for anonymous default export pattern: `export default (` or `export default =>` or `export default function(`
     re := /export\s+default\s+(?:(?:\((?:[^)]*)\)\s*=>)|(?:=>)|(?:function\s*\())/g
     var match: RegExpExecArray | null = null
 
@@ -26,3 +25,9 @@ export const preferNamedExportDefaultRule: Rule = {
         pos
       })
 }
+
+function intersectsRange(ranges: { start: number, end: number }[], start: number, end: number): boolean
+  for range of ranges
+    if start < range.end and (end > range.start or (start is end and start > range.start))
+      return true
+  false

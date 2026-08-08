@@ -1,5 +1,4 @@
 import type { Rule, RuleContext } from "../types.civet"
-import { walkAst } from "../utils.civet"
 
 export const noIsNotRule: Rule = {
   id: "style/no-is-not"
@@ -7,23 +6,21 @@ export const noIsNotRule: Rule = {
     description: "Flag 'is not' (prefer 'isnt')"
     fixable: false
     defaultSeverity: "warn"
-    // This rule applies when `isnt` is available as the preferred spelling or when
-    // `coffeeNot` turns `a is not b` into the dangerous `a === !b` footgun.
     capabilities: {
       requiresAny: ["coffeeIsnt", "coffeeNot"]
     }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
+    tree := ctx.syntax
     reportedStarts := new Set<number>()
 
-    walkAst ctx.ast, (node, parent) ->
-      return unless node? and typeof node is "object"
-
-      if node.$loc
-        pos := node.$loc.pos
-        len := node.$loc.length
-        slice := source.slice(pos, pos + len)
+    tree.visit (node) ->
+      span := tree.range(node)
+      if span
+        pos := span.start
+        len := span.end - span.start
+        slice := source.slice(pos, span.end)
         coffeeNotFootgun := ctx.parseOptions.coffeeNot and
           node.token is "===" and
           slice is "is" and

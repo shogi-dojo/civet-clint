@@ -49,6 +49,13 @@ describe "Rules Test Suite", ->
       })
       expect(res.fixedSource).toBe("a is undefined\nb isnt undefined")
 
+    it "continues after an operator whose preferred spelling is unavailable", ->
+      res := lintSource("a !== b\nc === d", {
+        rules: { "style/prefer-word-operators": "error" }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("a !== b\nc is d")
+
     it "does not replace operators inside strings, comments, or JSX text", ->
       input := 's := "=== && || !"\n// comment with !== and ||\n<div>=== and &&</div>'
       res := lintSource(input, {
@@ -155,6 +162,14 @@ describe "Rules Test Suite", ->
         input := '<div {...props} className="btn">x</div>'
         expect(jsxFix(input).fixedSource ?? input).toBe(input)
 
+      it "skips className that follows a JSX attribute shorthand", ->
+        input := '<span {key} className="counter">x</span>'
+        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+
+      it "preserves the 0.1.1 result for a returned JSX element", ->
+        input := 'render := =>\n  return <div className="container">x</div>'
+        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+
       it "rewrites className that precedes a spread", ->
         res := jsxFix '<div className="btn" {...props}>x</div>'
         expect(res.isEquivalencePreserved).toBe(true)
@@ -234,3 +249,10 @@ describe "Rules Test Suite", ->
       res := lintSource(input)
       interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
       expect(interpDiags.length).toBe(1)
+
+    it "reports the template that actually contains the mixed interpolation", ->
+      input := 'safe := `Hello ${name}`\nbad := `Hello #{name}`'
+      res := lintSource(input)
+      interpDiags := res.diagnostics.filter((d) -> d.ruleId is "style/no-mixed-interpolation")
+      expect(interpDiags).toHaveLength(1)
+      expect(interpDiags[0].line).toBe(2)

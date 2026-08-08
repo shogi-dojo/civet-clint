@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
 import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
-import { parseRawAst, compileForOutput } from "../src/compiler.civet"
+import { parseSyntax, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
 // Configuration matrix: every supported dial × rule interaction must be covered. The
@@ -129,14 +129,16 @@ describe "Configuration matrix", ->
       expect(baseline.output).toBe("const x = 1")
 
     it "keeps Clint control options synchronous and text-producing", ->
-      raw := parseRawAst("x := 1", {
+      raw := parseSyntax("x := 1", {
         dial: {}
         compileOptions: { sync: false, ast: false, filename: "wrong.civet" }
         filename: "right.civet"
       })
       expect(raw.ok).toBe(true)
-      expect(raw.ast?.type).toBe("BlockStatement")
-      expect(raw.ast).not.toBeInstanceOf(Promise)
+      expect(raw.syntax).toBeDefined()
+      // Clint intentionally keeps Civet's unpruned child arrays behind SyntaxTree.
+      // `ast: true` collapses this single-child shape to an object.
+      expect(Array.isArray(raw.syntax!.root.children)).toBe(true)
 
       output := compileForOutput("x := 1", {
         dial: {}
