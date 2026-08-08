@@ -31,6 +31,9 @@ export class SyntaxTree
   root: any
 
   constructor(ast: any, source: string)
+    // `ast` is Civet's unpruned tree. All raw tuple/parent handling stays in this
+    // adapter so rules consume named nodes, source tokens, ranges, and normalized
+    // helpers instead of depending on compiler layout directly.
     @source = source
     @root = ast
 

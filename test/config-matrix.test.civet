@@ -136,6 +136,9 @@ describe "Configuration matrix", ->
       })
       expect(raw.ok).toBe(true)
       expect(raw.syntax).toBeDefined()
+      // Clint intentionally keeps Civet's unpruned child arrays behind SyntaxTree.
+      // `ast: true` collapses this single-child shape to an object.
+      expect(Array.isArray(raw.syntax!.root.children)).toBe(true)
 
       output := compileForOutput("x := 1", {
         dial: {}

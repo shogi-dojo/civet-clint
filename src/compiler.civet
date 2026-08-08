@@ -36,14 +36,16 @@ export interface CompileResult
   column?: number
   offset?: number
 
-// Parse source into a SyntaxTree under the given dial using Civet's semantic AST (ast: true).
+// Parse source into a SyntaxTree under the given dial. Clint intentionally consumes
+// Civet's unpruned AST: its child arrays retain a consistent shape, while SyntaxTree
+// keeps that compiler-specific representation out of rules and the public rule API.
 export function parseSyntax(source: string, options: SyntaxParseOptions): CompileResult
   try
     retained := pipelineOptions(options.compileOptions)
     ast := civet.compile(source, {
       ...retained
       sync: true
-      ast: true
+      ast: "raw"
       filename: options.filename
       parseOptions: options.dial
     }) as any
