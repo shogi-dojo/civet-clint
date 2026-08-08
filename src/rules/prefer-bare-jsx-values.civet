@@ -20,6 +20,7 @@ export const preferBareJsxValuesRule: Rule = {
 
         span := attr.bracedRange
         bracedText := source.slice(span.start, span.end)
+        continue unless bracedText.startsWith("{") and bracedText.endsWith("}")
         continue if bracedText.includes("\n") or bracedText.includes("\r")
 
         expr := attr.expression

@@ -1,13 +1,6 @@
 import type { Rule, RuleContext } from "../types.civet"
-import type { SourceRange } from "../syntax.civet"
 
-const DIRECTIVE_REGEX = /^\/\/\s*(?:@ts-|eslint|prettier|c8\b|istanbul\b|#\s*sourceURL|#\s*sourceMappingURL)/i
-
-function isInsideJsx(pos: number, jsxRanges: SourceRange[]): boolean
-  for range of jsxRanges
-    if pos > range.start and pos < range.end
-      return true
-  false
+const DIRECTIVE_REGEX = /^\/\/\s*(?:@(?:ts-|flow\b|jsx(?:ImportSource|Runtime)?\b|vitest-)|eslint|prettier|biome|deno-lint|oxlint|rome|stylelint|c8\b|istanbul\b|vite\b|webpack\b|#\s*(?:sourceURL|sourceMappingURL|region|endregion))/i
 
 export const preferHashCommentsRule: Rule = {
   id: "style/prefer-hash-comments"
@@ -15,6 +8,7 @@ export const preferHashCommentsRule: Rule = {
     description: "Prefer CoffeeScript-style '#' comments over '//' comments"
     fixable: true
     defaultSeverity: "error"
+    allowFixesInsideComments: true
     capabilities: {
       requires: ["coffeeComment"]
     }
@@ -22,22 +16,22 @@ export const preferHashCommentsRule: Rule = {
   check: (ctx: RuleContext) ->
     source := ctx.source
     tree := ctx.syntax
-    jsxRanges := tree.jsxRanges()
 
-    for commentRange of tree.commentRanges()
+    tree.visit "Comment", (comment) ->
+      commentRange := tree.range(comment)
+      return unless commentRange?
       pos := commentRange.start
       slice := source.slice(pos, commentRange.end)
 
-      continue unless slice.startsWith("//")
-      continue if slice.startsWith("///")
-      continue if DIRECTIVE_REGEX.test(slice)
-      continue if isInsideJsx(pos, jsxRanges)
+      return unless slice.startsWith("//")
+      return if slice.startsWith("///")
+      return if DIRECTIVE_REGEX.test(slice)
+      return if tree.hasAncestorType(comment, ["JSXElement", "JSXFragment"])
 
       ctx.report({
         ruleId: "style/prefer-hash-comments"
         message: "Prefer CoffeeScript-style '#' comment over '//' comment"
         pos
-        severity: "error"
         fix: {
           start: pos
           end: pos + 2

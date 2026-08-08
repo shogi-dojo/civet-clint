@@ -170,7 +170,9 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       ruleLevel := mergedRules[d.ruleId] or "off"
       return if ruleLevel is "off"
 
-      if d.fix and d.ruleId isnt "style/prefer-hash-comments" and intersectsRange(commentRanges, d.fix.start, d.fix.end)
+      reportingRule := registry.get(d.ruleId)
+      allowsCommentFix := reportingRule?.meta.allowFixesInsideComments is true
+      if d.fix and not allowsCommentFix and intersectsRange(commentRanges, d.fix.start, d.fix.end)
         return
 
       severity: Severity := (ruleLevel is "error" or ruleLevel is "warn")

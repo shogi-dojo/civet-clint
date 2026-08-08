@@ -33,6 +33,25 @@ describe "style/prefer-bare-jsx-values", ->
     })
     expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
 
+  it "preserves tag shape, attribute order, and optional member access", ->
+    input := '<Panel {...props} value={option?.value} other={fallback.value}></Panel>'
+    res := lintSource(input, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+      fix: true
+    })
+    expect(res.fixedSource).toBe('<Panel {...props} value=option?.value other=fallback.value></Panel>')
+    expect(res.appliedFixesCount).toBe(2)
+    expect(res.isEquivalencePreserved).toBe(true)
+
+    again := lintSource(res.fixedSource!, {
+      rules: { "style/prefer-bare-jsx-values": "error" }
+      civetOptions: { react: true }
+      fix: true
+    })
+    expect(again.fixedSource).toBeUndefined()
+    expect(again.diagnostics).toHaveLength(0)
+
   it "is skipped when react dial is disabled", ->
     input := '<Button onClick={handleClick} />'
     res := lintSource(input, {
@@ -66,7 +85,7 @@ describe "style/prefer-hash-comments", ->
     expect(res.fixedSource).toBe("# line 1\r\n# line 2\r\n")
 
   it "skips directives and triple-slash comments", ->
-    input := "// @ts-check\n// eslint-disable-next-line\n// prettier-ignore\n// c8 ignore next\n// istanbul ignore next\n//# sourceMappingURL=foo.map\n/// <reference path=\"./types\" />\n"
+    input := "// @ts-check\n// @ts-nocheck\n// @flow\n// @jsxImportSource react\n// eslint-disable-next-line\n// prettier-ignore\n// biome-ignore lint\n// deno-lint-ignore\n// oxlint-disable\n// c8 ignore next\n// istanbul ignore next\n// vite ignore\n// webpack ignore\n//# sourceMappingURL=foo.map\n// #region setup\n/// <reference path=\"./types\" />\n"
     res := lintSource(input, {
       rules: { "style/prefer-hash-comments": "warn" }
       civetOptions: { coffeeComment: true }
@@ -80,6 +99,16 @@ describe "style/prefer-hash-comments", ->
       civetOptions: { coffeeComment: true, react: true, autoLet: true }
     })
     expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-hash-comments")).toHaveLength(0)
+
+  it "uses AST ancestry for comments inside bare JSX tags and fragments", ->
+    input := '<>\n  <div>\n    // first located token inside the element\n  // fragment comment\n</>'
+    res := lintSource(input, {
+      rules: { "style/prefer-hash-comments": "error" }
+      civetOptions: { coffeeComment: true, react: true }
+      fix: true
+    })
+    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-hash-comments")).toHaveLength(0)
+    expect(res.fixedSource).toBeUndefined()
 
   it "is skipped when coffeeComment dial is disabled", ->
     input := "// regular comment"

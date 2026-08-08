@@ -101,6 +101,7 @@ export class SyntaxTree {
   findToken(node: any, tokenValue: string): SourceToken | undefined;
   visit(targetOrType: any, typeOrCallback?: any, callback?: any): void;
   jsxAttributes(jsxElementNode: any, options?: JsxAttributeOptions): JsxAttribute[];
+  hasAncestorType(node: any, types: string | string[]): boolean;
   commentRanges(): SourceRange[];
   stringRanges(): SourceRange[];
 }
@@ -160,6 +161,7 @@ export interface RuleMeta {
   description: string;
   fixable: boolean;
   defaultSeverity: Severity;
+  allowFixesInsideComments?: boolean;
   capabilities?: RuleCapability;
   defaultOptions?: RuleOptions;
 }

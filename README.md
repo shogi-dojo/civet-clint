@@ -20,7 +20,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Coffee-React & Idiomatic Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Coffee-React & Idiomatic Style Rules**: 19 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -197,7 +197,7 @@ Tailored for idiomatic Civet + React codebases:
 - `style/no-null-equality`: `"warn"` (diagnostic)
 - `style/no-is-not`: `"warn"` (diagnostic)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- Compiler options: `{ "autoLet": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
+- Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
 
 ### Per-file Configuration Overrides
 
@@ -226,7 +226,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 17 built-in style and correctness rules.
+`civet-clint` currently provides 19 built-in style and correctness rules.
 
 ### Fixable Rules
 
@@ -347,6 +347,10 @@ const result = lintSource('fn := () => a === b', {
 console.log(result.isEquivalencePreserved); // true
 console.log(result.fixedSource);            // "fn := => a is b"
 ```
+
+Fixes that intentionally rewrite comment text must declare
+`meta.allowFixesInsideComments: true`; comment edits from every other built-in or
+plugin rule are rejected before the compiler-equivalence gate.
 
 ---
 

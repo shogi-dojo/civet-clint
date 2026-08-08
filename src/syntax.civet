@@ -206,6 +206,8 @@ export class SyntaxTree
       return undefined unless Array.isArray(value) and value.length > 0
       return [value] if isAttr value
       if value.some isAttr
+        // Keep non-named entries. They are ordering barriers for `.class`/`#id`
+        // lowering even though another rule may not inspect them directly.
         return value
       undefined
 
@@ -240,14 +242,17 @@ export class SyntaxTree
     else
       undefined
 
-  // Ranges of all JSX elements and fragments.
-  jsxRanges(): SourceRange[]
-    ranges: SourceRange[] := []
-    @visit ["JSXElement", "JSXFragment"], (node) ->
-      span := @range(node)
-      ranges.push(span) if span
-    ranges.sort (a, b) -> a.start - b.start
-    ranges
+  // Whether a raw node is nested under one of the requested normalized node types.
+  // Rules use this helper instead of depending on Civet's parent layout directly.
+  hasAncestorType(node: any, types: string | string[]): boolean
+    wanted := new Set(if Array.isArray(types) then types else [types])
+    seen := new Set<any>()
+    var current = node?.parent
+    while current? and typeof current is "object" and not seen.has(current)
+      return true if wanted.has(current.type)
+      seen.add(current)
+      current = current.parent
+    false
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]

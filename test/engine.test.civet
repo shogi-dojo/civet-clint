@@ -39,6 +39,39 @@ describe "Engine & Utils", ->
     expect(conflicts.length).toBe(1)
     expect(output).toBe("aXef")
 
+  it "allows any explicitly authorized plugin rule to rewrite comments", ->
+    registry := new RuleRegistry()
+    rule: Rule := {
+      id: "custom/prefer-hash"
+      meta: {
+        description: "test comment fixer"
+        fixable: true
+        defaultSeverity: "error"
+        allowFixesInsideComments: true
+      }
+      check: (ctx) ->
+        ctx.report({
+          ruleId: "custom/prefer-hash"
+          message: "use hash comment"
+          pos: 0
+          fix: { start: 0, end: 2, replacement: "#" }
+        })
+    }
+    registry.register(rule)
+    res := lintSource("// note\n", {
+      registry
+      config: {
+        preset: "custom"
+        rules: { "custom/prefer-hash": "error" }
+        civetOptions: { coffeeComment: true }
+        compileOptions: {}
+        skippedRules: []
+      }
+      fix: true
+    })
+    expect(res.fixedSource).toBe("# note\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
   it "handles parse errors cleanly as error diagnostics", ->
     source := "const x = ;;; invalid civet {{{"
     res := lintSource(source)

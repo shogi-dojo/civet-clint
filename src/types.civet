@@ -51,6 +51,7 @@ export interface RuleMeta
   description: string
   fixable: boolean
   defaultSeverity: Severity
+  allowFixesInsideComments?: boolean
   capabilities?: RuleCapability
   defaultOptions?: RuleOptions
 
