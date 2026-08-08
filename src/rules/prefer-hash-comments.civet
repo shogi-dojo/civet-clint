@@ -14,7 +14,7 @@ export const preferHashCommentsRule: Rule = {
   meta: {
     description: "Prefer CoffeeScript-style '#' comments over '//' comments"
     fixable: true
-    defaultSeverity: "warn"
+    defaultSeverity: "error"
     capabilities: {
       requires: ["coffeeComment"]
     }
@@ -37,7 +37,7 @@ export const preferHashCommentsRule: Rule = {
         ruleId: "style/prefer-hash-comments"
         message: "Prefer CoffeeScript-style '#' comment over '//' comment"
         pos
-        severity: "warn"
+        severity: "error"
         fix: {
           start: pos
           end: pos + 2

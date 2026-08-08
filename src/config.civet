@@ -64,8 +64,8 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-named-export-default": "warn"
       "style/prefer-range-operator": "warn"
       "style/prefer-terse-imports": "error"
-      "style/prefer-bare-jsx-values": "warn"
-      "style/prefer-hash-comments": "warn"
+      "style/prefer-bare-jsx-values": "error"
+      "style/prefer-hash-comments": "error"
     }
     civetOptions: {
       autoLet: true
