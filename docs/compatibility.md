@@ -56,7 +56,7 @@ Clint's current adapter auto-discovers and reads `civet.json`, `civetconfig.json
 | Preset | Purpose | Required Compiler Options | Default Rules |
 |---|---|---|---|
 | `default` | Standard, neutral Civet style | `{}` (none required) | `style/prefer-word-operators`<br>`style/prefer-concise-arrow`<br>`style/no-mixed-interpolation`<br>`style/no-trailing-semicolons` |
-| `coffee-react` | Idiomatic CoffeeScript-feel Civet + React | `{ "autoLet": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | All 17 built-in rules configured for terse syntax and React JSX shorthands. |
+| `coffee-react` | Idiomatic CoffeeScript-feel Civet + React | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | All 19 built-in rules configured for terse syntax, CoffeeScript comments, and React JSX shorthands. |
 
 ---
 

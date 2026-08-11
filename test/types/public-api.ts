@@ -24,6 +24,8 @@ import {
   noThinArrowRule,
   noPipeOperatorRule,
   preferRangeOperatorRule,
+  preferBareJsxValuesRule,
+  preferHashCommentsRule,
   type ClintConfig,
   type CompileDialOptions,
   type CompileResult,
@@ -48,7 +50,7 @@ const userConfig: ClintConfig = {
 const registry = new RuleRegistry()
 const customRule: Rule = {
   id: 'example/rule',
-  meta: { description: 'Example', fixable: false, defaultSeverity: 'warn' },
+  meta: { description: 'Example', fixable: false, defaultSeverity: 'warn', allowFixesInsideComments: false },
   check(context) {
     context.report({ ruleId: 'example/rule', message: 'Example diagnostic' })
   },

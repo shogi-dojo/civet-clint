@@ -20,7 +20,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Coffee-React & Idiomatic Style Rules**: 17 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Coffee-React & Idiomatic Style Rules**: 19 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -183,6 +183,8 @@ Tailored for idiomatic Civet + React codebases:
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/prefer-bare-assignment`: `"error"` (fixable, requires `autoLet`)
 - `style/prefer-terse-imports`: `"error"` (fixable)
+- `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
+- `style/prefer-hash-comments`: `"error"` (fixable, requires `coffeeComment`)
 - `style/no-trailing-semicolons`: `"error"` (diagnostic)
 - `style/prefer-existential-check`: `"warn"` (diagnostic)
 - `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
@@ -195,7 +197,7 @@ Tailored for idiomatic Civet + React codebases:
 - `style/no-null-equality`: `"warn"` (diagnostic)
 - `style/no-is-not`: `"warn"` (diagnostic)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- Compiler options: `{ "autoLet": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
+- Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
 
 ### Per-file Configuration Overrides
 
@@ -224,7 +226,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 17 built-in style and correctness rules.
+`civet-clint` currently provides 19 built-in style and correctness rules.
 
 ### Fixable Rules
 
@@ -236,6 +238,8 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
+| [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
+| [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 
@@ -343,6 +347,10 @@ const result = lintSource('fn := () => a === b', {
 console.log(result.isEquivalencePreserved); // true
 console.log(result.fixedSource);            // "fn := => a is b"
 ```
+
+Fixes that intentionally rewrite comment text must declare
+`meta.allowFixesInsideComments: true`; comment edits from every other built-in or
+plugin rule are rejected before the compiler-equivalence gate.
 
 ---
 

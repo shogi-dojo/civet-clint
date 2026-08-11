@@ -24,6 +24,19 @@ describe "Configuration matrix", ->
       expect(PRESETS["default"].rules["style/prefer-jsx-shorthand"]).toBeUndefined()
       expect(PRESETS["default"].rules["style/no-is-not"]).toBeUndefined()
 
+    it "keeps the coffee-react dial and all enforced rules intact", ->
+      preset := PRESETS["coffee-react"]
+      expect(preset.civetOptions).toEqual({
+        autoLet: true
+        coffeeIsnt: true
+        coffeeRange: true
+        coffeeComment: true
+        react: true
+      })
+      expect(preset.rules["style/prefer-bare-jsx-values"]).toBe("error")
+      expect(preset.rules["style/prefer-hash-comments"]).toBe("error")
+      expect(preset.rules["style/no-thin-arrow"]).toBe("warn")
+
     it "uses the neutral preset when no Clint config exists", async ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
       config := loadConfig(undefined, tmpDir)
