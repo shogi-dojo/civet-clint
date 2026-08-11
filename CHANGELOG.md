@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-11
+
+### Added
+
+- **`style/prefer-bare-jsx-values`**: safely removes redundant braces from
+  single-line JSX attribute expressions, such as `value={option.value}` →
+  `value=option.value`, with compiler-equivalence verification and idempotence
+  coverage.
+- **`style/prefer-hash-comments`**: converts ordinary `//` comments to Civet
+  `#` comments when `coffeeComment` is enabled, while preserving compiler,
+  coverage, formatter, bundler, region, and triple-slash directives and leaving
+  comments nested in JSX untouched.
+- **Comment-fix capability metadata**: custom rules can explicitly opt into
+  comment rewrites with `meta.allowFixesInsideComments`; all other comment edits
+  remain blocked by the engine.
+
+### Changed
+
+- The `coffee-react` preset now enables `coffeeComment` and enforces both new
+  rules at `error`, bringing the built-in rule catalog to 19 rules.
+- AST ancestry checks are exposed through `SyntaxTree.hasAncestorType`, keeping
+  rule code independent of Civet's raw parent-node layout.
+
+### Fixed
+
+- Hardened bare JSX value fixes around spreads, optional member access,
+  attribute order, and malformed source spans.
+- Restored `style/no-thin-arrow` to the `coffee-react` preset after the AST
+  migration.
+
+## [0.2.0] - 2026-08-08
+
+### Changed
+
+- Rebuilt Clint's 17 existing rules on Civet's raw AST behind a Clint-owned
+  `SyntaxTree` abstraction for source ranges, tokens, traversal, JSX attributes,
+  comments, and strings.
+- Preserved the 0.1.1 rule behavior and compiler-equivalence guarantees while
+  removing rule-level dependencies on ad hoc raw-source scanning where the AST
+  provides structure.
+
+### Tests
+
+- Added cross-rule parity tests and a structural guard that keeps raw compiler
+  AST access inside the syntax adapter.
+
 ## [0.1.1] - 2026-08-04
 
 ### Documentation
