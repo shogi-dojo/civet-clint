@@ -8,6 +8,7 @@ import { preferIsNotRule } from "./rules/prefer-is-not.civet"
 import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./rules/no-trailing-semicolons.civet"
 import { preferBareAssignmentRule } from "./rules/prefer-bare-assignment.civet"
+import { preferExplicitDeclarationsRule } from "./rules/prefer-explicit-declarations.civet"
 import { preferExistentialCheckRule } from "./rules/prefer-existential-check.civet"
 import { preferJsxAttrShorthandRule } from "./rules/prefer-jsx-attr-shorthand.civet"
 import { preferAmpersandShorthandRule } from "./rules/prefer-ampersand-shorthand.civet"
@@ -86,6 +87,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(noMixedInterpolationRule)
   registry.register(noTrailingSemicolonsRule)
   registry.register(preferBareAssignmentRule)
+  registry.register(preferExplicitDeclarationsRule)
   registry.register(preferExistentialCheckRule)
   registry.register(preferJsxAttrShorthandRule)
   registry.register(preferAmpersandShorthandRule)

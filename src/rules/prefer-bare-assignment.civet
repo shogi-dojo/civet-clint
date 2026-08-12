@@ -13,6 +13,7 @@ export const preferBareAssignmentRule: Rule = {
     capabilities: {
       requires: ["autoLet"]
     }
+    conflictsWith: ["style/prefer-explicit-declarations"]
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

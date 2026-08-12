@@ -13,6 +13,7 @@ import { preferIsNotRule } from "./prefer-is-not.civet"
 import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./no-trailing-semicolons.civet"
 import { preferBareAssignmentRule } from "./prefer-bare-assignment.civet"
+import { preferExplicitDeclarationsRule } from "./prefer-explicit-declarations.civet"
 import { preferExistentialCheckRule } from "./prefer-existential-check.civet"
 import { preferJsxAttrShorthandRule } from "./prefer-jsx-attr-shorthand.civet"
 import { preferAmpersandShorthandRule } from "./prefer-ampersand-shorthand.civet"
@@ -41,6 +42,7 @@ export {
   noMixedInterpolationRule,
   noTrailingSemicolonsRule,
   preferBareAssignmentRule,
+  preferExplicitDeclarationsRule,
   preferExistentialCheckRule,
   preferJsxAttrShorthandRule,
   preferAmpersandShorthandRule,

@@ -1,0 +1,108 @@
+import type { Rule, RuleContext } from "../types.civet"
+
+const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+const TOP_LEVEL_BINDING_TYPES = new Set([
+  "Declaration"
+  "ImportDeclaration"
+  "FunctionDeclaration"
+  "ClassDeclaration"
+])
+
+function linePrefix(source: string, pos: number): string
+  lineStart := source.lastIndexOf("\n", pos - 1) + 1
+  source.slice(lineStart, pos)
+
+function isTopLevelStart(source: string, pos: number): boolean
+  linePrefix(source, pos) is ""
+
+export const preferExplicitDeclarationsRule: Rule = {
+  id: "style/prefer-explicit-declarations"
+  meta: {
+    description: "Prefer explicit let/const declarations over autoLet bindings"
+    fixable: true
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["autoLet"]
+    }
+    conflictsWith: ["style/prefer-bare-assignment"]
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    explicitlyBound := new Set<string>()
+
+    // Record named top-level declarations/imports/classes/functions first so a
+    // later assignment to an existing binding is never mistaken for autoLet.
+    tree.visit (node) ->
+      return unless TOP_LEVEL_BINDING_TYPES.has(node?.type) and Array.isArray(node?.names)
+      span := tree.range(node)
+      return unless span? and isTopLevelStart(source, span.start)
+      for name of node.names
+        explicitlyBound.add(name) if typeof name is "string" and IDENTIFIER.test(name)
+
+    // `:=` and `export name =` are represented as declarations by Civet, so their
+    // source spans can be migrated without reconstructing scope.
+    tree.visit "Declaration", (node) ->
+      span := tree.range(node)
+      return unless span?
+      text := source.slice(span.start, span.end)
+
+      constMatch := text.match(/^([A-Za-z_$][A-Za-z0-9_$]*)([ \t]*):=/)
+      if constMatch
+        name := constMatch[1]
+        between := constMatch[2]
+        ctx.report({
+          ruleId: "style/prefer-explicit-declarations"
+          message: `Use explicit 'const ${name} =' instead of '${name} :='`
+          pos: span.start
+          fix: {
+            start: span.start
+            end: span.start + constMatch[0].length
+            replacement: `const ${name}${between}=`
+          }
+        })
+        return
+
+      if node.autoExport is true and /^([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*=/.test(text)
+        name := text.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/)![1]
+        ctx.report({
+          ruleId: "style/prefer-explicit-declarations"
+          message: `Use explicit 'export let ${name} =' instead of autoLet export`
+          pos: span.start
+          fix: {
+            start: span.start
+            end: span.start
+            replacement: "let "
+          }
+        })
+
+    // Civet represents both autoLet declarations and later reassignments as
+    // AssignmentExpression. The first unbound, simple assignment at column zero is
+    // the conservative subset we can identify without recreating nested scope rules.
+    assignments: { start: number, name: string }[] := []
+    tree.visit "AssignmentExpression", (node) ->
+      span := tree.range(node)
+      return unless span? and isTopLevelStart(source, span.start)
+      return unless Array.isArray(node.names) and node.names.length is 1
+      name := node.names[0]
+      return unless typeof name is "string" and IDENTIFIER.test(name)
+      text := source.slice(span.start, span.end)
+      return unless new RegExp(`^${name.replace(/[$]/g, "\\$")}([ \\t]*)=(?!=)`).test(text)
+      assignments.push({ start: span.start, name })
+
+    assignments.sort (a, b) -> a.start - b.start
+    seenAssignments := new Set<string>()
+    for assignment of assignments
+      continue if explicitlyBound.has(assignment.name) or seenAssignments.has(assignment.name)
+      seenAssignments.add(assignment.name)
+      ctx.report({
+        ruleId: "style/prefer-explicit-declarations"
+        message: `Use explicit 'let ${assignment.name} =' instead of autoLet binding`
+        pos: assignment.start
+        fix: {
+          start: assignment.start
+          end: assignment.start
+          replacement: "let "
+        }
+      })
+}
