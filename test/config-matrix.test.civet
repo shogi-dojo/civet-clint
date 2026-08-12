@@ -98,6 +98,23 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-hash-comments"]).toBe("error")
       expect(preset.rules["style/no-thin-arrow"]).toBe("warn")
 
+    it "provides a conflict-free CoffeeScript-to-standard migration preset", ->
+      preset := PRESETS["coffee-to-standard"]
+      expect(preset.civetOptions).toEqual({
+        autoLet: true
+        coffeeIsnt: true
+        coffeeRange: true
+        coffeeComment: true
+        react: true
+      })
+      expect(preset.rules["style/prefer-slash-comments"]).toBe("error")
+      expect(preset.rules["style/prefer-is-not"]).toBe("error")
+      expect(preset.rules["style/prefer-explicit-declarations"]).toBe("error")
+      expect(preset.rules["style/prefer-hash-comments"]).toBeUndefined()
+      expect(preset.rules["style/no-is-not"]).toBeUndefined()
+      expect(preset.rules["style/prefer-bare-assignment"]).toBeUndefined()
+      expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
+
     it "uses the neutral preset when no Clint config exists", async ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
       config := loadConfig(undefined, tmpDir)

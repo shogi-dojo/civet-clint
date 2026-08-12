@@ -49,5 +49,6 @@ The following improvements are planned for subsequent technical PRs:
    - `coffee`: Idiomatic CoffeeScript-style conventions (`coffeeIsnt`, `coffeeRange`, `autoLet`).
    - `react`: React JSX shorthands and component patterns without requiring CoffeeScript operators.
    - `coffee-react`: Combined preset for CoffeeScript-style React codebases.
-   - `migration`: Transitional rules designed for incremental migration from JavaScript/TypeScript to Civet.
+   - `coffee-to-standard`: Transitional rules for migrating CoffeeScript-compatible source back toward standard Civet (implemented for comments, `isnt`, and conservative declarations).
+   - `migration`: Future transitional rules designed for incremental migration from JavaScript/TypeScript to Civet.
    - `solid`: Dialect rules tailored for SolidJS JSX and fine-grained reactivity.

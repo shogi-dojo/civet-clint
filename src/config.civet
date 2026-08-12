@@ -77,6 +77,29 @@ export const PRESETS: Record<string, PresetDefinition> = {
     }
     compileOptions: {}
   }
+  // Transitional preset: parse the same legacy Coffee/React source as
+  // `coffee-react`, but enforce only byte-identical rewrites that move the source
+  // toward the neutral/default Civet dialect. Users disable the legacy compiler
+  // options and switch to `default` after the migration pass is clean.
+  "coffee-to-standard": {
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/no-mixed-interpolation": "warn"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-slash-comments": "error"
+      "style/prefer-is-not": "error"
+      "style/prefer-explicit-declarations": "error"
+    }
+    civetOptions: {
+      autoLet: true
+      coffeeIsnt: true
+      coffeeRange: true
+      coffeeComment: true
+      react: true
+    }
+    compileOptions: {}
+  }
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined

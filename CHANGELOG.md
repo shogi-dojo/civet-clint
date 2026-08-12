@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CoffeeScript-to-standard migration:** added compiler-safe inverse rules for
+  `#` comments, `isnt`, and conservative explicit declarations, plus a
+  `coffee-to-standard` transition preset.
+- **Rule conflict validation:** opposing rule directions are rejected during
+  effective-config resolution so autofix runs always converge.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

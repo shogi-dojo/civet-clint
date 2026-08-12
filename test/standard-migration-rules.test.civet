@@ -1,8 +1,30 @@
 import { describe, it, expect } from "vitest"
 import { lintSource } from "../src/engine.civet"
 import { compileForOutput } from "../src/compiler.civet"
+import { PRESETS, computeSkippedRules } from "../src/config.civet"
+import type { ResolvedConfig } from "../src/types.civet"
+
+function migrationConfig(): ResolvedConfig
+  preset := PRESETS["coffee-to-standard"]
+  {
+    preset: "coffee-to-standard"
+    rules: { ...preset.rules }
+    ruleOptions: {}
+    civetOptions: { ...preset.civetOptions }
+    compileOptions: { ...preset.compileOptions }
+    skippedRules: computeSkippedRules(preset.rules, preset.civetOptions)
+  }
 
 describe "standard Civet migration rules", ->
+  it "applies all initial inverse rules through the migration preset", ->
+    input := "# legacy\nvalue = 1\na isnt b\n"
+    res := lintSource(input, {
+      config: migrationConfig()
+      fix: true
+    })
+    expect(res.fixedSource).toBe("// legacy\nlet value = 1\na is not b\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
   describe "style/prefer-slash-comments", ->
     it "rewrites leading and trailing hash comments with compiler-identical output", ->
       input := "# leading comment\nx := 1 # trailing comment\n"

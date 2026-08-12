@@ -20,10 +20,10 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Coffee-React & Idiomatic Style Rules**: 19 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Bidirectional Civet Style Rules**: 22 built-in rules covering idiomatic Coffee/React style and compiler-safe migration back toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
-- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
+- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
 - 🧭 **Dial-Aware Capability Checks**: Rules declare the compiler options they require (e.g., `autoLet`, `react`, `coffeeRange`). Incompatible rules are skipped rather than emitting invalid autofixes.
 - 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
@@ -199,6 +199,29 @@ Tailored for idiomatic Civet + React codebases:
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
 
+#### `coffee-to-standard`
+
+A transition preset for legacy CoffeeScript-compatible source. It parses with the
+same compiler options as `coffee-react`, but enables the safe inverse rules instead
+of their Coffee-style counterparts:
+
+- `style/prefer-slash-comments`: `"error"` (`#` → `//`)
+- `style/prefer-is-not`: `"error"` (`isnt` → `is not`)
+- `style/prefer-explicit-declarations`: `"error"` (top-level `autoLet`, `:=`, and exported auto-bindings)
+- The four neutral `default` rules remain enabled.
+- Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
+
+Use it as a staged migration rather than turning compiler options off immediately:
+
+1. Select `"preset": "coffee-to-standard"` while keeping the existing Civet dial.
+2. Run `clint --write`, review the diff, then run it again to verify a no-op.
+3. Repeat until `clint --check` is clean; unsupported cases remain untouched.
+4. Disable migrated Coffee options in `civet.json` and switch to `"preset": "default"`.
+5. Compile and test the application after each compiler-option removal.
+
+Opposing rules cannot be enabled together. Clint rejects those configurations before
+linting, preventing repeated autofix runs from oscillating between styles.
+
 ### Per-file Configuration Overrides
 
 The `overrides` array allows configuring rules, presets, compiler options, or separate `civet.json` configurations for subsets of files matching glob patterns. Overrides apply in declaration order on top of the base configuration.
@@ -226,7 +249,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 19 built-in style and correctness rules.
+`civet-clint` currently provides 22 built-in style, correctness, and migration rules.
 
 ### Fixable Rules
 
@@ -240,6 +263,9 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
+| [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
+| [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
+| [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert conservative top-level auto-bindings to explicit `let`/`const` declarations. | `autoLet` |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 
