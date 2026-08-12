@@ -57,11 +57,13 @@ Clint's current adapter auto-discovers and reads `civet.json`, `civetconfig.json
 |---|---|---|---|
 | `default` | Standard, neutral Civet style | `{}` (none required) | `style/prefer-word-operators`<br>`style/prefer-concise-arrow`<br>`style/no-mixed-interpolation`<br>`style/no-trailing-semicolons` |
 | `coffee-react` | Idiomatic CoffeeScript-feel Civet + React | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | All 19 built-in rules configured for terse syntax, CoffeeScript comments, and React JSX shorthands. |
-| `coffee-to-standard` | Migrate legacy CoffeeScript-compatible source toward neutral Civet | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | Neutral rules plus compiler-identical `#` → `//`, `isnt` → `is not`, and conservative explicit declarations. |
+| `coffee-to-standard` | Migrate legacy CoffeeScript-compatible source toward neutral Civet | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | Neutral rules plus compiler-identical `#` → `//`, `isnt` → `is not`, `:=` → `const`, and exported auto-bindings → `export let`. |
 
 The migration preset intentionally keeps legacy parser options enabled while source is
 being rewritten. After the migration check is clean, disable the corresponding
 compiler options and switch to `default`; Clint does not mutate `civet.json` itself.
+`style/prefer-is-not` is reported as skipped while `coffeeNot` remains enabled because
+under that dial `is not` does not mean inequality.
 
 ---
 

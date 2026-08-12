@@ -207,7 +207,7 @@ of their Coffee-style counterparts:
 
 - `style/prefer-slash-comments`: `"error"` (`#` → `//`)
 - `style/prefer-is-not`: `"error"` (`isnt` → `is not`)
-- `style/prefer-explicit-declarations`: `"error"` (top-level `autoLet`, `:=`, and exported auto-bindings)
+- `style/prefer-explicit-declarations`: `"error"` (`:=` and exported auto-bindings)
 - The three dialect-independent `default` rules remain enabled. The existing
   word-operator rule stays out because it selects `isnt` while `coffeeIsnt` is active;
   the transition preset must converge directly on `is not`.
@@ -216,10 +216,14 @@ of their Coffee-style counterparts:
 Use it as a staged migration rather than turning compiler options off immediately:
 
 1. Select `"preset": "coffee-to-standard"` while keeping the existing Civet dial.
-2. Run `clint --write`, review the diff, then run it again to verify a no-op.
-3. Repeat until `clint --check` is clean; unsupported cases remain untouched.
-4. Disable migrated Coffee options in `civet.json` and switch to `"preset": "default"`.
-5. Compile and test the application after each compiler-option removal.
+2. Run `clint --print-config` and inspect `skippedRules`. In particular,
+   `style/prefer-is-not` is skipped while `coffeeNot` is enabled because that option
+   changes the meaning of `is not`.
+3. Disable `coffeeNot` only after compiling/testing the project without it, then run
+   `clint --write`, review the diff, and run it again to verify a no-op.
+4. Repeat until `clint --check` is clean; unsupported cases remain untouched.
+5. Disable migrated Coffee options in `civet.json` and switch to `"preset": "default"`.
+6. Compile and test the application after each compiler-option removal.
 
 Opposing rules cannot be enabled together. Clint rejects those configurations before
 linting, preventing repeated autofix runs from oscillating between styles.
@@ -267,7 +271,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 | [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
 | [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
-| [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert conservative top-level auto-bindings to explicit `let`/`const` declarations. | `autoLet` |
+| [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert `:=` and exported auto-bindings to explicit `const`/`let` declarations. Bare `autoLet` requires scope/hoisting analysis and remains untouched. | `autoLet` |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 

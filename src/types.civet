@@ -46,6 +46,7 @@ export interface RuleContext
 export interface RuleCapability
   requires?: string[]
   requiresAny?: string[]
+  forbids?: string[]
 
 export interface RuleMeta
   description: string

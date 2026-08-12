@@ -184,6 +184,16 @@ describe "Configuration matrix", ->
       expect(dangerousDiags).toHaveLength(1)
       expect(dangerousDiags[0].message).toContain("coffeeNot")
 
+    it "skips is-not migration when coffeeNot changes its parse", ->
+      skipped := computeSkippedRules(
+        { "style/prefer-is-not": "error" }
+        { coffeeIsnt: true, coffeeNot: true }
+      )
+      expect(skipped).toEqual([{
+        ruleId: "style/prefer-is-not"
+        reason: "incompatible with coffeeNot in the compiler dial"
+      }])
+
   describe "React on/off", ->
     it "skips prefer-jsx-shorthand when react is off, runs it when react is on", ->
       off := lintSource('<div className="btn">hi</div>', {

@@ -250,12 +250,15 @@ export function computeSkippedRules(
     continue unless rule
     requires := rule.meta.capabilities?.requires
     requiresAny := rule.meta.capabilities?.requiresAny
+    forbids := rule.meta.capabilities?.forbids
     missing := (requires or []).filter (key) -> not dial[key]
     lacksAny := requiresAny? and requiresAny.length > 0 and not requiresAny.some (key) -> dial[key]
-    if missing.length > 0 or lacksAny
+    incompatible := (forbids or []).filter (key) -> Boolean(dial[key])
+    if missing.length > 0 or lacksAny or incompatible.length > 0
       reasons: string[] := []
       reasons.push(`requires ${missing.join(", ")} in the compiler dial`) if missing.length > 0
       reasons.push(`requires one of ${requiresAny!.join(", ")} in the compiler dial`) if lacksAny
+      reasons.push(`incompatible with ${incompatible.join(", ")} in the compiler dial`) if incompatible.length > 0
       skipped.push({
         ruleId
         reason: reasons.join("; ")

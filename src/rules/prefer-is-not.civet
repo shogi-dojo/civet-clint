@@ -8,6 +8,8 @@ export const preferIsNotRule: Rule = {
     defaultSeverity: "error"
     capabilities: {
       requires: ["coffeeIsnt"]
+      // Under coffeeNot, `is not` parses as `is (!...)` rather than inequality.
+      forbids: ["coffeeNot"]
     }
     conflictsWith: ["style/no-is-not"]
   }

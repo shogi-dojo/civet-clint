@@ -17,12 +17,12 @@ function migrationConfig(): ResolvedConfig
 
 describe "standard Civet migration rules", ->
   it "applies all initial inverse rules through the migration preset", ->
-    input := "# legacy\nvalue = 1\na isnt b\n"
+    input := "# legacy\nVALUE := 1\na isnt b\n"
     res := lintSource(input, {
       config: migrationConfig()
       fix: true
     })
-    expect(res.fixedSource).toBe("// legacy\nlet value = 1\na is not b\n")
+    expect(res.fixedSource).toBe("// legacy\nconst VALUE = 1\na is not b\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
     second := lintSource(res.fixedSource!, {
@@ -130,8 +130,8 @@ describe "standard Civet migration rules", ->
       })).toThrow("Conflicting rules enabled")
 
   describe "style/prefer-explicit-declarations", ->
-    it "rewrites top-level autoLet, const, and exported bindings with compiler-identical output", ->
-      input := "value = 1\nVALUE := 2\nexport result = 3\nvalue = 4\n"
+    it "rewrites const and exported autoLet bindings with compiler-identical output", ->
+      input := "VALUE := 2\nexport result = 3\n"
       dial := { autoLet: true }
       res := lintSource(input, {
         rules: { "style/prefer-explicit-declarations": "error" }
@@ -140,8 +140,8 @@ describe "standard Civet migration rules", ->
       })
 
       expect(res.isEquivalencePreserved).toBe(true)
-      expect(res.fixedSource).toBe("let value = 1\nconst VALUE = 2\nexport let result = 3\nvalue = 4\n")
-      expect(res.appliedFixesCount).toBe(3)
+      expect(res.fixedSource).toBe("const VALUE = 2\nexport let result = 3\n")
+      expect(res.appliedFixesCount).toBe(2)
       expect(compileForOutput(input, { dial }).output)
         .toBe(compileForOutput(res.fixedSource!, { dial }).output)
 
@@ -153,14 +153,14 @@ describe "standard Civet migration rules", ->
       })
       expect(res.fixedSource).toBe("const VALUE   = 2")
 
-    it "does not rewrite reassignments or already declared bindings", ->
-      input := "let existing = 0\nexisting = 1\nnewValue = 2\nnewValue = 3\n"
+    it "leaves bare autoLet and reassignments for future scope-aware migration", ->
+      input := "existing = 1\nnewValue = 2\nnewValue = 3\n"
       res := lintSource(input, {
         rules: { "style/prefer-explicit-declarations": "error" }
         civetOptions: { autoLet: true }
         fix: true
       })
-      expect(res.fixedSource).toBe("let existing = 0\nexisting = 1\nlet newValue = 2\nnewValue = 3\n")
+      expect(res.fixedSource).toBeUndefined()
 
     it "leaves nested autoLet bindings for a later scope-aware expansion", ->
       input := "run := =>\n  nested = 1\n"
@@ -170,6 +170,15 @@ describe "standard Civet migration rules", ->
         fix: true
       })
       expect(res.fixedSource).toBe("const run = =>\n  nested = 1\n")
+
+    it "skips isnt migration when coffeeNot remains enabled", ->
+      res := lintSource("a isnt b", {
+        rules: { "style/prefer-is-not": "error" }
+        civetOptions: { coffeeIsnt: true, coffeeNot: true }
+        fix: true
+      })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.diagnostics).toHaveLength(0)
 
     it "is inactive after autoLet is disabled", ->
       res := lintSource("let value = 1", {
