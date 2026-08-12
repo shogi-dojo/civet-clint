@@ -53,6 +53,7 @@ export interface RuleMeta
   defaultSeverity: Severity
   allowFixesInsideComments?: boolean
   capabilities?: RuleCapability
+  conflictsWith?: string[]
   defaultOptions?: RuleOptions
 
 export interface Rule

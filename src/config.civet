@@ -240,6 +240,29 @@ export function computeSkippedRules(
       })
   skipped
 
+// Reject configurations that enable opposing style directions together. Without
+// this guard, repeated autofix passes can oscillate between two equally valid source
+// spellings instead of converging on a stable result.
+export function validateRuleConflicts(
+  rules: Record<string, RuleLevel>,
+  registry: RuleRegistry = defaultRuleRegistry
+): void
+  conflicts := new Set<string>()
+  for ruleId of Object.keys(rules)
+    continue if rules[ruleId] is "off"
+    rule := registry.get(ruleId)
+    continue unless rule
+    for conflictingId of rule.meta.conflictsWith or []
+      continue if rules[conflictingId] is undefined or rules[conflictingId] is "off"
+      pair := [ruleId, conflictingId].sort()
+      conflicts.add(`${pair[0]}|${pair[1]}`)
+
+  if conflicts.size > 0
+    descriptions := Array.from(conflicts).map (pair) ->
+      [left, right] := pair.split("|")
+      `"${left}" conflicts with "${right}"`
+    throw new Error(`Conflicting rules enabled: ${descriptions.join("; ")}`)
+
 export function globToRegex(glob: string): RegExp
   normalized := glob.replace(/\\/g, "/")
   var re = ""
@@ -347,6 +370,7 @@ export function loadConfig(
   compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
 
   skippedRules := computeSkippedRules(mergedRules, civetOptions, registry)
+  validateRuleConflicts(mergedRules, registry)
 
   {
     preset: presetName
@@ -419,6 +443,7 @@ export function resolveConfigForFile(
           delete effectiveRuleOptions[ruleId]
 
   skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
+  validateRuleConflicts(effectiveRules, registry)
 
   {
     preset: effectivePreset

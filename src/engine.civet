@@ -3,7 +3,7 @@ import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, Severity } from "./types.civet"
 import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange } from "./utils.civet"
-import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions } from "./config.civet"
+import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 import type { SyntaxTree } from "./syntax.civet"
 
@@ -92,6 +92,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     level := mergedRules[ruleId]
     if (level is "warn" or level is "error") and not registry.has(ruleId)
       throw new Error(`Unknown rule ID: "${ruleId}". Available rules: ${registry.getRuleList().map((r) -> r.id).join(", ")}`)
+
+  validateRuleConflicts(mergedRules, registry)
 
   skippedIds := new Set(computeSkippedRules(mergedRules, civetOptions, registry).map (s) -> s.ruleId)
 

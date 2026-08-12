@@ -3,7 +3,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
-import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
 import { parseSyntax, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -14,6 +15,66 @@ import type { ResolvedConfig } from "../src/types.civet"
 // incompatible rule/config combinations.
 
 describe "Configuration matrix", ->
+  describe "opposing rule directions", ->
+    it "rejects conflicting rules before linting", ->
+      registry := defaultRuleRegistry.clone()
+      registry.register({
+        id: "test/prefer-left"
+        meta: {
+          description: "Prefer left"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-right"]
+        }
+        check: ->
+      })
+      registry.register({
+        id: "test/prefer-right"
+        meta: {
+          description: "Prefer right"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-left"]
+        }
+        check: ->
+      })
+
+      rules := {
+        "test/prefer-left": "error"
+        "test/prefer-right": "warn"
+      }
+      expect(() -> validateRuleConflicts(rules, registry))
+        .toThrow('"test/prefer-left" conflicts with "test/prefer-right"')
+      expect(() -> lintSource("x = 1", { rules, registry }))
+        .toThrow("Conflicting rules enabled")
+
+    it "allows either direction when the opposite rule is off", ->
+      registry := defaultRuleRegistry.clone()
+      registry.register({
+        id: "test/prefer-left"
+        meta: {
+          description: "Prefer left"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-right"]
+        }
+        check: ->
+      })
+      registry.register({
+        id: "test/prefer-right"
+        meta: {
+          description: "Prefer right"
+          fixable: false
+          defaultSeverity: "error"
+        }
+        check: ->
+      })
+
+      expect(() -> validateRuleConflicts({
+        "test/prefer-left": "error"
+        "test/prefer-right": "off"
+      }, registry)).not.toThrow()
+
   describe "default preset (neutral, no Coffee options)", ->
     it "ships an empty dial and only dial-independent rules", ->
       expect(PRESETS["default"].civetOptions).toEqual({})
