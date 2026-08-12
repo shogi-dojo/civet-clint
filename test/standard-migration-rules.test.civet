@@ -1,0 +1,60 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+describe "standard Civet migration rules", ->
+  describe "style/prefer-slash-comments", ->
+    it "rewrites leading and trailing hash comments with compiler-identical output", ->
+      input := "# leading comment\nx := 1 # trailing comment\n"
+      dial := { coffeeComment: true, autoLet: true }
+      res := lintSource(input, {
+        rules: { "style/prefer-slash-comments": "error" }
+        civetOptions: dial
+        fix: true
+      })
+
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("// leading comment\nx := 1 // trailing comment\n")
+      expect(compileForOutput(input, { dial }).output)
+        .toBe(compileForOutput(res.fixedSource!, { dial }).output)
+
+    it "preserves CRLF line endings and converges after one pass", ->
+      input := "# line 1\r\n# line 2\r\n"
+      options := {
+        rules: { "style/prefer-slash-comments": "error" as const }
+        civetOptions: { coffeeComment: true }
+        fix: true
+      }
+      first := lintSource(input, options)
+      expect(first.fixedSource).toBe("// line 1\r\n// line 2\r\n")
+
+      second := lintSource(first.fixedSource!, options)
+      expect(second.fixedSource).toBeUndefined()
+      expect(second.diagnostics).toHaveLength(0)
+
+    it "skips tool directives, shebangs, and block comments", ->
+      input := "# @ts-check\n# eslint-disable\n#! /usr/bin/env node\n### block comment ###\n"
+      res := lintSource(input, {
+        rules: { "style/prefer-slash-comments": "error" }
+        civetOptions: { coffeeComment: true }
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-slash-comments"))
+        .toHaveLength(0)
+
+    it "ignores slash comments, strings containing hashes, and JSX text", ->
+      input := '// existing\nvalue := "# text"\n<div>\n  # JSX text\n</div>\n'
+      res := lintSource(input, {
+        rules: { "style/prefer-slash-comments": "error" }
+        civetOptions: { coffeeComment: true, autoLet: true, react: true }
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-slash-comments"))
+        .toHaveLength(0)
+
+    it "rejects enabling both comment directions", ->
+      expect(() -> lintSource("# comment", {
+        rules: {
+          "style/prefer-hash-comments": "error"
+          "style/prefer-slash-comments": "error"
+        }
+        civetOptions: { coffeeComment: true }
+      })).toThrow("Conflicting rules enabled")
