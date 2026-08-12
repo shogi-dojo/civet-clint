@@ -1,6 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
-
-const DIRECTIVE_REGEX = /^\/\/\s*(?:@(?:ts-|flow\b|jsx(?:ImportSource|Runtime)?\b|vitest-)|eslint|prettier|biome|deno-lint|oxlint|rome|stylelint|c8\b|istanbul\b|vite\b|webpack\b|#\s*(?:sourceURL|sourceMappingURL|region|endregion))/i
+import { shouldSkipCommentStyleRewrite } from "./comment-style.civet"
 
 export const preferHashCommentsRule: Rule = {
   id: "style/prefer-hash-comments"
@@ -25,8 +24,7 @@ export const preferHashCommentsRule: Rule = {
 
       return unless slice.startsWith("//")
       return if slice.startsWith("///")
-      return if DIRECTIVE_REGEX.test(slice)
-      return if tree.hasAncestorType(comment, ["JSXElement", "JSXFragment"])
+      return if shouldSkipCommentStyleRewrite(comment, slice, tree)
 
       ctx.report({
         ruleId: "style/prefer-hash-comments"
