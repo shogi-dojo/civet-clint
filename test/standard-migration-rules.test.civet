@@ -58,3 +58,44 @@ describe "standard Civet migration rules", ->
         }
         civetOptions: { coffeeComment: true }
       })).toThrow("Conflicting rules enabled")
+
+  describe "style/prefer-is-not", ->
+    it "rewrites isnt operators with compiler-identical output", ->
+      input := "a isnt b\nc isnt d\n"
+      dial := { coffeeIsnt: true }
+      res := lintSource(input, {
+        rules: { "style/prefer-is-not": "error" }
+        civetOptions: dial
+        fix: true
+      })
+
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is not b\nc is not d\n")
+      expect(compileForOutput(input, { dial }).output)
+        .toBe(compileForOutput(res.fixedSource!, { dial }).output)
+
+    it "ignores isnt text in identifiers, strings, and comments", ->
+      input := 'isntValue := "isnt"\n# isnt comment\n'
+      res := lintSource(input, {
+        rules: { "style/prefer-is-not": "error" }
+        civetOptions: { coffeeIsnt: true, coffeeComment: true, autoLet: true }
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-is-not"))
+        .toHaveLength(0)
+
+    it "is inactive after coffeeIsnt is disabled", ->
+      res := lintSource("a is not b", {
+        rules: { "style/prefer-is-not": "error" }
+        civetOptions: {}
+      })
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-is-not"))
+        .toHaveLength(0)
+
+    it "rejects enabling opposite isnt preferences", ->
+      expect(() -> lintSource("a isnt b", {
+        rules: {
+          "style/no-is-not": "warn"
+          "style/prefer-is-not": "error"
+        }
+        civetOptions: { coffeeIsnt: true }
+      })).toThrow("Conflicting rules enabled")

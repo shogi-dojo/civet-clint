@@ -1,0 +1,35 @@
+import type { Rule, RuleContext } from "../types.civet"
+
+export const preferIsNotRule: Rule = {
+  id: "style/prefer-is-not"
+  meta: {
+    description: "Prefer standard Civet 'is not' over CoffeeScript-style 'isnt'"
+    fixable: true
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["coffeeIsnt"]
+    }
+    conflictsWith: ["style/no-is-not"]
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    seen := new Set<number>()
+
+    for token of ctx.syntax.tokens()
+      continue unless token.value is "!==" and token.raw is "isnt"
+      pos := token.range.start
+      continue if seen.has(pos)
+      continue unless source.slice(pos, token.range.end) is "isnt"
+      seen.add(pos)
+
+      ctx.report({
+        ruleId: "style/prefer-is-not"
+        message: "Prefer standard Civet 'is not' over CoffeeScript-style 'isnt'"
+        pos
+        fix: {
+          start: pos
+          end: token.range.end
+          replacement: "is not"
+        }
+      })
+}

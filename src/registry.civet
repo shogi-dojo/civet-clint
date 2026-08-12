@@ -4,6 +4,7 @@ import { preferConciseArrowRule } from "./rules/prefer-concise-arrow.civet"
 import { preferJsxShorthandRule } from "./rules/prefer-jsx-shorthand.civet"
 import { noNullEqualityRule } from "./rules/no-null-equality.civet"
 import { noIsNotRule } from "./rules/no-is-not.civet"
+import { preferIsNotRule } from "./rules/prefer-is-not.civet"
 import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./rules/no-trailing-semicolons.civet"
 import { preferBareAssignmentRule } from "./rules/prefer-bare-assignment.civet"
@@ -81,6 +82,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferJsxShorthandRule)
   registry.register(noNullEqualityRule)
   registry.register(noIsNotRule)
+  registry.register(preferIsNotRule)
   registry.register(noMixedInterpolationRule)
   registry.register(noTrailingSemicolonsRule)
   registry.register(preferBareAssignmentRule)
