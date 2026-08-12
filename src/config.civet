@@ -83,7 +83,6 @@ export const PRESETS: Record<string, PresetDefinition> = {
   // options and switch to `default` after the migration pass is clean.
   "coffee-to-standard": {
     rules: {
-      "style/prefer-word-operators": "error"
       "style/prefer-concise-arrow": "error"
       "style/no-mixed-interpolation": "warn"
       "style/no-trailing-semicolons": "error"

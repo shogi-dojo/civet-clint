@@ -110,6 +110,9 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-slash-comments"]).toBe("error")
       expect(preset.rules["style/prefer-is-not"]).toBe("error")
       expect(preset.rules["style/prefer-explicit-declarations"]).toBe("error")
+      // The existing word-operator rule selects `isnt` while coffeeIsnt is active,
+      // so it stays out of this preset to keep migration convergent in one pass.
+      expect(preset.rules["style/prefer-word-operators"]).toBeUndefined()
       expect(preset.rules["style/prefer-hash-comments"]).toBeUndefined()
       expect(preset.rules["style/no-is-not"]).toBeUndefined()
       expect(preset.rules["style/prefer-bare-assignment"]).toBeUndefined()

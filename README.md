@@ -208,7 +208,9 @@ of their Coffee-style counterparts:
 - `style/prefer-slash-comments`: `"error"` (`#` → `//`)
 - `style/prefer-is-not`: `"error"` (`isnt` → `is not`)
 - `style/prefer-explicit-declarations`: `"error"` (top-level `autoLet`, `:=`, and exported auto-bindings)
-- The four neutral `default` rules remain enabled.
+- The three dialect-independent `default` rules remain enabled. The existing
+  word-operator rule stays out because it selects `isnt` while `coffeeIsnt` is active;
+  the transition preset must converge directly on `is not`.
 - Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
 
 Use it as a staged migration rather than turning compiler options off immediately:

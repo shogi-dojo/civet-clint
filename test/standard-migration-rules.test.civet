@@ -25,6 +25,13 @@ describe "standard Civet migration rules", ->
     expect(res.fixedSource).toBe("// legacy\nlet value = 1\na is not b\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
+    second := lintSource(res.fixedSource!, {
+      config: migrationConfig()
+      fix: true
+    })
+    expect(second.fixedSource).toBeUndefined()
+    expect(second.diagnostics).toHaveLength(0)
+
   describe "style/prefer-slash-comments", ->
     it "rewrites leading and trailing hash comments with compiler-identical output", ->
       input := "# leading comment\nx := 1 # trailing comment\n"
