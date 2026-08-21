@@ -241,6 +241,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
   equivalenceReferences := new Map<string, EquivalenceReference>()
   outputDeltas := new Map<string, OutputDelta>()
   var currentRuleId = ""
+  var suppressFixForCurrentRule = false
 
   outputDeltaAllowed := (ruleId: string, before: string, after: string): boolean ->
     kind := outputDeltas.get(ruleId)
@@ -302,7 +303,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         line: line!
         column: column!
         pos: d.pos
-        fix: d.fix
+        fix: suppressFixForCurrentRule ? undefined : d.fix
       })
   }
 
@@ -310,13 +311,21 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     continue if mergedRules[ruleId] is "off"
     continue if skippedIds.has(ruleId)
     rule := registry.get(ruleId)
+    rulePhase := rule ? (rule.meta.phase or "idiom") : "idiom"
     // When a phase is requested, only rules belonging to it participate -- including
     // in the equivalence reference, so a phase is verified against its own fixes.
-    if options.phase? and rule? and (rule.meta.phase or "idiom") isnt options.phase
+    if options.phase? and rule? and rulePhase isnt options.phase
       continue
+    // A "repair" rule changes emitted output by design and is only applied when the
+    // caller opts into that phase (as `--rewrite` does). Outside it the rule still
+    // REPORTS -- the mis-compilation is worth knowing about -- but its fix is
+    // withheld, so a plain `--write` neither applies it nor reports a confusing
+    // equivalence mismatch for a fix it was never going to use.
+    suppressFix := rulePhase is "repair" and options.phase isnt "repair"
     if rule
       try
         currentRuleId = ruleId
+        suppressFixForCurrentRule = suppressFix
         context.options = resolveRuleOptions(ruleId, mergedRuleOptions[ruleId], registry)
         rule.check(context)
       catch err: any
@@ -329,6 +338,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         })
       finally
         currentRuleId = ""
+        suppressFixForCurrentRule = false
 
   diagnostics.sort (a, b) ->
     if a.line isnt b.line
@@ -399,9 +409,17 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         i = end + 1
       total
 
+    countMatches := (code: string, pattern: RegExp): number ->
+      code.match(new RegExp(pattern.source, "g"))?.length ?? 0
+
+    // A repair must strictly REDUCE the defect, not necessarily eliminate it. Nested
+    // constructs are peeled one layer per pass (see style/no-braced-arrow-body), so
+    // requiring zero occurrences would reject every intermediate step and leave the
+    // file unrepaired. Requiring a strict decrease still forbids a rule from making
+    // unrelated edits under cover of the phase.
     repairIsAcceptable := (candidateOutput: string): boolean ->
       before := originalCompiled!
-      fixedMisparse := misparsePattern.test(before) and not misparsePattern.test(candidateOutput)
+      fixedMisparse := countMatches(candidateOutput, misparsePattern) < countMatches(before, misparsePattern)
       fixedDiscard := countDiscardedBodies(candidateOutput) < countDiscardedBodies(before)
       fixedMisparse or fixedDiscard
 
@@ -576,14 +594,22 @@ export function lintPhased(source: string, options: LintOptions = {}): LintResul
   var totalApplied = 0
   var everFixed = false
   var equivalencePreserved = true
-  var last: LintResult | undefined = undefined
 
+  // Each phase runs to a fixed point. Nested constructs produce overlapping fixes --
+  // de-bracing `describe => { it => { ... } }` yields an outer edit whose span
+  // contains the inner one -- and applyEdits keeps only the outermost of an
+  // overlapping pair. Re-running the phase against the rewritten text exposes the
+  // next layer, so nesting is peeled one level per iteration instead of being
+  // silently left half-repaired.
+  MAX_PASSES := 10
   for phase of phases
-    res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
-    last = res
-    equivalencePreserved = false unless res.isEquivalencePreserved
-    totalApplied += res.appliedFixesCount
-    if res.fixedSource? and res.fixedSource isnt current
+    var pass = 0
+    while pass < MAX_PASSES
+      pass++
+      res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
+      equivalencePreserved = false unless res.isEquivalencePreserved
+      totalApplied += res.appliedFixesCount
+      break unless res.fixedSource? and res.fixedSource isnt current
       current = res.fixedSource
       everFixed = true
 

@@ -7,13 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-21
+
 ### Added
 
-- **CoffeeScript-to-standard migration:** added compiler-safe inverse rules for
-  `#` comments, `isnt`, and conservative explicit declarations, plus a
+- **`clint --rewrite`**: converts JS/TS files to Civet. Verifies the source parses
+  under the project's resolved dial, refuses to clobber an existing `.civet`,
+  renames via `fs.rename` (so Git records a clean `R100`), then runs the autofix
+  pipeline. Skips `.d.ts`/`.d.mts`/`.d.cts` declaration files and `.cjs`.
+- **Rule phases** (`repair`, `idiom`, `cleanup`): rules declare a phase and the
+  engine runs them in order, re-parsing between phases so a later phase sees the
+  text earlier phases produced. This makes ordered dependencies expressible — for
+  example, de-bracing an arrow body is what makes its trailing semicolons
+  redundant, so the semicolon rule must not run first. `--rewrite` runs the full
+  phase order by default.
+- **`style/no-braced-arrow-body`** (phase `repair`): detects `=> { ... }` bodies
+  that Civet parses as **object literals** rather than statement blocks. Side
+  effects still run, so tests pass, but the arrow returns an object instead of the
+  last value. Autofix de-braces the body while keeping its semicolons, preserving
+  the original JS meaning.
+- **`style/no-discarded-arrow-return`** (phase `repair`): detects a concise arrow
+  whose trailing semicolon collapses it into a block that evaluates its expression
+  and discards the value, so the function silently returns `undefined`
+  (`() => new QueryClient({...});`). Only arises when renaming JS to Civet.
+- **`style/no-trailing-commas`**: removes a trailing comma before the closing brace
+  of an **object literal**, where Civet lets indentation separate entries.
+  Deliberately scoped: trailing commas in argument lists, arrays, destructuring
+  patterns and import clauses are idiomatic and left alone.
+- **`style/prefer-indented-object`**: drops the braces from a multi-line object
+  literal bound to a declaration, letting indentation delimit it.
+- **Output deltas** `declaration-style` and `trailing-comma-style`, unblocking
+  autofix for `style/prefer-bare-assignment` and `style/no-trailing-commas`.
+- **CoffeeScript-to-standard migration:** compiler-safe inverse rules for `#`
+  comments, `isnt`, and conservative explicit declarations, plus a
   `coffee-to-standard` transition preset.
 - **Rule conflict validation:** opposing rule directions are rejected during
   effective-config resolution so autofix runs always converge.
+
+### Fixed
+
+- **`style/no-trailing-commas` no longer edits inside regex literals.** A `{5,}`
+  quantifier ends in a comma before `}`, and the rule rewrote it to `{5}` —
+  silently changing "five or more" to "exactly five". The equivalence gate could
+  not catch this: the rule's own `trailing-comma-style` delta strips commas from
+  emitted output on both sides, so the corrupted and original programs normalized
+  identically. Regex literals now join strings and templates in
+  `collectStringRanges`, so every rule that skips string content skips regex too.
+- **`style/no-trailing-semicolons` no longer removes semicolons that suppress an
+  implicit return.** Inside a function body a trailing `;` is one of the sanctioned
+  ways to stop the last statement becoming the return value; removing it changed
+  what the function returned and the equivalence gate rejected the fix. The rule
+  now verifies each candidate by compiling with and without it, so it reports only
+  removals the gate will accept. Candidates are bisected rather than checked
+  individually — a linear scan cost one compile per semicolon and exhausted memory
+  on a 900-line file.
+- **Nested arrow bodies are fully repaired.** The outer arrow's edit span contains
+  the inner one, and overlapping edits are resolved by keeping the outermost, so
+  offering both silently dropped the inner fix and left the file half-repaired.
+  Only the outermost body carries a fix per pass, and each phase now runs to a
+  fixed point so nesting is peeled one layer at a time.
+- **`--write` no longer reports a spurious equivalence mismatch for repair rules.**
+  A `repair` fix is only applied when the caller opts into that phase (as
+  `--rewrite` does). Outside it the mis-compilation is still reported, but the fix
+  is withheld rather than offered and then rejected.
+- **Multi-rule equivalence references no longer use stale offsets.** The combined
+  reference chained each rule's builder against the original source, so a second
+  rule's edits were computed against text that no longer existed. Each builder is
+  now re-run against the accumulated text.
+
+### Changed
+
+- `normalizeSemicolonStyle` moved to `utils.civet` and is shared by the engine's
+  `semicolon-style` delta and `style/no-trailing-semicolons`; a drift between two
+  copies would surface as a reported-then-rejected fix.
 
 ## [0.3.0] - 2026-08-11
 

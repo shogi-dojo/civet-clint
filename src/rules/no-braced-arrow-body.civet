@@ -64,6 +64,7 @@ export const noBracedArrowBodyRule: Rule = {
     source := ctx.source
     tree := ctx.syntax
     reported := new Set<number>()
+    candidates: { pos: number, start: number, end: number, fix: Fix }[] := []
 
     tree.visit "ArrowFunction", (node) ->
       block := node.block
@@ -120,18 +121,36 @@ export const noBracedArrowBodyRule: Rule = {
       // Keep the body verbatim, including its final newline and the closing line's
       // indentation, so whatever followed the `}` (usually the enclosing call's
       // `)`) stays on its own line.
+      // Keep the body verbatim but drop the closing line's indentation: it belonged
+      // to the `}` that is going away, and leaving it behind strands trailing
+      // whitespace on a blank line.
       body := source.slice(openIdx + 1, lineStart)
-      closeIndent := source.slice(lineStart, closeIdx)
       fix: Fix := {
         start: openFrom
         end: closeIdx + 1
-        replacement: body + closeIndent
+        replacement: body.replace(/\n$/, "")
       }
 
+      candidates.push({ pos, start: openFrom, end: closeIdx + 1, fix })
+
+    // Nested bodies produce overlapping edits: the outer arrow's span contains the
+    // inner one, and applyEdits keeps only the outermost of an overlapping pair, so
+    // offering both would silently drop the inner fix and leave the file
+    // half-repaired -- which the equivalence gate then rejects wholesale.
+    //
+    // Only the outermost body carries a fix in any one pass. lintPhased re-runs each
+    // phase to a fixed point, so re-parsing the de-braced text exposes the next layer
+    // and nesting is peeled one level at a time. Inner bodies are still REPORTED, so
+    // a check-only run lists every occurrence.
+    candidates.sort (a, b) -> a.start - b.start
+    var lastEnd = -1
+    for candidate of candidates
+      nested := candidate.start < lastEnd
+      lastEnd = candidate.end if not nested
       ctx.report({
         ruleId: "style/no-braced-arrow-body"
         message: "'=> { ... }' is parsed as an object literal — drop the braces and indent the body"
-        pos
-        fix
+        pos: candidate.pos
+        fix: nested ? undefined : candidate.fix
       })
 }
