@@ -191,6 +191,49 @@ export function normalizeDeclarationStyle(code: string): string
     i++
   out
 
+// Normalize away a comma that sits immediately before a closing bracket, so a fix
+// that only drops trailing commas can be verified. Civet emits the comma verbatim,
+// so the byte-identical gate would otherwise reject every such fix.
+//
+// Elision guard: `[1, 2,,]` has length 3 and `[a, , b]` skips an element, so a
+// comma preceded by another comma is left alone — dropping it would change meaning.
+export function normalizeTrailingCommaStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is ","
+      var k = i + 1
+      while k < code.length and /\s/.test(code[k])
+        k++
+      prevNonWs := out.replace(/\s+$/, "").slice(-1)
+      if k < code.length and ")]}".includes(code[k]) and prevNonWs isnt ","
+        i++
+        continue
+    out += ch
+    i++
+  out
+
 export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
   res := compileForOutput(source, { dial: civetOptions, filename })
   if res.ok
@@ -283,6 +326,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeSemicolonStyle(before) is normalizeSemicolonStyle(after)
       when "declaration-style"
         normalizeDeclarationStyle(before) is normalizeDeclarationStyle(after)
+      when "trailing-comma-style"
+        normalizeTrailingCommaStyle(before) is normalizeTrailingCommaStyle(after)
       else
         false
 
@@ -419,13 +464,41 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     { output: combinedCandidate, appliedEdits } := applyEdits(source, approvedFixes)
     if combinedCandidate isnt source
       combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
+      // Each rule's reference builder is written against the ORIGINAL source and uses
+      // absolute offsets, so chaining the builders would feed rule N+1 a string whose
+      // positions have already shifted. Instead, derive each rule's edit against the
+      // original as a single replaced span (common prefix/suffix diff) and merge those
+      // spans through applyEdits, which is how the real fixes are combined.
+      // Each rule's builder is written against the ORIGINAL source and uses absolute
+      // offsets, so the builders cannot simply be chained — once the first rule has
+      // rewritten the text, the second rule's offsets refer to positions that have
+      // moved. Instead, re-run every rule's `check` against the accumulated text so
+      // each builder is rebuilt on the string it is actually about to transform.
       combinedReference := ->
         var acc = source
         for id of approvedRuleIds
-          build := equivalenceReferences.get(id)
-          if build?
-            next := build(acc)
-            acc = next if next?
+          rule := registry.get(id)
+          continue unless rule?
+          accParse := parseSyntax(acc, { dial: civetOptions, compileOptions, filename })
+          break unless accParse.ok and accParse.syntax?
+
+          var rebuilt: EquivalenceReference | undefined = undefined
+          scratchContext: RuleContext := {
+            ...context
+            source: acc
+            syntax: accParse.syntax!
+            options: resolveRuleOptions(id, mergedRuleOptions[id], registry)
+            getLineColumn: createLineColumnIndex(acc)
+            declareEquivalenceReference: (_delta, build) -> rebuilt = build
+            report: -> undefined
+          }
+          try
+            rule.check(scratchContext)
+          catch
+            break
+          continue unless rebuilt?
+          next := rebuilt!(acc)
+          acc = next if next? and next isnt acc
         acc
       normalizeCombined := (code: string): string ->
         var res = code
@@ -436,6 +509,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           res = normalizeQuoteStyle(res)
         if kinds.has("declaration-style")
           res = normalizeDeclarationStyle(res)
+        if kinds.has("trailing-comma-style")
+          res = normalizeTrailingCommaStyle(res)
         res
       combinedAccepted := combinedRes.ok and (
         combinedRes.output is originalCompiled or (

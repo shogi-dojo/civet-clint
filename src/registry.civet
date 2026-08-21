@@ -7,6 +7,7 @@ import { noIsNotRule } from "./rules/no-is-not.civet"
 import { preferIsNotRule } from "./rules/prefer-is-not.civet"
 import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./rules/no-trailing-semicolons.civet"
+import { noTrailingCommasRule } from "./rules/no-trailing-commas.civet"
 import { preferBareAssignmentRule } from "./rules/prefer-bare-assignment.civet"
 import { preferExplicitDeclarationsRule } from "./rules/prefer-explicit-declarations.civet"
 import { preferExistentialCheckRule } from "./rules/prefer-existential-check.civet"
@@ -86,6 +87,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferIsNotRule)
   registry.register(noMixedInterpolationRule)
   registry.register(noTrailingSemicolonsRule)
+  registry.register(noTrailingCommasRule)
   registry.register(preferBareAssignmentRule)
   registry.register(preferExplicitDeclarationsRule)
   registry.register(preferExistentialCheckRule)
