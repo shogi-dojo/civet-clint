@@ -1,0 +1,67 @@
+import type { Rule, RuleContext } from "../types.civet"
+
+// A JS-style `=> { ... }` arrow body is not a block in Civet: when every statement
+// can be read as an object key, Civet parses the braces as an OBJECT LITERAL.
+//
+//   it 'x', => {          compiles to    it('x', () =>( {
+//     expect(a).toBe(1)                    toBe: expect(a).toBe(1)
+//   }                                    }))
+//
+// Side effects still run (the call is evaluated while the object is built), which is
+// why such tests pass, but the arrow now returns an object instead of the last value.
+// That breaks any consumer of the return value — a `useEffect` cleanup, a `.map`
+// callback — and duplicate keys silently overwrite each other.
+//
+// The fix is the Civet-native form: drop the braces and let indentation delimit the
+// body. This is a semantic REPAIR, not a style tweak, so it deliberately does NOT
+// declare an output delta — the emitted JS is meant to change, and the engine's
+// byte-identical gate would rightly reject it. It is reported as fixable only under
+// an explicit opt-in so `--write` never rewrites semantics without being asked.
+export const noBracedArrowBodyRule: Rule = {
+  id: "style/no-braced-arrow-body"
+  meta: {
+    description: "Disallow JS-style '=> { ... }' arrow bodies that Civet parses as object literals"
+    fixable: false
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    reported := new Set<number>()
+
+    tree.visit "ArrowFunction", (node) ->
+      block := node.block
+      return unless block?
+      // Civet marks an implicitly-returned body, and wraps an object-literal body in
+      // a ParenthesizedExpression. Both together identify the mis-parsed shape; a
+      // real statement block has neither.
+      return unless block.implicitlyReturned
+      expressions := block.expressions
+      return unless Array.isArray(expressions) and expressions.length > 0
+      firstEntry := expressions[0]
+      first := Array.isArray(firstEntry) ? firstEntry[1] : firstEntry
+      return unless first?.type is "ParenthesizedExpression"
+
+      span := tree.range(node)
+      return unless span?
+
+      // Distinguish the accidental `=> {` from a deliberate `=> ({ ... })` object
+      // return, which is written with explicit parens and must be left alone.
+      text := source.slice(span.start, span.end)
+      arrowIdx := text.indexOf("=>")
+      return if arrowIdx < 0
+      after := text.slice(arrowIdx + 2)
+      braceOffset := after.search(/\S/)
+      return if braceOffset < 0
+      return unless after[braceOffset] is "{"
+
+      pos := span.start + arrowIdx
+      return if reported.has(pos)
+      reported.add(pos)
+
+      ctx.report({
+        ruleId: "style/no-braced-arrow-body"
+        message: "'=> { ... }' is parsed as an object literal — drop the braces and indent the body"
+        pos
+      })
+}

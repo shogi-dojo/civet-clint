@@ -1,0 +1,62 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/no-braced-arrow-body"
+DIAL := { autoLet: true, react: true }
+
+function check(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, civetOptions: DIAL })
+
+function findings(source: string)
+  check(source).diagnostics.filter (d) -> d.ruleId is RULE
+
+describe "style/no-braced-arrow-body", ->
+  it "flags a single-statement braced body", ->
+    expect(findings("it 'x', => {\n  f()\n}\n")).toHaveLength(1)
+
+  it "flags a multi-statement braced body", ->
+    expect(findings("it 'x', => {\n  f()\n  g()\n}\n")).toHaveLength(1)
+
+  it "flags an async braced body", ->
+    expect(findings("it 'x', async => {\n  await f()\n}\n")).toHaveLength(1)
+
+  it "flags each nested braced body", ->
+    source := "describe 'a', => {\n  it 'b', => {\n    f()\n  }\n}\n"
+    expect(findings(source)).toHaveLength(2)
+
+  it "does not flag a body that compiles to a real block", ->
+    // A declaration cannot be read as an object key, so Civet keeps the braces as a
+    // statement block and the arrow behaves as written.
+    expect(findings("it 'x', => {\n  x = 1\n}\n")).toHaveLength(0)
+
+  it "does not flag a body containing a control statement", ->
+    expect(findings("it 'x', => {\n  if c\n    f()\n}\n")).toHaveLength(0)
+
+  it "does not flag the Civet-native indented body", ->
+    expect(findings("it 'x', =>\n  f()\n")).toHaveLength(0)
+
+  it "does not flag a deliberate object return written with parens", ->
+    expect(findings("f := => ({ a: 1 })\n")).toHaveLength(0)
+
+  it "does not flag a deliberate object return spanning lines", ->
+    expect(findings("m := vi.hoisted(=> ({\n  a: 1\n}))\n")).toHaveLength(0)
+
+  it "reports at the arrow, not the enclosing call", ->
+    source := "it 'x', => {\n  f()\n}\n"
+    diag := findings(source)[0]
+    expect(source.slice(diag.pos!, diag.pos! + 2)).toBe("=>")
+
+  it "does not offer an autofix", ->
+    // The rewrite changes emitted output on purpose, so it is never applied
+    // automatically — see the rule's header comment.
+    expect(findings("it 'x', => {\n  f()\n}\n")[0].fix).toBeUndefined()
+
+describe "the mis-parse this rule detects", ->
+  it "compiles a braced body to an object literal", ->
+    out := compileSource("it 'x', => {\n  expect(a).toBe(1)\n}\n", DIAL)
+    expect(out).toContain("toBe: expect(a).toBe(1)")
+
+  it "compiles the indented body to a real block", ->
+    out := compileSource("it 'x', =>\n  expect(a).toBe(1)\n", DIAL)
+    expect(out).toContain("return expect(a).toBe(1)")
+    expect(out).not.toContain("toBe:")
