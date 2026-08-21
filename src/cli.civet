@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { loadConfig, resolveConfigForFile, resolveRuleOptions } from "./config.civet"
 import { pipelineOptions, controlledOptionKeys } from "./compiler.civet"
-import { lintFile } from "./engine.civet"
+import { lintFile, rewriteFile } from "./engine.civet"
 import { defaultRuleRegistry } from "./registry.civet"
 import type { LintResult, ResolvedConfig } from "./types.civet"
 
@@ -28,7 +28,26 @@ const IGNORED_DIRS = new Set([
   ".output"
 ])
 
-export async function findCivetFiles(targets: string[], cwd: string = process.cwd()): Promise<string[]>
+export interface FindFilesOptions
+  extensions?: string[]
+  rewrite?: boolean
+
+const REWRITE_EXTS = [".js", ".jsx", ".ts", ".tsx", ".mts", ".cts"]
+
+function isTargetFile(name: string, opts: FindFilesOptions = {}): boolean
+  if opts.rewrite
+    return false if name.endsWith(".d.ts") or name.endsWith(".d.mts") or name.endsWith(".d.cts")
+    REWRITE_EXTS.some (ext) -> name.endsWith(ext)
+  else if opts.extensions and opts.extensions.length > 0
+    opts.extensions.some (ext) -> name.endsWith(ext)
+  else
+    name.endsWith(".civet")
+
+export async function findCivetFiles(
+  targets: string[]
+  cwd: string = process.cwd()
+  opts: FindFilesOptions = {}
+): Promise<string[]>
   effectiveTargets := targets.length > 0 ? targets : ["."]
   files: string[] := []
 
@@ -39,7 +58,7 @@ export async function findCivetFiles(targets: string[], cwd: string = process.cw
       if entry.isDirectory()
         if not IGNORED_DIRS.has(entry.name) and not entry.name.startsWith(".")
           await traverse(path.join(dirPath, entry.name))
-      else if entry.isFile() and entry.name.endsWith(".civet")
+      else if entry.isFile() and isTargetFile(entry.name, opts)
         files.push(path.join(dirPath, entry.name))
 
   for target of effectiveTargets
@@ -48,7 +67,7 @@ export async function findCivetFiles(targets: string[], cwd: string = process.cw
       stat := await fs.stat(resolved)
       if stat.isDirectory()
         await traverse(resolved)
-      else if stat.isFile() and resolved.endsWith(".civet")
+      else if stat.isFile() and isTargetFile(resolved, opts)
         files.push(resolved)
     catch
       throw new Error(`Target not found or unreadable: ${target}`)
@@ -59,6 +78,7 @@ export async function findCivetFiles(targets: string[], cwd: string = process.cw
 export interface CliOptions
   check?: boolean
   write?: boolean
+  rewrite?: boolean
   config?: string
   format?: "text" | "json"
   printConfig?: boolean
@@ -83,6 +103,8 @@ export function parseCliArgs(args: string[]): CliOptions
       options.check = true
     else if arg is "--write" or arg is "-w" or arg is "--fix"
       options.write = true
+    else if arg is "--rewrite"
+      options.rewrite = true
     else if arg is "--print-config"
       options.printConfig = true
     else if arg is "--help" or arg is "-h"
@@ -117,7 +139,12 @@ export function parseCliArgs(args: string[]): CliOptions
 
   options
 
-export function formatTextReport(results: LintResult[], isWriteMode: boolean): { output: string, exitCode: number }
+export function formatTextReport(
+  results: LintResult[]
+  isWriteMode: boolean
+  isRewriteMode: boolean = false
+  totalRewritten: number = 0
+): { output: string, exitCode: number }
   lines: string[] := []
   var totalErrors = 0
   var totalWarnings = 0
@@ -156,10 +183,13 @@ export function formatTextReport(results: LintResult[], isWriteMode: boolean): {
     if totalFixable > 0 and not isWriteMode
       lines.push(`  ${totalFixable} fixable with --write`)
 
-  if isWriteMode and totalFixed > 0
+  if isRewriteMode and totalRewritten > 0
+    lines.push(`✔ Rewrote ${totalRewritten} file${totalRewritten is 1 ? "" : "s"}`)
+
+  if isWriteMode and not isRewriteMode and totalFixed > 0
     lines.push(`✔ Fixed ${totalFixed} problem${totalFixed is 1 ? "" : "s"}`)
 
-  if totalProblems is 0 and totalFixed is 0
+  if totalProblems is 0 and totalFixed is 0 and totalRewritten is 0
     lines.push("✔ No problems found")
 
   exitCode := hasFatalError ? 2 : totalErrors > 0 ? 1 : 0
@@ -183,6 +213,7 @@ Usage:
 Options:
   --check              Check files and report errors (default mode)
   -w, --write, --fix   Automatically fix style issues in place
+  --rewrite            Rename and convert JS/TS files to Civet, then apply autofixes
   --print-config       Print the resolved preset, compiler options, rules, and
                        skipped/incompatible rules, then exit
   -c, --config <path>  Path to civet-clint configuration file
@@ -252,29 +283,40 @@ Options:
       console.log(JSON.stringify(payload, null, 2))
       return 0
 
+  isRewriteMode := options.rewrite is true
+  isWriteMode := options.write is true or isRewriteMode
+
   var files: string[]
   try
-    files = await findCivetFiles(options.targets, process.cwd())
+    files = await findCivetFiles(options.targets, process.cwd(), { rewrite: isRewriteMode })
   catch err: any
     console.error(`Input error: ${err.message or err}`)
     return 2
   if files.length is 0
     if options.format is "json"
-      console.log(JSON.stringify({ files: [], totalErrors: 0, totalWarnings: 0, totalFixed: 0 }, null, 2))
+      console.log(JSON.stringify({ files: [], totalErrors: 0, totalWarnings: 0, totalFixed: 0, ...(isRewriteMode ? { totalRewritten: 0 } : {}) }, null, 2))
     else
-      console.log("No .civet files found.")
+      console.log(isRewriteMode ? "No files found to rewrite." : "No .civet files found.")
     return 0
 
   results: LintResult[] := []
-  isWriteMode := options.write is true
+  var totalRewritten = 0
 
   for file of files
     try
-      res := await lintFile(file, {
-        config
-        fix: isWriteMode
-      })
-      results.push(res)
+      if isRewriteMode
+        res := await rewriteFile(file, { config })
+        results.push(res)
+        hasFatal := res.diagnostics.some (d) ->
+          d.ruleId is "syntax-error" or d.ruleId is "io-error" or d.ruleId is "compile-error"
+        if not hasFatal
+          totalRewritten++
+      else
+        res := await lintFile(file, {
+          config
+          fix: isWriteMode
+        })
+        results.push(res)
     catch err: any
       results.push({
         filePath: file
@@ -321,11 +363,12 @@ Options:
       totalErrors
       totalWarnings
       totalFixed
+      ...(isRewriteMode ? { totalRewritten } : {})
     }
     console.log(JSON.stringify(jsonPayload, null, 2))
     return hasFatalError ? 2 : totalErrors > 0 ? 1 : 0
   else
-    { output, exitCode } := formatTextReport(results, isWriteMode)
+    { output, exitCode } := formatTextReport(results, isWriteMode, isRewriteMode, totalRewritten)
     if output
       console.log(output)
     return exitCode

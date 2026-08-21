@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest"
-import { lintSource } from "../src/engine.civet"
+import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
+
+function fixSemicolons(source: string, civetOptions: Record<string, any> = {})
+  lintSource(source, {
+    rules: {
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-concise-arrow": "off"
+    }
+    fix: true
+    civetOptions
+  })
+
+function expectSemicolonFix(source: string, civetOptions: Record<string, any> = {})
+  res := fixSemicolons(source, civetOptions)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeSemicolonStyle(compileSource(fixed, civetOptions))).toBe(normalizeSemicolonStyle(compileSource(source, civetOptions)))
+  fixed
 
 describe "Style Guide Rules Coverage", ->
   describe "style/no-trailing-semicolons", ->
@@ -24,9 +42,6 @@ describe "Style Guide Rules Coverage", ->
       expect(diags.length).toBe(1)
 
     it "ignores semicolons inside a template literal", ->
-      // CSS-in-JS is the common case: a `TemplateLiteral` carries no `$loc` of its
-      // own, so its span must be derived from descendant tokens or every CSS
-      // declaration is reported as a stray semicolon.
       source := "x = <style>{`\n  a { opacity: 1; }\n`}</style>\n"
       res := lintSource(source, {
         rules: { "style/no-trailing-semicolons": "error" }
@@ -42,8 +57,100 @@ describe "Style Guide Rules Coverage", ->
         civetOptions: { autoLet: true }
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons"
-      // Only the trailing semicolon at line 1 should be flagged
       expect(diags.length).toBe(1)
+
+    it "fixes simple statement semicolon: x = 1; -> x = 1", ->
+      expect(expectSemicolonFix("x = 1;\n", { autoLet: true })).toBe("x = 1\n")
+
+    it "fixes call statement semicolon: doThing(); -> doThing()", ->
+      expect(expectSemicolonFix("doThing();\n")).toBe("doThing()\n")
+
+    it "fixes assertion chain: expect(a).toBe(1); -> expect(a).toBe(1)", ->
+      expect(expectSemicolonFix("expect(a).toBe(1);\n")).toBe("expect(a).toBe(1)\n")
+
+    it "fixes semicolon before comment while preserving single space", ->
+      expect(expectSemicolonFix("x = 1; # comment\n", { autoLet: true, coffeeComment: true })).toBe("x = 1 # comment\n")
+
+    it "hazard: f := () => { doThing(); } fix is rejected because emit changes to object literal", ->
+      source := "f := () => { doThing(); }\n"
+      res := fixSemicolons(source)
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(false)
+      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(true)
+
+    it "hazard: if block { doThing(); } fix is rejected because emit changes to object literal", ->
+      source := "if cond\n  { doThing(); }\n"
+      res := fixSemicolons(source)
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(false)
+      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(true)
+
+    it "idempotence: second pass produces no changes and no diagnostics", ->
+      first := fixSemicolons("x = 1;\n", { autoLet: true })
+      expect(first.fixedSource).toBe("x = 1\n")
+      second := fixSemicolons(first.fixedSource!, { autoLet: true })
+      expect(second.fixedSource).toBeUndefined()
+      expect(second.diagnostics.filter((d) -> d.ruleId is "style/no-trailing-semicolons")).toHaveLength(0)
+
+    it "preserves CRLF line endings", ->
+      source := "x = 1;\r\ny = 2;\r\n"
+      res := fixSemicolons(source, { autoLet: true })
+      expect(res.fixedSource).toBe("x = 1\r\ny = 2\r\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "leaves semicolons inside string literals untouched", ->
+      source := 'str = "hello; world";\n'
+      expect(expectSemicolonFix(source, { autoLet: true })).toBe('str = "hello; world"\n')
+
+    it "leaves semicolons inside comments untouched", ->
+      source := "# comment with ; in it\nx = 1\n"
+      res := fixSemicolons(source, { autoLet: true, coffeeComment: true })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/no-trailing-semicolons")).toHaveLength(0)
+
+    it "leaves for loop header semicolons untouched", ->
+      source := "for (let i = 0; i < n; i++)\n  console.log(i)\n"
+      res := fixSemicolons(source)
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.diagnostics.filter((d) -> d.ruleId is "style/no-trailing-semicolons")).toHaveLength(0)
+
+    it "composes with prefer-concise-arrow in one pass", ->
+      source := "fn := () =>\n  return 1;\n"
+      res := lintSource(source, {
+        rules: {
+          "style/no-trailing-semicolons": "error"
+          "style/prefer-concise-arrow": "error"
+        }
+        fix: true
+      })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("fn := =>\n  return 1\n")
+
+    it "adversarial: rejects rule declaring semicolon-style to sneak identifier rename", ->
+      sneaky := {
+        id: "test/sneaky-semicolon"
+        meta: { description: "test", fixable: true, defaultSeverity: "error" }
+        check: (ctx: any) ->
+          ctx.declareEquivalenceReference?("semicolon-style", -> ctx.source.replace("VALUE", "CHANGED"))
+          i := ctx.source.indexOf "VALUE"
+          if i >= 0
+            ctx.report({
+              ruleId: "test/sneaky-semicolon"
+              message: "sneaky"
+              pos: i
+              fix: { start: i, end: i + 5, replacement: "CHANGED" }
+            })
+      }
+      registry := defaultRuleRegistry.clone()
+      registry.register sneaky as any
+      res := lintSource("y := VALUE\n", {
+        registry
+        rules: { "test/sneaky-semicolon": "error" }
+        fix: true
+      })
+      expect(res.fixedSource).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(false)
+
 
   describe "style/prefer-bare-assignment", ->
     it "converts let to bare assignment under autoLet", ->

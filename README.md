@@ -74,6 +74,7 @@ npx clint --print-config src/components/Button.civet
 |---|---|
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
+| `--rewrite` | Rename and convert JS/TS files (`.js`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`) to `.civet` after verifying they parse, then run the autofix pipeline in place. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
 | `-c`, `--config <path>` | Path to a configuration file. Only needed for names outside the auto-discovered list. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
@@ -173,7 +174,7 @@ The baseline neutral preset that relies on Civet's standard word-operator parsin
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- `style/no-trailing-semicolons`: `"error"` (fixable)
 - Compiler options: `{}`
 
 #### `coffee-react`
@@ -185,7 +186,7 @@ Tailored for idiomatic Civet + React codebases:
 - `style/prefer-terse-imports`: `"error"` (fixable)
 - `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
 - `style/prefer-hash-comments`: `"error"` (fixable, requires `coffeeComment`)
-- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- `style/no-trailing-semicolons`: `"error"` (fixable)
 - `style/prefer-existential-check`: `"warn"` (diagnostic)
 - `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
 - `style/prefer-ampersand-shorthand`: `"warn"` (diagnostic)
@@ -263,6 +264,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 |---|---|---|
 | [`style/prefer-word-operators`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
 | [`style/prefer-concise-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
+| [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. Verified via `semicolon-style` output delta. | — |
 | [`style/prefer-jsx-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
 | [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
@@ -307,7 +309,6 @@ changes which value wins. Skipped sites are still reported, so they surface for 
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
 | [`style/prefer-existential-check`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
 | [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
@@ -334,6 +335,29 @@ out of scope; their absence is a design boundary, not a missing feature.
 | Single-quoted module paths | Automated, opt-in | Off by default, because unquoting `'./x'` changes the emitted quote character. Set [`unquoteSingleQuotes`](#rule-options) on `style/prefer-terse-imports` to enable it; the fix is then verified against a reference compile so the change is provably confined to specifier quote style. |
 | Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |
 | Comment quality, naming, file/layer organization, architectural policy (i18n via `t()`, no `fetch` in components) | Not automated | Qualitative judgments with no mechanical rewrite. Enforce in review. |
+
+---
+
+## Migrating a JS/TS Codebase to Civet
+
+Because Civet is a superset of JS/TSX, migrating codebases to Civet does not require a separate decompiler or manual line-by-line translation. In empirical testing against real-world projects, over 97% of JS/TSX files (e.g. 133 of 137 in Ranked) parse and compile cleanly as Civet with zero manual source edits.
+
+Use `clint --rewrite` to convert and format files in one pass:
+
+```bash
+# Rewrite all JS/TS files in a directory
+npx clint --rewrite src/components
+
+# Rewrite specific files or test glob
+npx clint --rewrite src/**/*.test.jsx
+```
+
+`--rewrite` operates safely:
+1. Verifies that the source parses cleanly under the project's resolved Civet dial (`civet.json` / `clint.config.json`).
+2. Checks that the destination `.civet` file does not already exist (never clobbers).
+3. Renames the file in place via `fs.rename` (Git records an `R100` clean rename).
+4. Runs the autofix pipeline (e.g. `no-trailing-semicolons`, `prefer-word-operators`, `prefer-concise-arrow`).
+5. Skips `.d.ts`, `.d.mts`, `.d.cts` declaration files and `.cjs` files.
 
 ---
 

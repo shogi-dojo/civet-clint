@@ -67,12 +67,20 @@ under that dial `is not` does not mean inequality.
 
 ---
 
-## Programmatic API & Tooling Support
-
-`civet-clint` exports a typed ECMAScript Module (ESM) interface compatible with modern bundlers and Node.js environments:
-
 - `lintSource(source, options)`: In-memory linting and compiler-equivalence verification.
 - `lintFile(filePath, options)`: File-based linting and atomic writing.
+- `rewriteFile(filePath, options)`: Conversion of JS/TS files to Civet with safety check, atomic rename, and in-place fixing.
 - `loadConfig(explicitConfigPath?, cwd?, registry?)`: Configuration resolution with inheritance and overrides.
 - `resolveConfigForFile(config, filePath, cwd?, registry?)`: Per-file override resolution.
 - `RuleRegistry`, `createDefaultRuleRegistry()`: Extensible rule registry and plugin execution.
+
+---
+
+## Compiler Equivalence & Output Deltas
+
+By default, Clint enforces strict, byte-for-byte identity on compiled JS output before accepting any autofix. For non-byte-identical transforms, rules may declare bounded output deltas verified against an independently compiled reference source:
+
+| Output Delta | Rules | Permitted Difference |
+|---|---|---|
+| `quote-style` | `style/prefer-terse-imports` (opt-in `unquoteSingleQuotes`) | Module specifier quote character normalization (`'` ↔ `"`). |
+| `semicolon-style` | `style/no-trailing-semicolons` | Trailing statement semicolons and trailing line whitespace. Semicolons altering AST semantics (e.g. statement blocks reparsed as object literals) remain strictly rejected. |

@@ -1,43 +1,103 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { Fix, Rule, RuleContext } from "../types.civet"
+import type { SyntaxTree } from "../syntax.civet"
+import { intersectsRange, applyEdits } from "../utils.civet"
+import { parseSyntax } from "../compiler.civet"
+
+function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number, fix: Fix }[]
+  commentRanges := tree.commentRanges()
+  stringRanges := tree.stringRanges()
+  ignoredRanges := [...commentRanges, ...stringRanges]
+
+  results: { pos: number, fix: Fix }[] := []
+  lines := source.split("\n")
+  var currentOffset = 0
+  var parenDepth = 0
+
+  for line of lines
+    lineLen := line.length
+    for let i = 0; i < lineLen; i++
+      pos := currentOffset + i
+      if intersectsRange(ignoredRanges, pos, pos + 1)
+        continue
+
+      ch := line[i]
+      if ch is "("
+        parenDepth++
+        continue
+      if ch is ")"
+        parenDepth = Math.max(0, parenDepth - 1)
+        continue
+
+      if ch is ";" and parenDepth is 0
+        restOfLine := line.slice(i + 1)
+        trimmedRest := restOfLine.trim()
+
+        isComment := trimmedRest.startsWith("#") or trimmedRest.startsWith("//")
+        isBlockEnd := trimmedRest.startsWith("}")
+        isTrailing := trimmedRest.length is 0 or isComment or isBlockEnd
+
+        if isTrailing
+          var wsLen = 0
+          while i + 1 + wsLen < lineLen
+            nextCh := line[i + 1 + wsLen]
+            break if nextCh is "\r"
+            break unless nextCh is " " or nextCh is "\t"
+            wsLen++
+
+          var trailingWsToRemove = 0
+          if isComment
+            hasSpaceBefore := i > 0 and (line[i - 1] is " " or line[i - 1] is "\t")
+            if hasSpaceBefore
+              trailingWsToRemove = wsLen
+            else if wsLen > 1
+              trailingWsToRemove = wsLen - 1
+            else
+              trailingWsToRemove = 0
+          else if isBlockEnd
+            trailingWsToRemove = 0
+          else
+            trailingWsToRemove = wsLen
+
+          results.push({
+            pos
+            fix: {
+              start: pos
+              end: pos + 1 + trailingWsToRemove
+              replacement: ""
+            }
+          })
+
+    currentOffset += lineLen + 1
+
+  results
+
+function buildReference(input: string, dial: Record<string, any>): string | undefined
+  parseRes := parseSyntax(input, { dial })
+  return undefined unless parseRes.ok
+  found := findTrailingSemicolons(input, parseRes.syntax!)
+  return undefined if found.length is 0
+  fixes := found.map((f) -> f.fix)
+  { output } := applyEdits(input, fixes)
+  output is input ? undefined : output
 
 export const noTrailingSemicolonsRule: Rule = {
   id: "style/no-trailing-semicolons"
   meta: {
     description: "Disallow unnecessary trailing semicolons at statement or line ends"
-    fixable: false
+    fixable: true
     defaultSeverity: "error"
   }
   check: (ctx: RuleContext) ->
-    source := ctx.source
-    tree := ctx.syntax
-    commentRanges := tree.commentRanges()
-    stringRanges := tree.stringRanges()
-    ignoredRanges := [...commentRanges, ...stringRanges]
+    if ctx.declareEquivalenceReference?
+      ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
+        buildReference(input, ctx.parseOptions)
 
-    lines := source.split("\n")
-    var currentOffset = 0
-
-    for line of lines
-      lineLen := line.length
-      for let i = 0; i < lineLen; i++
-        if line[i] is ";"
-          pos := currentOffset + i
-          continue if intersectsRange(ignoredRanges, pos, pos + 1)
-
-          restOfLine := line.slice(i + 1)
-          trimmedRest := restOfLine.trim()
-
-          isTrailing := trimmedRest.length is 0 or
-            trimmedRest.startsWith("#") or
-            trimmedRest.startsWith("//")
-
-          if isTrailing
-            ctx.report({
-              ruleId: "style/no-trailing-semicolons"
-              message: "Unnecessary trailing semicolon"
-              pos
-            })
-
-      currentOffset += lineLen + 1
+    found := findTrailingSemicolons(ctx.source, ctx.syntax)
+    for item of found
+      ctx.report({
+        ruleId: "style/no-trailing-semicolons"
+        message: "Unnecessary trailing semicolon"
+        pos: item.pos
+        fix: item.fix
+      })
 }

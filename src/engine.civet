@@ -69,6 +69,86 @@ export function normalizeQuoteStyle(code: string): string
     i++
   out
 
+export function normalizeSemicolonStyle(code: string): string
+  var out = ""
+  var i = 0
+  var parenDepth = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`"
+      var j = i + 1
+      while j < code.length
+        break if code[j] is "`" and code[j - 1] isnt "\\"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      var body = ""
+      var closed = false
+      while j < code.length
+        c := code[j]
+        if c is "\\"
+          body += code.slice(j, j + 2)
+          j += 2
+          continue
+        if c is quote
+          closed = true
+          break
+        if c is "\n"
+          break
+        body += c
+        j++
+      if closed
+        out += quote + body + quote
+        i = j + 1
+      else
+        out += ch
+        i++
+      continue
+    if ch is "("
+      parenDepth++
+      out += ch
+      i++
+      continue
+    if ch is ")"
+      parenDepth = Math.max(0, parenDepth - 1)
+      out += ch
+      i++
+      continue
+    if ch is ";" and parenDepth is 0
+      var k = i + 1
+      while k < code.length and (code[k] is " " or code[k] is "\t")
+        k++
+      if k >= code.length or code[k] is "\n" or code[k] is "\r"
+        i = k
+        continue
+      if code[k] is "/" and (code[k + 1] is "/" or code[k + 1] is "*")
+        i++
+        if /[ \t]$/.test(out) and (code[i] is " " or code[i] is "\t")
+          while i < code.length and (code[i] is " " or code[i] is "\t")
+            i++
+        continue
+    if (ch is " " or ch is "\t") and parenDepth is 0
+      var k = i + 1
+      while k < code.length and (code[k] is " " or code[k] is "\t")
+        k++
+      if k >= code.length or code[k] is "\n" or code[k] is "\r"
+        i = k
+        continue
+    out += ch
+    i++
+  out
+
 export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
   res := compileForOutput(source, { dial: civetOptions, filename })
   if res.ok
@@ -154,8 +234,13 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
 
   outputDeltaAllowed := (ruleId: string, before: string, after: string): boolean ->
     kind := outputDeltas.get(ruleId)
-    return false unless kind is "quote-style"
-    normalizeQuoteStyle(before) is normalizeQuoteStyle(after)
+    switch kind
+      when "quote-style"
+        normalizeQuoteStyle(before) is normalizeQuoteStyle(after)
+      when "semicolon-style"
+        normalizeSemicolonStyle(before) is normalizeSemicolonStyle(after)
+      else
+        false
 
   context: RuleContext := {
     source
@@ -258,6 +343,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       outputDeltaAllowed(ruleId, originalCompiled!, candidateOutput)
 
     approvedFixes: Fix[] := []
+    approvedRuleIds := new Set<string>()
     for [ruleId, ruleFixes] of fixesByRule
       { output: ruleCandidate, appliedEdits: ruleApplied } := applyEdits(source, ruleFixes)
       continue if ruleCandidate is source
@@ -266,6 +352,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       if candidateRes.ok
         if acceptCandidate(ruleId, candidateRes.output!)
           approvedFixes.push(...ruleApplied)
+          approvedRuleIds.add(ruleId)
         else
           isEquivalencePreserved = false
           diagnostics.push({
@@ -290,13 +377,23 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
       combinedReference := ->
         var acc = source
-        for build of equivalenceReferences.values()
-          next := build(acc)
-          acc = next if next?
+        for id of approvedRuleIds
+          build := equivalenceReferences.get(id)
+          if build?
+            next := build(acc)
+            acc = next if next?
         acc
+      normalizeCombined := (code: string): string ->
+        var res = code
+        kinds := new Set(Array.from(approvedRuleIds).map((id) -> outputDeltas.get(id)).filter(Boolean))
+        if kinds.has("semicolon-style")
+          res = normalizeSemicolonStyle(res)
+        if kinds.has("quote-style")
+          res = normalizeQuoteStyle(res)
+        res
       combinedAccepted := combinedRes.ok and (
         combinedRes.output is originalCompiled or (
-          equivalenceReferences.size > 0 and do
+          approvedRuleIds.size > 0 and do
             reference := combinedReference()
             if reference is source
               false
@@ -304,8 +401,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
               referenceRes := compileForOutput(reference, { dial: civetOptions, compileOptions, filename })
               referenceRes.ok and
                 referenceRes.output is combinedRes.output and
-                Array.from(outputDeltas.keys()).every (id) ->
-                  outputDeltaAllowed(id, originalCompiled!, combinedRes.output!)
+                normalizeCombined(originalCompiled!) is normalizeCombined(combinedRes.output!)
         )
       )
       if combinedRes.ok
@@ -372,3 +468,88 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
     await atomicWriteFile(filePath, normalizedFixed)
 
   res
+
+export async function rewriteFile(filePath: string, options: LintOptions = {}): Promise<LintResult>
+  content := await fs.readFile(filePath, "utf8")
+  destPath := filePath.replace(/\.(jsx?|tsx?|mts|cts)$/, ".civet")
+
+  var destExists = false
+  try
+    await fs.stat(destPath)
+    destExists = true
+  catch
+    destExists = false
+
+  if destExists
+    return {
+      filePath
+      source: content
+      diagnostics: [{
+        ruleId: "io-error"
+        severity: "error"
+        message: `Cannot rewrite "${filePath}": destination "${destPath}" already exists.`
+        line: 1
+        column: 1
+      }]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+  registry := options.registry or defaultRuleRegistry
+  baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
+  fileConfig := resolveConfigForFile(baseConfig, destPath, process.cwd(), registry)
+
+  civetOptions: CompileDial := { ...fileConfig.civetOptions, ...(options.civetOptions or {}) }
+  compileOptions: CompileOptions := { ...fileConfig.compileOptions, ...(options.compileOptions or {}) }
+
+  parseRes := parseSyntax(content, { dial: civetOptions, compileOptions, filename: filePath })
+  if not parseRes.ok
+    return {
+      filePath
+      source: content
+      diagnostics: [{
+        ruleId: "syntax-error"
+        severity: "error"
+        message: `Cannot rewrite "${filePath}": parse error under resolved dial: ${parseRes.error}`
+        line: parseRes.line or 1
+        column: parseRes.column or 1
+        pos: parseRes.offset or 0
+      }]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+  baselineRes := compileForOutput(content, { dial: civetOptions, compileOptions, filename: filePath })
+  if not baselineRes.ok
+    return {
+      filePath
+      source: content
+      diagnostics: [{
+        ruleId: "compile-error"
+        severity: "error"
+        message: `Cannot rewrite "${filePath}": baseline compile error under resolved dial: ${baselineRes.error}`
+        line: baselineRes.line or 1
+        column: baselineRes.column or 1
+      }]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+  await fs.rename(filePath, destPath)
+
+  await lintFile(destPath, {
+    ...options
+    config: fileConfig
+    fix: true
+    registry
+  })
+

@@ -1,0 +1,141 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { runCli, findCivetFiles } from "../src/cli.civet"
+import { rewriteFile } from "../src/engine.civet"
+
+describe "CLI --rewrite Suite", ->
+  var tmpDir: string
+
+  beforeEach async ->
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-rewrite-"))
+
+  afterEach async ->
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "renames a .ts file to .civet and applies autofixes", async ->
+    tsFile := path.join(tmpDir, "example.ts")
+    civetFile := path.join(tmpDir, "example.civet")
+    await fs.writeFile(tsFile, "const a: number = 1;\n", "utf8")
+
+    code := await runCli(["--rewrite", tsFile])
+    expect(code).toBe(0)
+
+    // Original file must be gone, .civet must exist
+    existsTs := await fs.access(tsFile).then(-> true, -> false)
+    expect(existsTs).toBe(false)
+
+    content := await fs.readFile(civetFile, "utf8")
+    // Semicolon should be stripped by no-trailing-semicolons
+    expect(content).toBe("const a: number = 1\n")
+
+  it "renames .jsx, .tsx, .js, .mts, .cts files to .civet", async ->
+    files := [
+      { name: "a.js", content: "const a = 1;\n" }
+      { name: "b.jsx", content: "const b = <div />;\n" }
+      { name: "c.tsx", content: "const c: string = 'hello';\n" }
+      { name: "d.mts", content: "export const d = 4;\n" }
+      { name: "e.cts", content: "export const e = 5;\n" }
+    ]
+    for f of files
+      await fs.writeFile(path.join(tmpDir, f.name), f.content, "utf8")
+
+    code := await runCli(["--rewrite", tmpDir])
+    expect(code).toBe(0)
+
+    for f of files
+      baseName := f.name.replace(/\.[a-z]+$/, "")
+      oldPath := path.join(tmpDir, f.name)
+      newPath := path.join(tmpDir, `${baseName}.civet`)
+      expect(await fs.access(oldPath).then(-> true, -> false)).toBe(false)
+      expect(await fs.access(newPath).then(-> true, -> false)).toBe(true)
+
+  it "skips .d.ts, .d.mts, and .d.cts files", async ->
+    dts := path.join(tmpDir, "globals.d.ts")
+    dmts := path.join(tmpDir, "types.d.mts")
+    dcts := path.join(tmpDir, "common.d.cts")
+    normalTs := path.join(tmpDir, "app.ts")
+
+    await fs.writeFile(dts, "declare const foo: string;\n", "utf8")
+    await fs.writeFile(dmts, "declare const bar: string;\n", "utf8")
+    await fs.writeFile(dcts, "declare const baz: string;\n", "utf8")
+    await fs.writeFile(normalTs, "const app = 1;\n", "utf8")
+
+    discovered := await findCivetFiles([tmpDir], tmpDir, { rewrite: true })
+    expect(discovered).toEqual([normalTs])
+
+    code := await runCli(["--rewrite", tmpDir])
+    expect(code).toBe(0)
+
+    expect(await fs.access(dts).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(dmts).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(dcts).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(path.join(tmpDir, "app.civet")).then(-> true, -> false)).toBe(true)
+
+  it "refuses to clobber an existing .civet file", async ->
+    tsFile := path.join(tmpDir, "collision.ts")
+    civetFile := path.join(tmpDir, "collision.civet")
+    await fs.writeFile(tsFile, "const tsVersion = 1\n", "utf8")
+    await fs.writeFile(civetFile, "const civetVersion = 2\n", "utf8")
+
+    code := await runCli(["--rewrite", tsFile])
+    expect(code).toBe(2)
+
+    // Both files should remain untouched
+    expect(await fs.readFile(tsFile, "utf8")).toBe("const tsVersion = 1\n")
+    expect(await fs.readFile(civetFile, "utf8")).toBe("const civetVersion = 2\n")
+
+  it "leaves file untouched and exits non-zero on parse failure", async ->
+    badTs := path.join(tmpDir, "invalid.ts")
+    // Syntax that cannot parse under Civet
+    await fs.writeFile(badTs, "function ( { invalid syntax }}}", "utf8")
+
+    code := await runCli(["--rewrite", badTs])
+    expect(code).toBe(2)
+
+    // Original file must not have been renamed
+    expect(await fs.access(badTs).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(path.join(tmpDir, "invalid.civet")).then(-> true, -> false)).toBe(false)
+
+  it "honors --config during rewrite", async ->
+    civetJson := path.join(tmpDir, "civet.json")
+    await fs.writeFile(civetJson, JSON.stringify({
+      parseOptions: { autoLet: true }
+    }), "utf8")
+
+    cfgFile := path.join(tmpDir, "custom.json")
+    await fs.writeFile(cfgFile, JSON.stringify({
+      preset: "default"
+      civetConfig: "./civet.json"
+      rules: { "style/prefer-bare-assignment": "error" }
+    }), "utf8")
+
+    tsFile := path.join(tmpDir, "code.ts")
+    await fs.writeFile(tsFile, "let count = 0;\n", "utf8")
+
+    code := await runCli(["--rewrite", "--config", cfgFile, tsFile])
+    expect(code).toBe(0)
+
+    content := await fs.readFile(path.join(tmpDir, "code.civet"), "utf8")
+    // autoLet converted `let count = 0;` to `count = 0`
+    expect(content).toBe("count = 0\n")
+
+  it "formats JSON output correctly with totalRewritten", async ->
+    tsFile := path.join(tmpDir, "hello.ts")
+    await fs.writeFile(tsFile, "const msg = 'hi';\n", "utf8")
+
+    originalLog := console.log
+    captured: string[] := []
+    console.log = (...args) -> captured.push(args.join(" "))
+    var code = 2
+    try
+      code = await runCli(["--rewrite", "--format=json", tsFile])
+    finally
+      console.log = originalLog
+
+    expect(code).toBe(0)
+    parsed := JSON.parse(captured.join("\n"))
+    expect(parsed.totalRewritten).toBe(1)
+    expect(parsed.files).toHaveLength(1)
+    expect(parsed.files[0].filePath).toBe(path.join(tmpDir, "hello.civet"))
