@@ -9,6 +9,7 @@ import { noMixedInterpolationRule } from "./rules/no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./rules/no-trailing-semicolons.civet"
 import { noTrailingCommasRule } from "./rules/no-trailing-commas.civet"
 import { noBracedArrowBodyRule } from "./rules/no-braced-arrow-body.civet"
+import { noDiscardedArrowReturnRule } from "./rules/no-discarded-arrow-return.civet"
 import { preferIndentedObjectRule } from "./rules/prefer-indented-object.civet"
 import { preferBareAssignmentRule } from "./rules/prefer-bare-assignment.civet"
 import { preferExplicitDeclarationsRule } from "./rules/prefer-explicit-declarations.civet"
@@ -91,6 +92,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(noTrailingSemicolonsRule)
   registry.register(noTrailingCommasRule)
   registry.register(noBracedArrowBodyRule)
+  registry.register(noDiscardedArrowReturnRule)
   registry.register(preferIndentedObjectRule)
   registry.register(preferBareAssignmentRule)
   registry.register(preferExplicitDeclarationsRule)

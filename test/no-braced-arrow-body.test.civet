@@ -46,10 +46,11 @@ describe "style/no-braced-arrow-body", ->
     diag := findings(source)[0]
     expect(source.slice(diag.pos!, diag.pos! + 2)).toBe("=>")
 
-  it "does not offer an autofix", ->
-    // The rewrite changes emitted output on purpose, so it is never applied
-    // automatically — see the rule's header comment.
-    expect(findings("it 'x', => {\n  f()\n}\n")[0].fix).toBeUndefined()
+  it "offers an autofix that runs only in the repair phase", ->
+    // The rewrite changes emitted output on purpose, so it is gated on the mis-parse
+    // disappearing rather than on byte-identical emit, and only runs when the caller
+    // opts into the "repair" phase.
+    expect(findings("it 'x', => {\n  f()\n}\n")[0].fix).toBeDefined()
 
 describe "the mis-parse this rule detects", ->
   it "compiles a braced body to an object literal", ->

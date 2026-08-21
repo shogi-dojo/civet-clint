@@ -1,4 +1,4 @@
-import type { Rule, RuleContext } from "../types.civet"
+import type { Fix, Rule, RuleContext } from "../types.civet"
 
 // A JS-style `=> { ... }` arrow body is not a block in Civet: when every statement
 // can be read as an object key, Civet parses the braces as an OBJECT LITERAL.
@@ -17,12 +17,48 @@ import type { Rule, RuleContext } from "../types.civet"
 // declare an output delta — the emitted JS is meant to change, and the engine's
 // byte-identical gate would rightly reject it. It is reported as fixable only under
 // an explicit opt-in so `--write` never rewrites semantics without being asked.
+
+// Index of the `}` matching the `{` at openIdx, or -1. Skips braces inside strings,
+// template literals and comments.
+function findMatchingBrace(source: string, openIdx: number): number
+  var depth = 0
+  var i = openIdx
+  while i < source.length
+    ch := source[i]
+    if ch is "/" and (source[i + 1] is "/" or source[i + 1] is "*")
+      block := source[i + 1] is "*"
+      end := block ? source.indexOf("*/", i + 2) : source.indexOf("\n", i + 2)
+      i = end < 0 ? source.length : (block ? end + 2 : end)
+      continue
+    if ch is '"' or ch is "'" or ch is "`"
+      quote := ch
+      var j = i + 1
+      while j < source.length
+        if source[j] is "\\"
+          j += 2
+          continue
+        break if source[j] is quote
+        j++
+      i = j + 1
+      continue
+    if ch is "{"
+      depth++
+    else if ch is "}"
+      depth--
+      return i if depth is 0
+    i++
+  -1
+
 export const noBracedArrowBodyRule: Rule = {
   id: "style/no-braced-arrow-body"
   meta: {
     description: "Disallow JS-style '=> { ... }' arrow bodies that Civet parses as object literals"
-    fixable: false
+    fixable: true
     defaultSeverity: "error"
+    // Runs before every other rule: de-bracing is what makes the body's trailing
+    // semicolons redundant, so style/no-trailing-semicolons (phase "cleanup") must
+    // not judge the braced form.
+    phase: "repair"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -59,9 +95,43 @@ export const noBracedArrowBodyRule: Rule = {
       return if reported.has(pos)
       reported.add(pos)
 
+      // Build the fix: delete the `{` (and any space before it), then delete the
+      // matching `}`. The body lines are already indented relative to the arrow, so
+      // removing the braces leaves a valid indented body.
+      //
+      // The trailing semicolons inside the body are deliberately LEFT ALONE. Keeping
+      // them preserves the original JS meaning exactly -- without them the last
+      // statement becomes an implicit return, which for a useEffect body React would
+      // treat as a cleanup callback. style/no-trailing-semicolons runs in the later
+      // "cleanup" phase and removes whichever of them are then genuinely redundant.
+      openIdx := span.start + arrowIdx + 2 + braceOffset
+      closeIdx := findMatchingBrace(source, openIdx)
+      return if closeIdx < 0
+
+      var openFrom = openIdx
+      while openFrom > 0 and (source[openFrom - 1] is " " or source[openFrom - 1] is "\t")
+        openFrom--
+
+      // Only unwrap when the closing brace sits on its own line; anything else is a
+      // one-liner whose reflow is not a safe mechanical edit.
+      lineStart := source.lastIndexOf("\n", closeIdx) + 1
+      return unless source.slice(lineStart, closeIdx).trim() is ""
+
+      // Keep the body verbatim, including its final newline and the closing line's
+      // indentation, so whatever followed the `}` (usually the enclosing call's
+      // `)`) stays on its own line.
+      body := source.slice(openIdx + 1, lineStart)
+      closeIndent := source.slice(lineStart, closeIdx)
+      fix: Fix := {
+        start: openFrom
+        end: closeIdx + 1
+        replacement: body + closeIndent
+      }
+
       ctx.report({
         ruleId: "style/no-braced-arrow-body"
         message: "'=> { ... }' is parsed as an object literal — drop the braces and indent the body"
         pos
+        fix
       })
 }

@@ -1,13 +1,14 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
-import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, Severity } from "./types.civet"
+import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
 import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
 import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
+import { RULE_PHASE_ORDER } from "./types.civet"
 import type { SyntaxTree } from "./syntax.civet"
 
 export interface LintOptions
@@ -19,6 +20,11 @@ export interface LintOptions
   fix?: boolean
   rules?: Record<string, RuleLevel>
   ruleOptions?: Record<string, RuleOptions>
+  // Restrict this pass to a single phase. lintSource runs every enabled rule when
+  // omitted, which is the historical behaviour.
+  phase?: RulePhase
+  // Run each phase in order, re-parsing between them. See lintPhased.
+  phases?: RulePhase[]
 
 export function normalizeQuoteStyle(code: string): string
   var out = ""
@@ -304,6 +310,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     continue if mergedRules[ruleId] is "off"
     continue if skippedIds.has(ruleId)
     rule := registry.get(ruleId)
+    // When a phase is requested, only rules belonging to it participate -- including
+    // in the equivalence reference, so a phase is verified against its own fixes.
+    if options.phase? and rule? and (rule.meta.phase or "idiom") isnt options.phase
+      continue
     if rule
       try
         currentRuleId = ruleId
@@ -340,8 +350,65 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       ruleFixes.push(diag.fix!)
       fixesByRule.set(diag.ruleId, ruleFixes)
 
+    // A "repair" rule changes emitted output on purpose -- it fixes code the compiler
+    // mis-parses, so requiring byte-identical emit would reject every real repair.
+    // Its gate instead demands that the mis-parse the phase targets was present
+    // before and is gone after. Correctness of the surrounding behaviour is the
+    // project test suite's job, which is why repairs are opt-in.
+    // Each repair targets a specific mis-compilation. The gate requires that the
+    // defect was present before and is absent after, so a repair rule cannot use
+    // this phase as a licence to make arbitrary edits.
+    //
+    //   object-literal arrow  `=>( {`      — a braced body read as an object literal
+    //   discarded return      `=> { x; }`  — a concise body collapsed into a block
+    misparsePattern := /=>\(\s*\{/
+
+    // Counts `=> { ... ; }` bodies whose braces wrap a single semicolon-terminated
+    // expression — the shape a concise arrow collapses into. A regex cannot express
+    // this because the body spans lines and nests braces, so the brace is matched.
+    countDiscardedBodies := (code: string): number ->
+      var total = 0
+      var i = 0
+      while i < code.length
+        idx := code.indexOf("=>", i)
+        break if idx < 0
+        var j = idx + 2
+        while j < code.length and (code[j] is " " or code[j] is "\t")
+          j++
+        if code[j] isnt "{"
+          i = idx + 2
+          continue
+        var depth = 0
+        var k = j
+        var end = -1
+        while k < code.length
+          if code[k] is "{"
+            depth++
+          else if code[k] is "}"
+            depth--
+            if depth is 0
+              end = k
+              break
+          k++
+        if end < 0
+          i = idx + 2
+          continue
+        inner := code.slice(j + 1, end).trim()
+        // A single statement ending in `;` and containing no further statements.
+        total++ if inner.endsWith(";") and not inner.slice(0, -1).includes(";")
+        i = end + 1
+      total
+
+    repairIsAcceptable := (candidateOutput: string): boolean ->
+      before := originalCompiled!
+      fixedMisparse := misparsePattern.test(before) and not misparsePattern.test(candidateOutput)
+      fixedDiscard := countDiscardedBodies(candidateOutput) < countDiscardedBodies(before)
+      fixedMisparse or fixedDiscard
+
     acceptCandidate := (ruleId: string, candidateOutput: string): boolean ->
       return true if candidateOutput is originalCompiled
+      if (registry.get(ruleId)?.meta.phase or "idiom") is "repair"
+        return repairIsAcceptable(candidateOutput)
       build := equivalenceReferences.get(ruleId)
       return false unless build?
       referenceSource := build(source)
@@ -431,7 +498,12 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         if kinds.has("trailing-comma-style")
           res = normalizeTrailingCommaStyle(res)
         res
-      combinedAccepted := combinedRes.ok and (
+      // Same distinction as acceptCandidate: a repair phase is verified by the
+      // mis-parse disappearing, not by the emit staying identical.
+      isRepairPhase := options.phase is "repair"
+      combinedAccepted := isRepairPhase
+        ? combinedRes.ok and repairIsAcceptable(combinedRes.output!)
+        : combinedRes.ok and (
         combinedRes.output is originalCompiled or (
           approvedRuleIds.size > 0 and do
             reference := combinedReference()
@@ -486,18 +558,60 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     fixableCount
   }
 
+// Runs each phase in turn, feeding one phase's fixed output into the next.
+//
+// A single pass cannot express "de-brace this arrow body, THEN drop the semicolons
+// that de-bracing made redundant": every rule sees the original source, so the
+// second rule judges text that no longer exists by the time fixes are applied.
+// Re-parsing between phases is what makes such a dependency expressible.
+//
+// Diagnostics are collected from every phase, but positions belong to the text that
+// phase saw. Only the final phase's diagnostics are reported, since earlier ones
+// refer to superseded offsets -- an earlier phase's findings are either fixed (and
+// so gone) or re-reported by the final pass.
+export function lintPhased(source: string, options: LintOptions = {}): LintResult
+  phases := options.phases or RULE_PHASE_ORDER
+
+  var current = source
+  var totalApplied = 0
+  var everFixed = false
+  var equivalencePreserved = true
+  var last: LintResult | undefined = undefined
+
+  for phase of phases
+    res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
+    last = res
+    equivalencePreserved = false unless res.isEquivalencePreserved
+    totalApplied += res.appliedFixesCount
+    if res.fixedSource? and res.fixedSource isnt current
+      current = res.fixedSource
+      everFixed = true
+
+  // Re-run the final state so reported diagnostics match the text the user ends up
+  // with, rather than whatever the last phase happened to look at.
+  final := lintSource(current, { ...options, phases: undefined, phase: undefined, fix: false, filename: options.filename })
+
+  {
+    filePath: options.filename or "input.civet"
+    source
+    fixedSource: everFixed ? current : undefined
+    diagnostics: final.diagnostics
+    appliedFixesCount: totalApplied
+    isEquivalencePreserved: equivalencePreserved
+    errorCount: final.errorCount
+    warningCount: final.warningCount
+    fixableCount: final.fixableCount
+  }
+
 export async function lintFile(filePath: string, options: LintOptions = {}): Promise<LintResult>
   content := await fs.readFile(filePath, "utf8")
   registry := options.registry or defaultRuleRegistry
   baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
   fileConfig := resolveConfigForFile(baseConfig, filePath, process.cwd(), registry)
 
-  res := lintSource(content, {
-    ...options
-    config: fileConfig
-    filename: filePath
-    registry
-  })
+  res := options.phases?
+    ? lintPhased(content, { ...options, config: fileConfig, filename: filePath, registry })
+    : lintSource(content, { ...options, config: fileConfig, filename: filePath, registry })
 
   if options.fix and res.fixedSource and res.fixedSource isnt content
     lineEnding := detectLineEnding(content)
@@ -586,10 +700,15 @@ export async function rewriteFile(filePath: string, options: LintOptions = {}): 
 
   await fs.rename(filePath, destPath)
 
+  // A freshly renamed JS file is the case the "repair" phase exists for: its
+  // `=> { ... }` bodies are mis-parsed as object literals the moment the extension
+  // changes. Run the full phase order so the mis-parse is repaired before any
+  // later rule judges the body. Callers can pass an explicit `phases` to opt out.
   await lintFile(destPath, {
     ...options
     config: fileConfig
     fix: true
+    phases: options.phases or RULE_PHASE_ORDER
     registry
   })
 

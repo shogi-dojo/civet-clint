@@ -173,6 +173,10 @@ export const noTrailingSemicolonsRule: Rule = {
     description: "Disallow unnecessary trailing semicolons at statement or line ends"
     fixable: true
     defaultSeverity: "error"
+    // Must run after the "repair" phase has de-braced arrow bodies: in a braced body
+    // the trailing semicolon is load-bearing, and neither keeping nor removing it
+    // produces correct code.
+    phase: "cleanup"
   }
   check: (ctx: RuleContext) ->
     if ctx.declareEquivalenceReference?
