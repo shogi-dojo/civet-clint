@@ -23,7 +23,7 @@ export interface Diagnostic
   fix?: Fix
 
 export type EquivalenceReference = (source: string) => string | undefined
-export type OutputDelta = "quote-style"
+export type OutputDelta = "quote-style" | "semicolon-style" | "declaration-style" | "trailing-comma-style"
 
 export interface RuleContext
   source: string
@@ -46,13 +46,31 @@ export interface RuleContext
 export interface RuleCapability
   requires?: string[]
   requiresAny?: string[]
+  forbids?: string[]
+
+// Rules run in ascending phase order, and the engine re-parses between phases so a
+// later phase sees the text earlier phases produced. Ordering matters when one rule
+// creates the conditions another depends on: de-bracing an arrow body (phase
+// "repair") is what makes its trailing semicolons genuinely redundant, so
+// style/no-trailing-semicolons must not run until that has happened.
+//
+//   repair  — semantic repairs that intentionally change emitted output.
+//             Gated by behaviour (the test suite), not byte-equality.
+//   idiom   — the default. Output-preserving style fixes.
+//   cleanup — fixes that only become correct once earlier phases have run.
+export type RulePhase = "repair" | "idiom" | "cleanup"
+
+export const RULE_PHASE_ORDER: RulePhase[] = ["repair", "idiom", "cleanup"]
 
 export interface RuleMeta
   description: string
   fixable: boolean
   defaultSeverity: Severity
+  // Defaults to "idiom" when omitted.
+  phase?: RulePhase
   allowFixesInsideComments?: boolean
   capabilities?: RuleCapability
+  conflictsWith?: string[]
   defaultOptions?: RuleOptions
 
 export interface Rule

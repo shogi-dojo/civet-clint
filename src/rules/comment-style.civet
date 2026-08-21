@@ -1,0 +1,9 @@
+import type { SyntaxTree } from "../syntax.civet"
+
+const TOOL_DIRECTIVE_REGEX = /^(?:\/\/|#)\s*(?:@(?:ts-|flow\b|jsx(?:ImportSource|Runtime)?\b|vitest-)|eslint|prettier|biome|deno-lint|oxlint|rome|stylelint|c8\b|istanbul\b|vite\b|webpack\b|#\s*(?:sourceURL|sourceMappingURL|region|endregion))/i
+
+// Comment-style rewrites must not activate/deactivate tool directives or rewrite
+// comments embedded in JSX, where the accepted comment syntax is context-sensitive.
+export function shouldSkipCommentStyleRewrite(comment: any, text: string, tree: SyntaxTree): boolean
+  TOOL_DIRECTIVE_REGEX.test(text) or
+    tree.hasAncestorType(comment, ["JSXElement", "JSXFragment"])

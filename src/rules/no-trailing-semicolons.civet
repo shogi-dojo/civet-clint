@@ -1,43 +1,194 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { Fix, Rule, RuleContext } from "../types.civet"
+import type { SyntaxTree } from "../syntax.civet"
+import { intersectsRange, applyEdits, normalizeSemicolonStyle } from "../utils.civet"
+import { parseSyntax, compileForOutput } from "../compiler.civet"
+
+// A trailing `;` in Civet is not always cosmetic. Inside a function body it is one
+// of the sanctioned ways to suppress the implicit return of the last statement
+// (civet.dev/reference), so deleting it can silently change what the function
+// returns:
+//
+//   it 'x', =>          without the `;` the last statement becomes the return
+//     f()               value, and a `useEffect` that returns a non-function
+//     g();              makes React treat it as a cleanup callback.
+//
+// Emitted `;` is normalized away by the engine's "semicolon-style" delta, so the
+// only differences that survive normalization are real semantic ones. Rather than
+// guess which positions are safe from syntax alone, each candidate is verified by
+// compiling with and without it and comparing normalized output. That keeps the
+// rule correct for shapes nobody enumerated.
+
+
+// True when removing the semicolon leaves the emitted program unchanged once
+// pass-through semicolons are normalized away. A compile failure counts as unsafe.
+function removalIsSafe(source: string, fix: Fix, dial: Record<string, any>): boolean
+  candidate := source.slice(0, fix.start) + fix.replacement + source.slice(fix.end)
+  withSemi := compileForOutput(source, { dial })
+  return false unless withSemi.ok
+  without := compileForOutput(candidate, { dial })
+  return false unless without.ok
+  normalizeSemicolonStyle(withSemi.output!) is normalizeSemicolonStyle(without.output!)
+
+function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number, fix: Fix }[]
+  commentRanges := tree.commentRanges()
+  stringRanges := tree.stringRanges()
+  ignoredRanges := [...commentRanges, ...stringRanges]
+
+  results: { pos: number, fix: Fix }[] := []
+  lines := source.split("\n")
+  var currentOffset = 0
+  var parenDepth = 0
+
+  for line of lines
+    lineLen := line.length
+    for let i = 0; i < lineLen; i++
+      pos := currentOffset + i
+      if intersectsRange(ignoredRanges, pos, pos + 1)
+        continue
+
+      ch := line[i]
+      if ch is "("
+        parenDepth++
+        continue
+      if ch is ")"
+        parenDepth = Math.max(0, parenDepth - 1)
+        continue
+
+      if ch is ";" and parenDepth is 0
+        restOfLine := line.slice(i + 1)
+        trimmedRest := restOfLine.trim()
+
+        isComment := trimmedRest.startsWith("#") or trimmedRest.startsWith("//")
+        isBlockEnd := trimmedRest.startsWith("}")
+        isTrailing := trimmedRest.length is 0 or isComment or isBlockEnd
+
+        if isTrailing
+          var wsLen = 0
+          while i + 1 + wsLen < lineLen
+            nextCh := line[i + 1 + wsLen]
+            break if nextCh is "\r"
+            break unless nextCh is " " or nextCh is "\t"
+            wsLen++
+
+          var trailingWsToRemove = 0
+          if isComment
+            hasSpaceBefore := i > 0 and (line[i - 1] is " " or line[i - 1] is "\t")
+            if hasSpaceBefore
+              trailingWsToRemove = wsLen
+            else if wsLen > 1
+              trailingWsToRemove = wsLen - 1
+            else
+              trailingWsToRemove = 0
+          else if isBlockEnd
+            trailingWsToRemove = 0
+          else
+            trailingWsToRemove = wsLen
+
+          results.push({
+            pos
+            fix: {
+              start: pos
+              end: pos + 1 + trailingWsToRemove
+              replacement: ""
+            }
+          })
+
+    currentOffset += lineLen + 1
+
+  results
+
+// Candidates whose removal provably does not change the emitted program.
+//
+// Verifying one candidate at a time costs a compile per semicolon, which on a large
+// test file (hundreds of semicolons, ~1k lines) is slow enough to exhaust memory.
+// Instead the set is bisected: a group that verifies clean is accepted whole, and
+// only a group that fails is split. Files where every semicolon is removable — the
+// common case — cost two compiles regardless of size, and a file with k unsafe
+// semicolons costs O(k log n) rather than O(n).
+function safeSemicolons(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+  found := findTrailingSemicolons(source, tree)
+  return found if found.length is 0
+
+  base := compileForOutput(source, { dial })
+  return [] unless base.ok
+  baseline := normalizeSemicolonStyle(base.output!)
+
+  groupIsSafe := (group: { pos: number, fix: Fix }[]): boolean ->
+    return true if group.length is 0
+    { output } := applyEdits(source, group.map((f) -> f.fix))
+    res := compileForOutput(output, { dial })
+    res.ok and normalizeSemicolonStyle(res.output!) is baseline
+
+  // Depth-bounded so a pathological file can never blow the stack.
+  accepted: { pos: number, fix: Fix }[] := []
+  partition := (group: { pos: number, fix: Fix }[], depth: number): void ->
+    return if group.length is 0
+    if groupIsSafe(group)
+      accepted.push(...group)
+      return
+    if group.length is 1 or depth > 24
+      return
+    mid := Math.floor(group.length / 2)
+    partition(group.slice(0, mid), depth + 1)
+    partition(group.slice(mid), depth + 1)
+
+  partition(found, 0)
+  accepted.sort (a, b) -> a.pos - b.pos
+
+  // Bisection verifies each group in isolation, but two removals that are each
+  // safe alone can interact — dropping one `;` can change how a later line parses.
+  // Re-verify the union and, if it fails, shrink it until it holds. The engine's
+  // gate would catch this anyway; doing it here means the user sees no error.
+  var result = accepted
+  while result.length > 0 and not groupIsSafe(result)
+    result = result.slice(0, Math.floor(result.length / 2))
+  result
+
+// safeSemicolons is the expensive part (several compiles), and the engine calls the
+// rule's reference builder with the same source it just checked. Memoising the last
+// result halves the work without holding memory across files.
+var lastKey: string | undefined = undefined
+var lastValue: { pos: number, fix: Fix }[] = []
+
+function safeSemicolonsCached(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+  key := source
+  return lastValue if lastKey is key
+  value := safeSemicolons(source, tree, dial)
+  lastKey = key
+  lastValue = value
+  value
+
+function buildReference(input: string, dial: Record<string, any>): string | undefined
+  parseRes := parseSyntax(input, { dial })
+  return undefined unless parseRes.ok
+  found := safeSemicolonsCached(input, parseRes.syntax!, dial)
+  return undefined if found.length is 0
+  fixes := found.map((f) -> f.fix)
+  { output } := applyEdits(input, fixes)
+  output is input ? undefined : output
 
 export const noTrailingSemicolonsRule: Rule = {
   id: "style/no-trailing-semicolons"
   meta: {
     description: "Disallow unnecessary trailing semicolons at statement or line ends"
-    fixable: false
+    fixable: true
     defaultSeverity: "error"
+    // Must run after the "repair" phase has de-braced arrow bodies: in a braced body
+    // the trailing semicolon is load-bearing, and neither keeping nor removing it
+    // produces correct code.
+    phase: "cleanup"
   }
   check: (ctx: RuleContext) ->
-    source := ctx.source
-    tree := ctx.syntax
-    commentRanges := tree.commentRanges()
-    stringRanges := tree.stringRanges()
-    ignoredRanges := [...commentRanges, ...stringRanges]
+    if ctx.declareEquivalenceReference?
+      ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
+        buildReference(input, ctx.parseOptions)
 
-    lines := source.split("\n")
-    var currentOffset = 0
-
-    for line of lines
-      lineLen := line.length
-      for let i = 0; i < lineLen; i++
-        if line[i] is ";"
-          pos := currentOffset + i
-          continue if intersectsRange(ignoredRanges, pos, pos + 1)
-
-          restOfLine := line.slice(i + 1)
-          trimmedRest := restOfLine.trim()
-
-          isTrailing := trimmedRest.length is 0 or
-            trimmedRest.startsWith("#") or
-            trimmedRest.startsWith("//")
-
-          if isTrailing
-            ctx.report({
-              ruleId: "style/no-trailing-semicolons"
-              message: "Unnecessary trailing semicolon"
-              pos
-            })
-
-      currentOffset += lineLen + 1
+    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions)
+    for item of found
+      ctx.report({
+        ruleId: "style/no-trailing-semicolons"
+        message: "Unnecessary trailing semicolon"
+        pos: item.pos
+        fix: item.fix
+      })
 }

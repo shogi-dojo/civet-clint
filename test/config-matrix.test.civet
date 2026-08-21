@@ -3,7 +3,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { lintSource } from "../src/engine.civet"
-import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
+import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
 import { parseSyntax, compileForOutput } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -14,6 +15,66 @@ import type { ResolvedConfig } from "../src/types.civet"
 // incompatible rule/config combinations.
 
 describe "Configuration matrix", ->
+  describe "opposing rule directions", ->
+    it "rejects conflicting rules before linting", ->
+      registry := defaultRuleRegistry.clone()
+      registry.register({
+        id: "test/prefer-left"
+        meta: {
+          description: "Prefer left"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-right"]
+        }
+        check: ->
+      })
+      registry.register({
+        id: "test/prefer-right"
+        meta: {
+          description: "Prefer right"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-left"]
+        }
+        check: ->
+      })
+
+      rules := {
+        "test/prefer-left": "error"
+        "test/prefer-right": "warn"
+      }
+      expect(() -> validateRuleConflicts(rules, registry))
+        .toThrow('"test/prefer-left" conflicts with "test/prefer-right"')
+      expect(() -> lintSource("x = 1", { rules, registry }))
+        .toThrow("Conflicting rules enabled")
+
+    it "allows either direction when the opposite rule is off", ->
+      registry := defaultRuleRegistry.clone()
+      registry.register({
+        id: "test/prefer-left"
+        meta: {
+          description: "Prefer left"
+          fixable: false
+          defaultSeverity: "error"
+          conflictsWith: ["test/prefer-right"]
+        }
+        check: ->
+      })
+      registry.register({
+        id: "test/prefer-right"
+        meta: {
+          description: "Prefer right"
+          fixable: false
+          defaultSeverity: "error"
+        }
+        check: ->
+      })
+
+      expect(() -> validateRuleConflicts({
+        "test/prefer-left": "error"
+        "test/prefer-right": "off"
+      }, registry)).not.toThrow()
+
   describe "default preset (neutral, no Coffee options)", ->
     it "ships an empty dial and only dial-independent rules", ->
       expect(PRESETS["default"].civetOptions).toEqual({})
@@ -36,6 +97,26 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-bare-jsx-values"]).toBe("error")
       expect(preset.rules["style/prefer-hash-comments"]).toBe("error")
       expect(preset.rules["style/no-thin-arrow"]).toBe("warn")
+
+    it "provides a conflict-free CoffeeScript-to-standard migration preset", ->
+      preset := PRESETS["coffee-to-standard"]
+      expect(preset.civetOptions).toEqual({
+        autoLet: true
+        coffeeIsnt: true
+        coffeeRange: true
+        coffeeComment: true
+        react: true
+      })
+      expect(preset.rules["style/prefer-slash-comments"]).toBe("error")
+      expect(preset.rules["style/prefer-is-not"]).toBe("error")
+      expect(preset.rules["style/prefer-explicit-declarations"]).toBe("error")
+      // The existing word-operator rule selects `isnt` while coffeeIsnt is active,
+      // so it stays out of this preset to keep migration convergent in one pass.
+      expect(preset.rules["style/prefer-word-operators"]).toBeUndefined()
+      expect(preset.rules["style/prefer-hash-comments"]).toBeUndefined()
+      expect(preset.rules["style/no-is-not"]).toBeUndefined()
+      expect(preset.rules["style/prefer-bare-assignment"]).toBeUndefined()
+      expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
 
     it "uses the neutral preset when no Clint config exists", async ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
@@ -102,6 +183,16 @@ describe "Configuration matrix", ->
       dangerousDiags := dangerous.diagnostics.filter((d) -> d.ruleId is "style/no-is-not")
       expect(dangerousDiags).toHaveLength(1)
       expect(dangerousDiags[0].message).toContain("coffeeNot")
+
+    it "skips is-not migration when coffeeNot changes its parse", ->
+      skipped := computeSkippedRules(
+        { "style/prefer-is-not": "error" }
+        { coffeeIsnt: true, coffeeNot: true }
+      )
+      expect(skipped).toEqual([{
+        ruleId: "style/prefer-is-not"
+        reason: "incompatible with coffeeNot in the compiler dial"
+      }])
 
   describe "React on/off", ->
     it "skips prefer-jsx-shorthand when react is off, runs it when react is on", ->

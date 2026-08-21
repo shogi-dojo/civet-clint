@@ -11,7 +11,7 @@ This document outlines the supported runtime environments, compiler dependencies
 | **Civet Compiler** | `@danielx/civet@0.11.15` | **Exact pin.** Clint relies on parser AST structures via `{ ast: "raw" }`. Other versions may alter raw AST shapes or compiler dial keys. |
 | **Node.js Runtime** | `>=20.0.0` | Tested in continuous integration across Node.js **20.x**, **22.x**, and **24.x**. |
 | **Operating Systems** | Linux (CI), macOS (consumer validation) | Windows-style paths and CRLF preservation have unit coverage, but native Windows execution is not yet CI-validated. |
-| **Presets** | `default`, `coffee-react` | `default` (neutral, dial-independent); `coffee-react` (requires `autoLet`, `coffeeIsnt`, `coffeeRange`, `react`). |
+| **Presets** | `default`, `coffee-react`, `coffee-to-standard` | Neutral style, Coffee/React style, and a transitional CoffeeScript-to-standard migration path. |
 | **Frameworks** | React (JSX) | Validated on React codebases. Solid and other JSX dialects are currently **unvalidated**. |
 | **Config Discovery** | `clint.config.json`, `.clintrc.json`, `.clint.json` | Auto-discovered in order from the repository root. Custom config paths supported via `--config <path>`. |
 | **Civet Config Adapter** | `civet.json`, `civetconfig.json`, `.civetconfig.json` | Clint auto-discovers these three static JSON names; broader Civet config formats are not yet supported. |
@@ -57,15 +57,30 @@ Clint's current adapter auto-discovers and reads `civet.json`, `civetconfig.json
 |---|---|---|---|
 | `default` | Standard, neutral Civet style | `{}` (none required) | `style/prefer-word-operators`<br>`style/prefer-concise-arrow`<br>`style/no-mixed-interpolation`<br>`style/no-trailing-semicolons` |
 | `coffee-react` | Idiomatic CoffeeScript-feel Civet + React | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | All 19 built-in rules configured for terse syntax, CoffeeScript comments, and React JSX shorthands. |
+| `coffee-to-standard` | Migrate legacy CoffeeScript-compatible source toward neutral Civet | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | Neutral rules plus compiler-identical `#` → `//`, `isnt` → `is not`, `:=` → `const`, and exported auto-bindings → `export let`. |
+
+The migration preset intentionally keeps legacy parser options enabled while source is
+being rewritten. After the migration check is clean, disable the corresponding
+compiler options and switch to `default`; Clint does not mutate `civet.json` itself.
+`style/prefer-is-not` is reported as skipped while `coffeeNot` remains enabled because
+under that dial `is not` does not mean inequality.
 
 ---
 
-## Programmatic API & Tooling Support
-
-`civet-clint` exports a typed ECMAScript Module (ESM) interface compatible with modern bundlers and Node.js environments:
-
 - `lintSource(source, options)`: In-memory linting and compiler-equivalence verification.
 - `lintFile(filePath, options)`: File-based linting and atomic writing.
+- `rewriteFile(filePath, options)`: Conversion of JS/TS files to Civet with safety check, atomic rename, and in-place fixing.
 - `loadConfig(explicitConfigPath?, cwd?, registry?)`: Configuration resolution with inheritance and overrides.
 - `resolveConfigForFile(config, filePath, cwd?, registry?)`: Per-file override resolution.
 - `RuleRegistry`, `createDefaultRuleRegistry()`: Extensible rule registry and plugin execution.
+
+---
+
+## Compiler Equivalence & Output Deltas
+
+By default, Clint enforces strict, byte-for-byte identity on compiled JS output before accepting any autofix. For non-byte-identical transforms, rules may declare bounded output deltas verified against an independently compiled reference source:
+
+| Output Delta | Rules | Permitted Difference |
+|---|---|---|
+| `quote-style` | `style/prefer-terse-imports` (opt-in `unquoteSingleQuotes`) | Module specifier quote character normalization (`'` ↔ `"`). |
+| `semicolon-style` | `style/no-trailing-semicolons` | Trailing statement semicolons and trailing line whitespace. Semicolons altering AST semantics (e.g. statement blocks reparsed as object literals) remain strictly rejected. |

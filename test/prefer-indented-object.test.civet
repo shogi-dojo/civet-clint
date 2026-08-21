@@ -1,0 +1,63 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeTrailingCommaStyle } from "../src/engine.civet"
+
+RULE := "style/prefer-indented-object"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectIndentEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeTrailingCommaStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeTrailingCommaStyle(compileSource(source, DIAL)))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-indented-object", ->
+  it "drops braces from a ':=' object literal", ->
+    expect(expectIndentEquivalent("o := {\n  a: 1\n  b: 2\n}\n")).toBe("o :=\n  a: 1\n  b: 2\n")
+
+  it "drops braces from a bare '=' object literal", ->
+    expect(expectIndentEquivalent("o = {\n  a: 1\n}\n")).toBe("o =\n  a: 1\n")
+
+  it "drops braces from an exported binding", ->
+    expect(expectIndentEquivalent("export o = {\n  a: 1\n}\n")).toBe("export o =\n  a: 1\n")
+
+  it "leaves an inner object alone while unwrapping the outer one", ->
+    expect(expectIndentEquivalent("o := {\n  a: {\n    b: 1\n  }\n}\n"))
+      .toBe("o :=\n  a: {\n    b: 1\n  }\n")
+
+  it "is idempotent", ->
+    once := fix("o := {\n  a: 1\n}\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-indented-object exclusions", ->
+  it "leaves an object passed directly to a call", ->
+    // Dropping the brace would strand the closing paren on its own line, which the
+    // compiler emits differently.
+    unchanged("f({\n  a: 1\n})\n")
+
+  it "leaves an arrow's parenthesised object return", ->
+    // The parens are load-bearing: removing them re-creates the object-literal
+    // mis-parse that style/no-braced-arrow-body detects.
+    unchanged("m := h(=> ({\n  a: 1\n}))\n")
+
+  it "leaves an object inside an array literal", ->
+    unchanged("a := [{\n  x: 1\n}]\n")
+
+  it "leaves a single-line object literal", ->
+    unchanged("o := { a: 1 }\n")
+
+  it "does not treat an equality comparison as a binding", ->
+    unchanged("if x == {\n  a: 1\n}\n")
+
+  it "leaves a braced arrow body to the dedicated rule", ->
+    unchanged("it 'x', => {\n  f()\n}\n")

@@ -58,7 +58,7 @@ export type RuleLevel = 'off' | 'warn' | 'error';
 export type RuleOptions = Record<string, any>;
 export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions];
 export type EquivalenceReference = (source: string) => string | undefined;
-export type OutputDelta = 'quote-style';
+export type OutputDelta = 'quote-style' | 'semicolon-style';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
 export interface SourceRange {
@@ -157,13 +157,17 @@ export interface RuleCapability {
   requires?: string[];
   requiresAny?: string[];
 }
+export type RulePhase = "repair" | "idiom" | "cleanup";
+export declare const RULE_PHASE_ORDER: RulePhase[];
 export interface RuleMeta {
   description: string;
   fixable: boolean;
   defaultSeverity: Severity;
   allowFixesInsideComments?: boolean;
   capabilities?: RuleCapability;
+  conflictsWith?: string[];
   defaultOptions?: RuleOptions;
+  phase?: RulePhase;
 }
 export interface Rule {
   id: string;
@@ -236,10 +240,13 @@ export interface LintOptions {
   fix?: boolean;
   rules?: Record<string, RuleLevel>;
   ruleOptions?: Record<string, RuleOptions>;
+  phase?: RulePhase;
+  phases?: RulePhase[];
 }
 export interface CliOptions {
   check?: boolean;
   write?: boolean;
+  rewrite?: boolean;
   config?: string;
   format?: 'text' | 'json';
   printConfig?: boolean;
@@ -289,8 +296,11 @@ export function parseSyntax(source: string, options: SyntaxParseOptions): Compil
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
 export function normalizeQuoteStyle(code: string): string;
+export function normalizeSemicolonStyle(code: string): string;
 export function lintSource(source: string, options?: LintOptions): LintResult;
+export function lintPhased(source: string, options?: LintOptions): LintResult;
 export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;
+export function rewriteFile(filePath: string, options?: LintOptions): Promise<LintResult>;
 export function createLineColumnIndex(source: string): (pos: number) => { line: number; column: number };
 export function walkAst(ast: any, visitor: (node: any, parent: any) => void): void;
 export function collectCommentRanges(ast: any): { start: number; end: number }[];
@@ -298,9 +308,13 @@ export function intersectsRange(ranges: { start: number; end: number }[], start:
 export function applyEdits(source: string, edits: Fix[]): { output: string; appliedEdits: Fix[]; conflicts: Fix[] };
 export function detectLineEnding(source: string): string;
 export function atomicWriteFile(filePath: string, content: string): Promise<void>;
-export function findCivetFiles(targets: string[], cwd?: string): Promise<string[]>;
+export interface FindFilesOptions {
+  extensions?: string[];
+  rewrite?: boolean;
+}
+export function findCivetFiles(targets: string[], cwd?: string, options?: FindFilesOptions): Promise<string[]>;
 export function parseCliArgs(args: string[]): CliOptions;
-export function formatTextReport(results: LintResult[], isWriteMode: boolean): { output: string; exitCode: number };
+export function formatTextReport(results: LintResult[], isWriteMode: boolean, isRewriteMode?: boolean, totalRewritten?: number): { output: string; exitCode: number };
 export function runCli(argv?: string[]): Promise<number>;
 `
   await fs.writeFile(path.join(DIST_DIR, 'index.d.ts'), indexDts, 'utf8')

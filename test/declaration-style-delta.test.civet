@@ -1,0 +1,100 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeDeclarationStyle } from "../src/engine.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
+import type { Rule } from "../src/types.civet"
+
+RULE := "style/prefer-bare-assignment"
+DIAL := { autoLet: true }
+
+function fix(source: string, civetOptions: Record<string, any> = DIAL)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions })
+
+// The safety contract: emitted output may differ ONLY by const/let. Anything else
+// must be rejected by the gate.
+function expectDeclarationEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeDeclarationStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeDeclarationStyle(compileSource(source, DIAL)))
+  fixed
+
+describe "normalizeDeclarationStyle", ->
+  it "rewrites a standalone const keyword to let", ->
+    expect(normalizeDeclarationStyle("const x = 1")).toBe("let x = 1")
+
+  it "leaves identifiers that merely contain 'const' alone", ->
+    expect(normalizeDeclarationStyle("constant = 1")).toBe("constant = 1")
+    expect(normalizeDeclarationStyle("myconst = 1")).toBe("myconst = 1")
+
+  it "does not touch 'const' inside strings", ->
+    expect(normalizeDeclarationStyle('x = "const y"')).toBe('x = "const y"')
+    expect(normalizeDeclarationStyle("x = 'const y'")).toBe("x = 'const y'")
+
+  it "does not touch 'const' inside comments", ->
+    expect(normalizeDeclarationStyle("// const y\nx = 1")).toBe("// const y\nx = 1")
+    expect(normalizeDeclarationStyle("/* const y */x = 1")).toBe("/* const y */x = 1")
+
+  it "does not touch 'const' inside template literals", ->
+    expect(normalizeDeclarationStyle("x = `const y`")).toBe("x = `const y`")
+
+describe "style/prefer-bare-assignment under the declaration-style delta", ->
+  it "rewrites const to a bare binding", ->
+    expect(expectDeclarationEquivalent("const x = 1\n")).toBe("x = 1\n")
+
+  it "rewrites a const initialised from a call", ->
+    expect(expectDeclarationEquivalent("const q = make()\n")).toBe("q = make()\n")
+
+  it "keeps CONST_CASE on the ':=' form", ->
+    expect(expectDeclarationEquivalent("const MAX_ROWS = 10\n")).toBe("MAX_ROWS := 10\n")
+
+  it "is idempotent", ->
+    once := fix("const x = 1\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "preserves CRLF line endings", ->
+    expect(expectDeclarationEquivalent("const x = 1\r\nconst y = 2\r\n"))
+      .toBe("x = 1\r\ny = 2\r\n")
+
+  it "leaves 'const' inside a string untouched", ->
+    source := 'label = "const x = 1"\n'
+    expect(fix(source).fixedSource ?? source).toBe(source)
+
+  it "leaves 'const' inside a comment untouched", ->
+    source := "// const x = 1\ny = 2\n"
+    expect(fix(source).fixedSource ?? source).toBe(source)
+
+describe "declaration-style delta safety", ->
+  it "rejects a rule that smuggles an identifier rename through the delta", ->
+    registry := defaultRuleRegistry.clone()
+    sneaky: Rule := {
+      id: "test/sneaky-declaration"
+      meta: { description: "adversarial", fixable: true, defaultSeverity: "error" }
+      check: (ctx) ->
+        idx := ctx.source.indexOf("const")
+        return if idx < 0
+        // Declare a reference that ALSO renames an identifier — not a const/let
+        // difference, so the engine's independent bound must reject it.
+        ctx.declareEquivalenceReference?.("declaration-style", (input: string) ->
+          input.replace("const VALUE", "RENAMED")
+        )
+        ctx.report({
+          ruleId: "test/sneaky-declaration"
+          message: "adversarial rewrite"
+          pos: idx
+          fix: { start: idx, end: idx + 11, replacement: "RENAMED" }
+        })
+    }
+    registry.register(sneaky)
+
+    res := lintSource("const VALUE = 1\n", {
+      registry
+      rules: { "test/sneaky-declaration": "error" }
+      fix: true
+      civetOptions: DIAL
+    })
+
+    expect(res.isEquivalencePreserved).toBe(false)
+    expect(res.diagnostics.some((d) -> d.ruleId is "compiler-equivalence-mismatch")).toBe(true)

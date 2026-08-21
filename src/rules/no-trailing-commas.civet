@@ -1,0 +1,86 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// A trailing comma before a closing brace is redundant in an OBJECT LITERAL, where
+// Civet lets indentation separate the entries instead:
+//
+//   o :=            not      o := {
+//     a: 1                     a: 1,
+//     b: 2                     b: 2,
+//                            }
+//
+// Scoped deliberately to object literals. A trailing comma in an argument list,
+// an array, a destructuring pattern or an import is idiomatic and stays: those are
+// genuinely comma-separated constructs, and stripping the comma there buys nothing
+// while making diffs noisier.
+//
+// Removing the comma is emitted verbatim by the compiler, so the rule declares a
+// trailing-comma-style delta and the engine independently confirms that dropping the
+// comma is the only difference in the emitted output.
+export const noTrailingCommasRule: Rule = {
+  id: "style/no-trailing-commas"
+  meta: {
+    description: "Disallow a trailing comma before the closing brace of an object literal"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+
+    // Spans of object literals. A trailing comma is only reported when it closes one
+    // of these, which is what distinguishes `{ a: 1, }` from `f(a, b,)`.
+    objectRanges: { start: number, end: number }[] := []
+    tree.visit "ObjectExpression", (node) ->
+      span := tree.range(node)
+      objectRanges.push(span) if span
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("trailing-comma-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    for let i = 0; i < source.length; i++
+      continue unless source[i] is ","
+      continue if intersectsRange(ignoredRanges, i, i + 1)
+
+      // Only a comma whose next non-whitespace character closes the literal.
+      var k = i + 1
+      while k < source.length and /\s/.test(source[k])
+        k++
+      // Only the closing brace of an object literal; `)` and `]` are left alone.
+      continue unless k < source.length and source[k] is "}"
+
+      // The brace must actually close an object literal, not a destructuring
+      // pattern, an import clause or a block.
+      var closesObject = false
+      for range of objectRanges
+        if range.start <= i and k < range.end
+          closesObject = true
+          break
+      continue unless closesObject
+
+      // Elision guard: `[1, 2,,]` and `[a, , b]` rely on the extra comma to hold a
+      // slot, so a comma adjacent to another comma is never removed.
+      var p = i - 1
+      while p >= 0 and /\s/.test(source[p])
+        p--
+      continue if p >= 0 and source[p] is ","
+
+      // Leave `(a, b,)`-style parameter lists that end in a rest element alone —
+      // the comma after `...rest` is a syntax error to re-add, so never touch it.
+      continue if /\.\.\.[A-Za-z0-9_$]*\s*$/.test(source.slice(Math.max(0, i - 40), i))
+
+      edits.push({ start: i, end: i + 1, replacement: "" })
+      ctx.report({
+        ruleId: "style/no-trailing-commas"
+        message: "Unnecessary trailing comma"
+        pos: i
+        fix: { start: i, end: i + 1, replacement: "" }
+      })
+}

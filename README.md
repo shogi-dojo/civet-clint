@@ -20,10 +20,10 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Coffee-React & Idiomatic Style Rules**: 19 built-in rules covering word operators, concise arrows, bare bindings, JSX shorthand, and idiomatic syntax.
+- 🎯 **Bidirectional Civet Style Rules**: 22 built-in rules covering idiomatic Coffee/React style and compiler-safe migration back toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
-- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
+- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
 - 🧭 **Dial-Aware Capability Checks**: Rules declare the compiler options they require (e.g., `autoLet`, `react`, `coffeeRange`). Incompatible rules are skipped rather than emitting invalid autofixes.
 - 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
@@ -74,6 +74,7 @@ npx clint --print-config src/components/Button.civet
 |---|---|
 | `--check` | Lint files and report diagnostics. Exits with code `1` if errors are found, `0` if clean. (Default) |
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
+| `--rewrite` | Rename and convert JS/TS files (`.js`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`) to `.civet` after verifying they parse, then run the autofix pipeline in place. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
 | `-c`, `--config <path>` | Path to a configuration file. Only needed for names outside the auto-discovered list. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
@@ -173,7 +174,7 @@ The baseline neutral preset that relies on Civet's standard word-operator parsin
 - `style/prefer-word-operators`: `"error"` (fixable)
 - `style/prefer-concise-arrow`: `"error"` (fixable)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
-- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- `style/no-trailing-semicolons`: `"error"` (fixable)
 - Compiler options: `{}`
 
 #### `coffee-react`
@@ -185,7 +186,7 @@ Tailored for idiomatic Civet + React codebases:
 - `style/prefer-terse-imports`: `"error"` (fixable)
 - `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
 - `style/prefer-hash-comments`: `"error"` (fixable, requires `coffeeComment`)
-- `style/no-trailing-semicolons`: `"error"` (diagnostic)
+- `style/no-trailing-semicolons`: `"error"` (fixable)
 - `style/prefer-existential-check`: `"warn"` (diagnostic)
 - `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
 - `style/prefer-ampersand-shorthand`: `"warn"` (diagnostic)
@@ -198,6 +199,35 @@ Tailored for idiomatic Civet + React codebases:
 - `style/no-is-not`: `"warn"` (diagnostic)
 - `style/no-mixed-interpolation`: `"warn"` (diagnostic)
 - Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
+
+#### `coffee-to-standard`
+
+A transition preset for legacy CoffeeScript-compatible source. It parses with the
+same compiler options as `coffee-react`, but enables the safe inverse rules instead
+of their Coffee-style counterparts:
+
+- `style/prefer-slash-comments`: `"error"` (`#` → `//`)
+- `style/prefer-is-not`: `"error"` (`isnt` → `is not`)
+- `style/prefer-explicit-declarations`: `"error"` (`:=` and exported auto-bindings)
+- The three dialect-independent `default` rules remain enabled. The existing
+  word-operator rule stays out because it selects `isnt` while `coffeeIsnt` is active;
+  the transition preset must converge directly on `is not`.
+- Compiler options: `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }`
+
+Use it as a staged migration rather than turning compiler options off immediately:
+
+1. Select `"preset": "coffee-to-standard"` while keeping the existing Civet dial.
+2. Run `clint --print-config` and inspect `skippedRules`. In particular,
+   `style/prefer-is-not` is skipped while `coffeeNot` is enabled because that option
+   changes the meaning of `is not`.
+3. Disable `coffeeNot` only after compiling/testing the project without it, then run
+   `clint --write`, review the diff, and run it again to verify a no-op.
+4. Repeat until `clint --check` is clean; unsupported cases remain untouched.
+5. Disable migrated Coffee options in `civet.json` and switch to `"preset": "default"`.
+6. Compile and test the application after each compiler-option removal.
+
+Opposing rules cannot be enabled together. Clint rejects those configurations before
+linting, preventing repeated autofix runs from oscillating between styles.
 
 ### Per-file Configuration Overrides
 
@@ -226,7 +256,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 19 built-in style and correctness rules.
+`civet-clint` currently provides 22 built-in style, correctness, and migration rules.
 
 ### Fixable Rules
 
@@ -234,12 +264,20 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 |---|---|---|
 | [`style/prefer-word-operators`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
 | [`style/prefer-concise-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
+| [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | **Phase `cleanup`.** Disallow unnecessary trailing semicolons at statement ends. Keeps any semicolon that suppresses an implicit return — see below. Verified via `semicolon-style` output delta. | — |
 | [`style/prefer-jsx-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
 | [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
+| [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
+| [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
+| [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert `:=` and exported auto-bindings to explicit `const`/`let` declarations. Bare `autoLet` requires scope/hoisting analysis and remains untouched. | `autoLet` |
+| [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove a trailing comma before the closing brace of an **object literal**. Argument lists, arrays, destructuring patterns and import clauses are left alone. Verified via `trailing-comma-style` output delta. | — |
+| [`style/prefer-indented-object`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-object.civet) | Drop the braces from a multi-line object literal bound to a declaration, letting indentation delimit it. | — |
+| [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--rewrite`; not by `--write`. | — |
+| [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--rewrite`; not by `--write`. | — |
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 
@@ -251,6 +289,26 @@ as `prop`, so the compiled output genuinely differs. React treats both as `true`
 that is a render-equivalence claim, and the gate only accepts byte-identical output.
 Note the two forms are not interchangeable in source either: a bare `prop` is the
 *boolean* shorthand, so writing it in place of `prop={prop}` would change meaning.
+
+#### `style/no-trailing-semicolons` — the semicolons it will not remove
+
+In Civet a trailing `;` is not always cosmetic: inside a function body it is one of
+the sanctioned ways to suppress the implicit return of the last statement.
+
+```civet
+useEffect =>
+  setCount 5;        # without the `;` this becomes `return setCount(5)`, and React
+                     # treats a non-function return value as a cleanup callback.
+```
+
+The rule verifies each candidate by compiling with and without the semicolon and
+comparing normalized output, so it reports only removals that provably do not change
+the emitted program. Candidates are bisected rather than tested one at a time, which
+keeps a file with hundreds of semicolons to a handful of compiles.
+
+Note this is the opposite of `style/no-discarded-arrow-return`, where the semicolon
+*must* go. The two never overlap: that rule fires only when the body is not a real
+block.
 
 #### `style/prefer-jsx-shorthand` — what it will and won't rewrite
 
@@ -275,7 +333,6 @@ changes which value wins. Skipped sites are still reported, so they surface for 
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | Disallow unnecessary trailing semicolons at statement ends. | — |
 | [`style/prefer-existential-check`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-existential-check.civet) | Prefer existential postfix (`x?`, `not x?`) over null equality comparisons. | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
 | [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
@@ -302,6 +359,87 @@ out of scope; their absence is a design boundary, not a missing feature.
 | Single-quoted module paths | Automated, opt-in | Off by default, because unquoting `'./x'` changes the emitted quote character. Set [`unquoteSingleQuotes`](#rule-options) on `style/prefer-terse-imports` to enable it; the fix is then verified against a reference compile so the change is provably confined to specifier quote style. |
 | Removing unused or default `React` imports | Not automated | Requires whole-program binding analysis; deleting a binding is not an equivalence-preserving edit. |
 | Comment quality, naming, file/layer organization, architectural policy (i18n via `t()`, no `fetch` in components) | Not automated | Qualitative judgments with no mechanical rewrite. Enforce in review. |
+
+---
+
+## Migrating a JS/TS Codebase to Civet
+
+Because Civet is a superset of JS/TSX, migrating codebases to Civet does not require a separate decompiler or manual line-by-line translation. In empirical testing against real-world projects, over 97% of JS/TSX files (e.g. 133 of 137 in Ranked) parse and compile cleanly as Civet with zero manual source edits.
+
+Use `clint --rewrite` to convert and format files in one pass:
+
+```bash
+# Rewrite all JS/TS files in a directory
+npx clint --rewrite src/components
+
+# Rewrite specific files or test glob
+npx clint --rewrite src/**/*.test.jsx
+```
+
+`--rewrite` operates safely:
+1. Verifies that the source parses cleanly under the project's resolved Civet dial (`civet.json` / `clint.config.json`).
+2. Checks that the destination `.civet` file does not already exist (never clobbers).
+3. Renames the file in place via `fs.rename` (Git records an `R100` clean rename).
+4. Runs the autofix pipeline in **phase order** (see below).
+5. Skips `.d.ts`, `.d.mts`, `.d.cts` declaration files and `.cjs` files.
+
+### Why renaming alone is not enough
+
+A JS file that parses as Civet does not necessarily *mean* the same thing. Two
+constructs change behaviour silently the moment the extension changes:
+
+```js
+// 1. A braced arrow body becomes an OBJECT LITERAL, not a statement block.
+it('x', () => {
+  expect(a).toBe(1)      //  compiles to:  it('x', () =>( { toBe: expect(a).toBe(1) }))
+})                       //  side effects still run, so the test passes — but the
+                         //  arrow now returns an object instead of the last value.
+
+// 2. A concise arrow ending in `;` collapses into a block that discards its value.
+const make = () => new QueryClient({ ... });
+                         //  compiles to:  () => { new QueryClient({...}); }
+                         //  make() now returns undefined.
+```
+
+Both compile cleanly and neither is reported by a lint pass over the resulting
+`.civet`, which is why `--rewrite` repairs them during conversion rather than
+leaving them to be found later. The rules are `style/no-braced-arrow-body` and
+`style/no-discarded-arrow-return`; both run in the `repair` phase.
+
+### Rule phases
+
+Rules declare a phase, and `--rewrite` runs them in order, re-parsing between each
+so a later phase sees the text earlier phases produced:
+
+| phase | purpose | gate |
+| --- | --- | --- |
+| `repair` | Fixes a mis-compilation. Emitted output changes **by design**. | The targeted defect must be present before and absent after. |
+| `idiom` | The default. Output-preserving style fixes. | Emitted output must be byte-identical (modulo a declared delta). |
+| `cleanup` | Fixes that only become correct once earlier phases have run. | Same as `idiom`. |
+
+Ordering is load-bearing, not cosmetic. In a braced arrow body the trailing
+semicolon is what stops Civet reparsing the block as an object literal, so
+`style/no-trailing-semicolons` (phase `cleanup`) must not judge the body until
+`style/no-braced-arrow-body` (phase `repair`) has de-braced it. Running them in one
+pass would have each rule judging text the other is about to replace.
+
+Because a `repair` changes emitted output on purpose, the byte-equality gate cannot
+verify it. Its gate is defect-specific instead — the mis-compilation must be present
+before and gone after — so a repair rule cannot use the phase as a licence to make
+arbitrary edits. **Behaviour is ultimately verified by your own test suite: run it
+after `--rewrite`.**
+
+### What to expect
+
+Compiling cleanly is not the same as passing. Budget for review:
+
+- Files whose arrow bodies could not be repaired mechanically (a body declaring
+  `const`/`let` is already a real block; `act(=> ...)` changes meaning if it gains
+  an implicit return) are reported, not rewritten.
+- A handful of files may need a Prettier pass first: a wrapped arrow argument
+  followed by a trailing comma (`f((id) =>\n  g(id),\n)`) does not parse as Civet.
+- Run `--rewrite`, then run your test suite, then review the diff. Do not assume a
+  clean `clint` run means the conversion was semantically neutral.
 
 ---
 

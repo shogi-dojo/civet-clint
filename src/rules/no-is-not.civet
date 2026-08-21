@@ -9,6 +9,7 @@ export const noIsNotRule: Rule = {
     capabilities: {
       requiresAny: ["coffeeIsnt", "coffeeNot"]
     }
+    conflictsWith: ["style/prefer-is-not"]
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

@@ -1,0 +1,103 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, lintPhased, compileSource } from "../src/engine.civet"
+
+RULE := "style/no-braced-arrow-body"
+DIAL := { autoLet: true, react: true }
+
+function check(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, civetOptions: DIAL })
+
+function findings(source: string)
+  check(source).diagnostics.filter (d) -> d.ruleId is RULE
+
+describe "style/no-braced-arrow-body", ->
+  it "flags a single-statement braced body", ->
+    expect(findings("it 'x', => {\n  f()\n}\n")).toHaveLength(1)
+
+  it "flags a multi-statement braced body", ->
+    expect(findings("it 'x', => {\n  f()\n  g()\n}\n")).toHaveLength(1)
+
+  it "flags an async braced body", ->
+    expect(findings("it 'x', async => {\n  await f()\n}\n")).toHaveLength(1)
+
+  it "flags each nested braced body", ->
+    source := "describe 'a', => {\n  it 'b', => {\n    f()\n  }\n}\n"
+    expect(findings(source)).toHaveLength(2)
+
+  it "does not flag a body that compiles to a real block", ->
+    // A declaration cannot be read as an object key, so Civet keeps the braces as a
+    // statement block and the arrow behaves as written.
+    expect(findings("it 'x', => {\n  x = 1\n}\n")).toHaveLength(0)
+
+  it "does not flag a body containing a control statement", ->
+    expect(findings("it 'x', => {\n  if c\n    f()\n}\n")).toHaveLength(0)
+
+  it "does not flag the Civet-native indented body", ->
+    expect(findings("it 'x', =>\n  f()\n")).toHaveLength(0)
+
+  it "does not flag a deliberate object return written with parens", ->
+    expect(findings("f := => ({ a: 1 })\n")).toHaveLength(0)
+
+  it "does not flag a deliberate object return spanning lines", ->
+    expect(findings("m := vi.hoisted(=> ({\n  a: 1\n}))\n")).toHaveLength(0)
+
+  it "reports at the arrow, not the enclosing call", ->
+    source := "it 'x', => {\n  f()\n}\n"
+    diag := findings(source)[0]
+    expect(source.slice(diag.pos!, diag.pos! + 2)).toBe("=>")
+
+  it "withholds its fix outside the repair phase", ->
+    // The repair changes emitted output on purpose, so a plain --write must neither
+    // apply it nor report an equivalence mismatch for a fix it would never use.
+    // The mis-parse is still reported: it is worth knowing about either way.
+    diag := findings("it 'x', => {\n  f()\n}\n")[0]
+    expect(diag).toBeDefined()
+    expect(diag.fix).toBeUndefined()
+
+  it "offers its fix when the repair phase is requested", ->
+    res := lintSource("it 'x', => {\n  f()\n}\n", {
+      rules: { [RULE]: "error" }
+      civetOptions: DIAL
+      phase: "repair"
+    })
+    diag := res.diagnostics.filter((d) -> d.ruleId is RULE)[0]
+    expect(diag.fix).toBeDefined()
+
+  it "applies the repair through the phase pipeline", ->
+    res := lintPhased("it 'x', => {\n  f()\n}\n", {
+      rules: { [RULE]: "error" }
+      fix: true
+      civetOptions: DIAL
+    })
+    expect(res.fixedSource).toBe("it 'x', =>\n  f()\n")
+
+  it "peels nested bodies one layer per pass", ->
+    // The outer arrow's edit span CONTAINS the inner one, and applyEdits keeps only
+    // the outermost of an overlapping pair. Offering both would silently drop the
+    // inner fix and leave the file half-repaired. Only the outer body carries a fix
+    // per pass; lintPhased iterates to a fixed point.
+    source := "describe 'a', => {\n  it 'b', => {\n    f()\n  }\n}\n"
+    res := lintPhased(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+    expect(res.fixedSource).toBe("describe 'a', =>\n  it 'b', =>\n    f()\n")
+    // Both layers really are repaired, not just the outer one.
+    expect(compileSource(res.fixedSource!, DIAL)).not.toContain("=>( {")
+
+  it "reports every nested body but only fixes the outermost per pass", ->
+    source := "describe 'a', => {\n  it 'b', => {\n    f()\n  }\n}\n"
+    diags := lintSource(source, {
+      rules: { [RULE]: "error" }
+      civetOptions: DIAL
+      phase: "repair"
+    }).diagnostics.filter (d) -> d.ruleId is RULE
+    expect(diags).toHaveLength(2)
+    expect(diags.filter((d) -> d.fix?)).toHaveLength(1)
+
+describe "the mis-parse this rule detects", ->
+  it "compiles a braced body to an object literal", ->
+    out := compileSource("it 'x', => {\n  expect(a).toBe(1)\n}\n", DIAL)
+    expect(out).toContain("toBe: expect(a).toBe(1)")
+
+  it "compiles the indented body to a real block", ->
+    out := compileSource("it 'x', =>\n  expect(a).toBe(1)\n", DIAL)
+    expect(out).toContain("return expect(a).toBe(1)")
+    expect(out).not.toContain("toBe:")

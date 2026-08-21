@@ -1,17 +1,17 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { shouldSkipCommentStyleRewrite } from "./comment-style.civet"
 
-export const preferHashCommentsRule: Rule = {
-  id: "style/prefer-hash-comments"
+export const preferSlashCommentsRule: Rule = {
+  id: "style/prefer-slash-comments"
   meta: {
-    description: "Prefer CoffeeScript-style '#' comments over '//' comments"
+    description: "Prefer standard Civet '//' comments over CoffeeScript-style '#' comments"
     fixable: true
     defaultSeverity: "error"
     allowFixesInsideComments: true
     capabilities: {
       requires: ["coffeeComment"]
     }
-    conflictsWith: ["style/prefer-slash-comments"]
+    conflictsWith: ["style/prefer-hash-comments"]
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -23,18 +23,20 @@ export const preferHashCommentsRule: Rule = {
       pos := commentRange.start
       slice := source.slice(pos, commentRange.end)
 
-      return unless slice.startsWith("//")
-      return if slice.startsWith("///")
+      // Only migrate single-line CoffeeScript comments. Preserve shebangs and
+      // block/doc forms such as ### ... ###.
+      return unless slice.startsWith("#")
+      return if slice.startsWith("#!") or slice.startsWith("##")
       return if shouldSkipCommentStyleRewrite(comment, slice, tree)
 
       ctx.report({
-        ruleId: "style/prefer-hash-comments"
-        message: "Prefer CoffeeScript-style '#' comment over '//' comment"
+        ruleId: "style/prefer-slash-comments"
+        message: "Prefer standard Civet '//' comment over CoffeeScript-style '#' comment"
         pos
         fix: {
           start: pos
-          end: pos + 2
-          replacement: "#"
+          end: pos + 1
+          replacement: "//"
         }
       })
 }

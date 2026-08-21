@@ -77,6 +77,28 @@ export const PRESETS: Record<string, PresetDefinition> = {
     }
     compileOptions: {}
   }
+  // Transitional preset: parse the same legacy Coffee/React source as
+  // `coffee-react`, but enforce only byte-identical rewrites that move the source
+  // toward the neutral/default Civet dialect. Users disable the legacy compiler
+  // options and switch to `default` after the migration pass is clean.
+  "coffee-to-standard": {
+    rules: {
+      "style/prefer-concise-arrow": "error"
+      "style/no-mixed-interpolation": "warn"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-slash-comments": "error"
+      "style/prefer-is-not": "error"
+      "style/prefer-explicit-declarations": "error"
+    }
+    civetOptions: {
+      autoLet: true
+      coffeeIsnt: true
+      coffeeRange: true
+      coffeeComment: true
+      react: true
+    }
+    compileOptions: {}
+  }
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined
@@ -228,17 +250,43 @@ export function computeSkippedRules(
     continue unless rule
     requires := rule.meta.capabilities?.requires
     requiresAny := rule.meta.capabilities?.requiresAny
+    forbids := rule.meta.capabilities?.forbids
     missing := (requires or []).filter (key) -> not dial[key]
     lacksAny := requiresAny? and requiresAny.length > 0 and not requiresAny.some (key) -> dial[key]
-    if missing.length > 0 or lacksAny
+    incompatible := (forbids or []).filter (key) -> Boolean(dial[key])
+    if missing.length > 0 or lacksAny or incompatible.length > 0
       reasons: string[] := []
       reasons.push(`requires ${missing.join(", ")} in the compiler dial`) if missing.length > 0
       reasons.push(`requires one of ${requiresAny!.join(", ")} in the compiler dial`) if lacksAny
+      reasons.push(`incompatible with ${incompatible.join(", ")} in the compiler dial`) if incompatible.length > 0
       skipped.push({
         ruleId
         reason: reasons.join("; ")
       })
   skipped
+
+// Reject configurations that enable opposing style directions together. Without
+// this guard, repeated autofix passes can oscillate between two equally valid source
+// spellings instead of converging on a stable result.
+export function validateRuleConflicts(
+  rules: Record<string, RuleLevel>,
+  registry: RuleRegistry = defaultRuleRegistry
+): void
+  conflicts := new Set<string>()
+  for ruleId of Object.keys(rules)
+    continue if rules[ruleId] is "off"
+    rule := registry.get(ruleId)
+    continue unless rule
+    for conflictingId of rule.meta.conflictsWith or []
+      continue if rules[conflictingId] is undefined or rules[conflictingId] is "off"
+      pair := [ruleId, conflictingId].sort()
+      conflicts.add(`${pair[0]}|${pair[1]}`)
+
+  if conflicts.size > 0
+    descriptions := Array.from(conflicts).map (pair) ->
+      [left, right] := pair.split("|")
+      `"${left}" conflicts with "${right}"`
+    throw new Error(`Conflicting rules enabled: ${descriptions.join("; ")}`)
 
 export function globToRegex(glob: string): RegExp
   normalized := glob.replace(/\\/g, "/")
@@ -347,6 +395,7 @@ export function loadConfig(
   compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
 
   skippedRules := computeSkippedRules(mergedRules, civetOptions, registry)
+  validateRuleConflicts(mergedRules, registry)
 
   {
     preset: presetName
@@ -419,6 +468,7 @@ export function resolveConfigForFile(
           delete effectiveRuleOptions[ruleId]
 
   skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
+  validateRuleConflicts(effectiveRules, registry)
 
   {
     preset: effectivePreset

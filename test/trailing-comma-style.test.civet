@@ -1,0 +1,130 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeTrailingCommaStyle } from "../src/engine.civet"
+
+RULE := "style/no-trailing-commas"
+DIAL := { autoLet: true }
+
+function fix(source: string, rules: Record<string, string> = { [RULE]: "error" })
+  lintSource(source, { rules: rules as any, fix: true, civetOptions: DIAL })
+
+function unchanged(source: string)
+  expect(fix(source).fixedSource ?? source).toBe(source)
+
+function expectCommaEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeTrailingCommaStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeTrailingCommaStyle(compileSource(source, DIAL)))
+  fixed
+
+describe "normalizeTrailingCommaStyle", ->
+  it "drops a comma before a closing brace, bracket, or paren", ->
+    expect(normalizeTrailingCommaStyle("{a: 1,}")).toBe("{a: 1}")
+    expect(normalizeTrailingCommaStyle("[1,]")).toBe("[1]")
+    expect(normalizeTrailingCommaStyle("f(a,)")).toBe("f(a)")
+
+  it "keeps elision commas that hold an array slot", ->
+    expect(normalizeTrailingCommaStyle("[1, 2,,]")).toBe("[1, 2,,]")
+
+  it "leaves commas inside strings and comments alone", ->
+    expect(normalizeTrailingCommaStyle('x = "a,]"')).toBe('x = "a,]"')
+    expect(normalizeTrailingCommaStyle("// a,]\ny = 1")).toBe("// a,]\ny = 1")
+
+describe "style/no-trailing-commas", ->
+  it "removes a trailing comma in an object literal", ->
+    expect(expectCommaEquivalent("o := {\n  a: 1,\n}\n")).toBe("o := {\n  a: 1\n}\n")
+
+  it "leaves a trailing comma in an array literal", ->
+    // Arrays are genuinely comma-separated; only object literals have an
+    // indentation-based alternative.
+    unchanged("a := [\n  1,\n]\n")
+
+  it "leaves a trailing comma in a call argument list", ->
+    unchanged("f(\n  a,\n)\n")
+
+  it "leaves a trailing comma in a destructuring pattern", ->
+    unchanged("{ a, b, } := o\n")
+
+  it "leaves a trailing comma in an import clause", ->
+    unchanged("{\n  a,\n  b,\n} from './m'\n")
+
+  it "removes only the object's comma in a nested literal", ->
+    // The inner array keeps its comma; the outer object loses its own.
+    expect(expectCommaEquivalent("o := {\n  a: [\n    1,\n  ],\n}\n"))
+      .toBe("o := {\n  a: [\n    1,\n  ]\n}\n")
+
+  it "removes the comma of an object nested in a call", ->
+    // `vi.mock('m', => ({ ... , }))` — the brace still closes an object literal.
+    expect(expectCommaEquivalent("m := h(=> ({\n  a: 1,\n}))\n"))
+      .toBe("m := h(=> ({\n  a: 1\n}))\n")
+
+  it "leaves an elision comma untouched", ->
+    source := "a := [1, 2,,]\n"
+    expect(fix(source).fixedSource ?? source).toBe(source)
+
+  it "leaves a separating comma untouched", ->
+    source := "o := { a: 1, b: 2 }\n"
+    expect(fix(source).fixedSource ?? source).toBe(source)
+
+  it "leaves a comma inside a string untouched", ->
+    source := 'label = "a,]"\n'
+    expect(fix(source).fixedSource ?? source).toBe(source)
+
+  it "is idempotent", ->
+    once := fix("o := {\n  a: 1,\n}\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "preserves CRLF line endings", ->
+    expect(expectCommaEquivalent("o := {\r\n  a: 1,\r\n}\r\n"))
+      .toBe("o := {\r\n  a: 1\r\n}\r\n")
+
+// Two rules that each declare an output delta must compose. The engine builds a
+// combined reference from every approved rule; before this was fixed it chained the
+// builders, feeding the second one offsets that the first had already invalidated.
+describe "multiple delta-declaring rules in one pass", ->
+  it "applies bare-assignment and trailing-comma fixes together", ->
+    source := "const o = {\n  a: 1,\n}\nconst p = {\n  b: 2,\n}\n"
+    res := fix(source, {
+      "style/no-trailing-commas": "error"
+      "style/prefer-bare-assignment": "error"
+    })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("o = {\n  a: 1\n}\np = {\n  b: 2\n}\n")
+
+  it "keeps the combined result compiling to the same normalized output", ->
+    source := "const o = {\n  a: 1,\n}\nconst p = {\n  b: 2,\n}\n"
+    res := fix(source, {
+      "style/no-trailing-commas": "error"
+      "style/prefer-bare-assignment": "error"
+    })
+    fixed := res.fixedSource ?? source
+    norm := (code: string) -> normalizeTrailingCommaStyle(code).replace(/\bconst\b/g, "let")
+    expect(norm(compileSource(fixed, DIAL))).toBe(norm(compileSource(source, DIAL)))
+
+describe "style/no-trailing-commas leaves regex literals alone", ->
+  it "does not turn a {5,} quantifier into {5}", ->
+    // A regex quantifier ends in a comma before `}`, but removing it changes
+    // "5 or more" to "exactly 5". The engine's trailing-comma-style delta strips
+    // commas from the EMITTED output too, so both sides normalized identically and
+    // the equivalence gate could not see the change -- this must be prevented in
+    // the rule, not caught downstream.
+    source := "f = (t: string?): string =>\n  m = String(t or '').match(/@([A-Za-z0-9_]{5,})/)\n  if m then '@' else ''\n"
+    res := fix(source)
+    expect(res.fixedSource ?? source).toContain("{5,}")
+
+  it "does not touch a \\s{2,} quantifier", ->
+    source := "isWide = (t: string): boolean => /\\s{2,}/.test t\n"
+    res := fix(source)
+    expect(res.fixedSource ?? source).toContain("{2,}")
+
+  it "still removes a real trailing comma in a file containing a regex", ->
+    // The guard must be scoped to the regex itself, not disable the rule for the
+    // whole file.
+    source := "rx := /a{2,}/\no := {\n  a: 1,\n}\n"
+    res := fix(source)
+    fixed := res.fixedSource ?? source
+    expect(fixed).toContain("{2,}")
+    expect(fixed).toContain("  a: 1\n}")

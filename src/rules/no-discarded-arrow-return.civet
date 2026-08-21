@@ -1,0 +1,86 @@
+import type { Fix, Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// A JS concise arrow whose statement ends in a semicolon loses its return value
+// when the file becomes Civet:
+//
+//   const make = () => new QueryClient({ ... });
+//
+// compiles to `() => { new QueryClient({...}); }` — a block that evaluates the
+// expression and discards it, so `make()` returns undefined. In JS the `;` merely
+// terminated the statement; in Civet it also suppresses the implicit return, and
+// a concise arrow has nothing else to return.
+//
+// This is silent: the code compiles, the call runs, and only a consumer of the
+// return value notices. In the Ranked test corpus it broke every helper of the
+// form `createX = () => new X(...)`, which then failed far from the cause.
+//
+// The AST distinguishes the shapes precisely. Civet marks a concise body
+// `bare: true` and an indented block `bare: false`; the pathological form — a
+// concise body forced into a block by the semicolon — leaves it undefined.
+//
+// The fix is to delete the semicolon, which is the OPPOSITE of what
+// style/no-trailing-semicolons does for a genuine block body, where the semicolon
+// is what suppresses an unwanted implicit return. The two rules never overlap:
+// this one fires only when the body is not a real block.
+export const noDiscardedArrowReturnRule: Rule = {
+  id: "style/no-discarded-arrow-return"
+  meta: {
+    description: "Disallow a trailing semicolon that discards a concise arrow's return value"
+    fixable: true
+    defaultSeverity: "error"
+    // A repair: the emitted output changes on purpose, restoring the return the
+    // JS original had.
+    phase: "repair"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    reported := new Set<number>()
+
+    tree.visit "ArrowFunction", (node) ->
+      block := node.block
+      return unless block?
+      // `bare` is true for a concise body and false for an indented block. Only the
+      // semicolon-collapsed form leaves it unset.
+      return if block.bare is true or block.bare is false
+
+      span := tree.range(node)
+      return unless span?
+
+      // The body must not be written as a brace block: `=> { ... }` is a different
+      // shape handled by style/no-braced-arrow-body.
+      text := source.slice(span.start, span.end)
+      arrowIdx := text.indexOf("=>")
+      return if arrowIdx < 0
+      after := text.slice(arrowIdx + 2)
+      firstNonSpace := after.search(/\S/)
+      return if firstNonSpace < 0
+      return if after[firstNonSpace] is "{"
+
+      // Find the semicolon that ends the arrow's statement: the last one in the
+      // node's span, at the end of a line.
+      var semiIdx = -1
+      for let i = span.end - 1; i > span.start + arrowIdx; i--
+        continue unless source[i] is ";"
+        var k = i + 1
+        while k < source.length and (source[k] is " " or source[k] is "\t")
+          k++
+        break unless k >= source.length or source[k] is "\n" or source[k] is "\r"
+        semiIdx = i
+        break
+      return if semiIdx < 0
+      return if intersectsRange(ignoredRanges, semiIdx, semiIdx + 1)
+      return if reported.has(semiIdx)
+      reported.add(semiIdx)
+
+      fix: Fix := { start: semiIdx, end: semiIdx + 1, replacement: "" }
+
+      ctx.report({
+        ruleId: "style/no-discarded-arrow-return"
+        message: "Trailing ';' turns this concise arrow into a block that discards its return value"
+        pos: semiIdx
+        fix
+      })
+}

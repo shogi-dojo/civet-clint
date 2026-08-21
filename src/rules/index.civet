@@ -9,9 +9,14 @@ import { preferConciseArrowRule } from "./prefer-concise-arrow.civet"
 import { preferJsxShorthandRule } from "./prefer-jsx-shorthand.civet"
 import { noNullEqualityRule } from "./no-null-equality.civet"
 import { noIsNotRule } from "./no-is-not.civet"
+import { preferIsNotRule } from "./prefer-is-not.civet"
 import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./no-trailing-semicolons.civet"
+import { noTrailingCommasRule } from "./no-trailing-commas.civet"
+import { noBracedArrowBodyRule } from "./no-braced-arrow-body.civet"
+import { preferIndentedObjectRule } from "./prefer-indented-object.civet"
 import { preferBareAssignmentRule } from "./prefer-bare-assignment.civet"
+import { preferExplicitDeclarationsRule } from "./prefer-explicit-declarations.civet"
 import { preferExistentialCheckRule } from "./prefer-existential-check.civet"
 import { preferJsxAttrShorthandRule } from "./prefer-jsx-attr-shorthand.civet"
 import { preferAmpersandShorthandRule } from "./prefer-ampersand-shorthand.civet"
@@ -23,6 +28,7 @@ import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./prefer-bare-jsx-values.civet"
 import { preferHashCommentsRule } from "./prefer-hash-comments.civet"
+import { preferSlashCommentsRule } from "./prefer-slash-comments.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -35,9 +41,14 @@ export {
   preferJsxShorthandRule,
   noNullEqualityRule,
   noIsNotRule,
+  preferIsNotRule,
   noMixedInterpolationRule,
-  noTrailingSemicolonsRule,
+  noTrailingSemicolonsRule
+  noTrailingCommasRule,
+  noBracedArrowBodyRule,
+  preferIndentedObjectRule,
   preferBareAssignmentRule,
+  preferExplicitDeclarationsRule,
   preferExistentialCheckRule,
   preferJsxAttrShorthandRule,
   preferAmpersandShorthandRule,
@@ -48,5 +59,6 @@ export {
   preferRangeOperatorRule,
   preferTerseImportsRule,
   preferBareJsxValuesRule,
-  preferHashCommentsRule
+  preferHashCommentsRule,
+  preferSlashCommentsRule
 }
