@@ -71,19 +71,32 @@ describe "Style Guide Rules Coverage", ->
     it "fixes semicolon before comment while preserving single space", ->
       expect(expectSemicolonFix("x = 1; # comment\n", { autoLet: true, coffeeComment: true })).toBe("x = 1 # comment\n")
 
-    it "hazard: f := () => { doThing(); } fix is rejected because emit changes to object literal", ->
+    // These two semicolons suppress an implicit return: without them Civet reparses
+    // the braced body as an object literal. The rule verifies each candidate by
+    // compiling with and without it, so it no longer reports them at all. Before,
+    // it reported the fix and the equivalence gate rejected it — same protection,
+    // but the user saw a spurious error and a non-zero exit.
+    it "hazard: does not report a load-bearing semicolon in an arrow body", ->
       source := "f := () => { doThing(); }\n"
       res := fixSemicolons(source)
-      expect(res.fixedSource).toBeUndefined()
-      expect(res.isEquivalencePreserved).toBe(false)
-      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(true)
+      expect(res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons").toHaveLength(0)
+      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
+      // The semicolon survives whatever other rules do to the line.
+      expect(res.fixedSource ?? source).toContain("doThing();")
 
-    it "hazard: if block { doThing(); } fix is rejected because emit changes to object literal", ->
+    it "hazard: does not report a load-bearing semicolon in a braced if body", ->
       source := "if cond\n  { doThing(); }\n"
       res := fixSemicolons(source)
+      expect(res.diagnostics.filter (d) -> d.ruleId is "style/no-trailing-semicolons").toHaveLength(0)
+      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
       expect(res.fixedSource).toBeUndefined()
-      expect(res.isEquivalencePreserved).toBe(false)
-      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(true)
+
+    it "hazard: removing the semicolon really would change the emit", ->
+      // Pins WHY the two tests above must hold, independent of the rule.
+      withSemi := compileSource("if cond\n  { doThing(); }\n", { autoLet: true })
+      without := compileSource("if cond\n  { doThing() }\n", { autoLet: true })
+      expect(withSemi).not.toBe(without)
+      expect(without).toContain("doThing:")
 
     it "idempotence: second pass produces no changes and no diagnostics", ->
       first := fixSemicolons("x = 1;\n", { autoLet: true })

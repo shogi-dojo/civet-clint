@@ -1,0 +1,79 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/no-trailing-semicolons"
+DIAL := { autoLet: true, react: true, coffeeEq: true, coffeeComment: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function findings(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, civetOptions: DIAL })
+    .diagnostics.filter (d) -> d.ruleId is RULE
+
+// A semicolon the rule declines to remove, verified by the fact that removing it
+// really does change the emitted program.
+function expectLoadBearing(source: string, withoutSemi: string)
+  expect(findings(source)).toHaveLength(0)
+  res := fix(source)
+  expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
+  expect(compileSource(source, DIAL)).not.toBe(compileSource(withoutSemi, DIAL))
+
+function expectRemoved(source: string, expected: string)
+  res := fix(source)
+  expect(res.fixedSource).toBe(expected)
+  expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
+
+describe "style/no-trailing-semicolons keeps implicit-return suppressors", ->
+  it "keeps the semicolon on the last statement of an indented arrow body", ->
+    expectLoadBearing("it 'x', =>\n  f()\n  g();\n", "it 'x', =>\n  f()\n  g()\n")
+
+  it "keeps the semicolon on the last statement of a braced arrow body", ->
+    expectLoadBearing("it 'x', => {\n  f()\n  g();\n}\n", "it 'x', => {\n  f()\n  g()\n}\n")
+
+  it "keeps the semicolon on the last statement of a function declaration", ->
+    expectLoadBearing("function h()\n  f()\n  g();\n", "function h()\n  f()\n  g()\n")
+
+  it "keeps a semicolon that suppresses a useEffect cleanup return", ->
+    // The React hazard: a non-function return value is treated as a cleanup callback.
+    source := "useEffect =>\n  setCount 5;\n"
+    expect(findings(source)).toHaveLength(0)
+    expect(compileSource(source, DIAL)).not.toContain("return")
+
+describe "style/no-trailing-semicolons still removes redundant ones", ->
+  it "removes a top-level trailing semicolon", ->
+    expectRemoved("f()\ng();\n", "f()\ng()\n")
+
+  it "removes a semicolon after an explicit return", ->
+    expectRemoved("f = =>\n  g()\n  return 1;\n", "f = =>\n  g()\n  return 1\n")
+
+  it "removes a semicolon in a void-annotated function", ->
+    // Assert only the semicolon: style/prefer-concise-arrow also rewrites `()` here.
+    res := fix("f = (): void =>\n  g();\n")
+    expect(res.fixedSource).not.toContain(";")
+    expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
+
+  it "removes a semicolon when the body already ends in a bare return", ->
+    expectRemoved("f = =>\n  g();\n  return\n", "f = =>\n  g()\n  return\n")
+
+describe "style/no-trailing-semicolons never proposes a rejected fix", ->
+  it "reports nothing that the equivalence gate would reject", ->
+    // The rule's own safety check and the engine's delta must agree exactly.
+    sources := [
+      "it 'x', =>\n  f()\n  g();\n"
+      "it 'x', => {\n  f()\n  g();\n}\n"
+      "function h()\n  f()\n  g();\n"
+      "f();\n"
+      "f();\ng()\n"
+      "x = 1; # c\n"
+      "useEffect =>\n  setCount 5;\n"
+      "for let i = 0; i < 3; i++\n  f()\n"
+    ]
+    for source of sources
+      res := fix(source)
+      expect(res.diagnostics.some (d) -> d.ruleId is "compiler-equivalence-mismatch").toBe(false)
+
+  it "is idempotent on a body whose semicolon is load-bearing", ->
+    source := "it 'x', =>\n  f()\n  g();\n"
+    once := fix(source)
+    expect(once.fixedSource ?? source).toBe(source)

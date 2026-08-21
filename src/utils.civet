@@ -130,3 +130,97 @@ export async function atomicWriteFile(filePath: string, content: string): Promis
   catch err
     await fs.rm(tmpPath, { force: true })
     throw err
+
+// Normalizes away semicolons that Civet passes straight through to emitted JS, so
+// two compilations can be compared for real differences. Shared by the engine's
+// "semicolon-style" output delta and by style/no-trailing-semicolons, which must
+// agree exactly: a semicolon the rule believes is removable but the engine does
+// not would be reported and then rejected by the equivalence gate.
+//
+// Only a `;` at end of line (or before a trailing comment) is stripped, and only
+// at paren depth 0 so `for (;;)` headers survive.
+export function normalizeSemicolonStyle(code: string): string
+  var out = ""
+  var i = 0
+  var parenDepth = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`"
+      var j = i + 1
+      while j < code.length
+        break if code[j] is "`" and code[j - 1] isnt "\\"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      var body = ""
+      var closed = false
+      while j < code.length
+        c := code[j]
+        if c is "\\"
+          body += code.slice(j, j + 2)
+          j += 2
+          continue
+        if c is quote
+          closed = true
+          break
+        if c is "\n"
+          break
+        body += c
+        j++
+      if closed
+        out += quote + body + quote
+        i = j + 1
+      else
+        out += ch
+        i++
+      continue
+    if ch is "("
+      parenDepth++
+      out += ch
+      i++
+      continue
+    if ch is ")"
+      parenDepth = Math.max(0, parenDepth - 1)
+      out += ch
+      i++
+      continue
+    if ch is ";" and parenDepth is 0
+      var k = i + 1
+      while k < code.length and (code[k] is " " or code[k] is "\t")
+        k++
+      if k >= code.length or code[k] is "\n" or code[k] is "\r"
+        i = k
+        continue
+      if code[k] is "/" and (code[k + 1] is "/" or code[k + 1] is "*")
+        i++
+        if /[ \t]$/.test(out) and (code[i] is " " or code[i] is "\t")
+          while i < code.length and (code[i] is " " or code[i] is "\t")
+            i++
+        continue
+    if (ch is " " or ch is "\t") and parenDepth is 0
+      var k = i + 1
+      while k < code.length and (code[k] is " " or code[k] is "\t")
+        k++
+      if k >= code.length or code[k] is "\n" or code[k] is "\r"
+        i = k
+        continue
+    out += ch
+    i++
+  out
+
+// Normalize `const` to `let` in emitted output so a fix that only changes a
+// declaration keyword can be verified. Bare `x = 1` compiles to `let x = 1` while
+// `const x = 1` keeps `const`, so the byte-identical gate would otherwise reject
+// every prefer-bare-assignment fix. Strings and comments are skipped, and the
+// match is word-bounded, so `constant` and `"const"` are left alone.

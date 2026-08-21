@@ -1,7 +1,33 @@
 import type { Fix, Rule, RuleContext } from "../types.civet"
 import type { SyntaxTree } from "../syntax.civet"
-import { intersectsRange, applyEdits } from "../utils.civet"
-import { parseSyntax } from "../compiler.civet"
+import { intersectsRange, applyEdits, normalizeSemicolonStyle } from "../utils.civet"
+import { parseSyntax, compileForOutput } from "../compiler.civet"
+
+// A trailing `;` in Civet is not always cosmetic. Inside a function body it is one
+// of the sanctioned ways to suppress the implicit return of the last statement
+// (civet.dev/reference), so deleting it can silently change what the function
+// returns:
+//
+//   it 'x', =>          without the `;` the last statement becomes the return
+//     f()               value, and a `useEffect` that returns a non-function
+//     g();              makes React treat it as a cleanup callback.
+//
+// Emitted `;` is normalized away by the engine's "semicolon-style" delta, so the
+// only differences that survive normalization are real semantic ones. Rather than
+// guess which positions are safe from syntax alone, each candidate is verified by
+// compiling with and without it and comparing normalized output. That keeps the
+// rule correct for shapes nobody enumerated.
+
+
+// True when removing the semicolon leaves the emitted program unchanged once
+// pass-through semicolons are normalized away. A compile failure counts as unsafe.
+function removalIsSafe(source: string, fix: Fix, dial: Record<string, any>): boolean
+  candidate := source.slice(0, fix.start) + fix.replacement + source.slice(fix.end)
+  withSemi := compileForOutput(source, { dial })
+  return false unless withSemi.ok
+  without := compileForOutput(candidate, { dial })
+  return false unless without.ok
+  normalizeSemicolonStyle(withSemi.output!) is normalizeSemicolonStyle(without.output!)
 
 function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number, fix: Fix }[]
   commentRanges := tree.commentRanges()
@@ -71,10 +97,71 @@ function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number
 
   results
 
+// Candidates whose removal provably does not change the emitted program.
+//
+// Verifying one candidate at a time costs a compile per semicolon, which on a large
+// test file (hundreds of semicolons, ~1k lines) is slow enough to exhaust memory.
+// Instead the set is bisected: a group that verifies clean is accepted whole, and
+// only a group that fails is split. Files where every semicolon is removable — the
+// common case — cost two compiles regardless of size, and a file with k unsafe
+// semicolons costs O(k log n) rather than O(n).
+function safeSemicolons(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+  found := findTrailingSemicolons(source, tree)
+  return found if found.length is 0
+
+  base := compileForOutput(source, { dial })
+  return [] unless base.ok
+  baseline := normalizeSemicolonStyle(base.output!)
+
+  groupIsSafe := (group: { pos: number, fix: Fix }[]): boolean ->
+    return true if group.length is 0
+    { output } := applyEdits(source, group.map((f) -> f.fix))
+    res := compileForOutput(output, { dial })
+    res.ok and normalizeSemicolonStyle(res.output!) is baseline
+
+  // Depth-bounded so a pathological file can never blow the stack.
+  accepted: { pos: number, fix: Fix }[] := []
+  partition := (group: { pos: number, fix: Fix }[], depth: number): void ->
+    return if group.length is 0
+    if groupIsSafe(group)
+      accepted.push(...group)
+      return
+    if group.length is 1 or depth > 24
+      return
+    mid := Math.floor(group.length / 2)
+    partition(group.slice(0, mid), depth + 1)
+    partition(group.slice(mid), depth + 1)
+
+  partition(found, 0)
+  accepted.sort (a, b) -> a.pos - b.pos
+
+  // Bisection verifies each group in isolation, but two removals that are each
+  // safe alone can interact — dropping one `;` can change how a later line parses.
+  // Re-verify the union and, if it fails, shrink it until it holds. The engine's
+  // gate would catch this anyway; doing it here means the user sees no error.
+  var result = accepted
+  while result.length > 0 and not groupIsSafe(result)
+    result = result.slice(0, Math.floor(result.length / 2))
+  result
+
+// safeSemicolons is the expensive part (several compiles), and the engine calls the
+// rule's reference builder with the same source it just checked. Memoising the last
+// result halves the work without holding memory across files.
+var lastKey: string | undefined = undefined
+var lastValue: { pos: number, fix: Fix }[] = []
+
+function safeSemicolonsCached(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+  key := source
+  return lastValue if lastKey is key
+  value := safeSemicolons(source, tree, dial)
+  lastKey = key
+  lastValue = value
+  value
+
 function buildReference(input: string, dial: Record<string, any>): string | undefined
   parseRes := parseSyntax(input, { dial })
   return undefined unless parseRes.ok
-  found := findTrailingSemicolons(input, parseRes.syntax!)
+  found := safeSemicolonsCached(input, parseRes.syntax!, dial)
   return undefined if found.length is 0
   fixes := found.map((f) -> f.fix)
   { output } := applyEdits(input, fixes)
@@ -92,7 +179,7 @@ export const noTrailingSemicolonsRule: Rule = {
       ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
         buildReference(input, ctx.parseOptions)
 
-    found := findTrailingSemicolons(ctx.source, ctx.syntax)
+    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions)
     for item of found
       ctx.report({
         ruleId: "style/no-trailing-semicolons"
