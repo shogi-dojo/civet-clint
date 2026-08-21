@@ -23,7 +23,7 @@ export interface Diagnostic
   fix?: Fix
 
 export type EquivalenceReference = (source: string) => string | undefined
-export type OutputDelta = "quote-style" | "semicolon-style"
+export type OutputDelta = "quote-style" | "semicolon-style" | "declaration-style"
 
 export interface RuleContext
   source: string

@@ -149,6 +149,48 @@ export function normalizeSemicolonStyle(code: string): string
     i++
   out
 
+// Normalize `const` to `let` in emitted output so a fix that only changes a
+// declaration keyword can be verified. Bare `x = 1` compiles to `let x = 1` while
+// `const x = 1` keeps `const`, so the byte-identical gate would otherwise reject
+// every prefer-bare-assignment fix. Strings and comments are skipped, and the
+// match is word-bounded, so `constant` and `"const"` are left alone.
+export function normalizeDeclarationStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "c" and code.startsWith("const", i)
+      before := i > 0 ? code[i - 1] : ""
+      after := code[i + 5] ?? ""
+      isWordChar := (c: string): boolean -> /[A-Za-z0-9_$]/.test(c)
+      if not isWordChar(before) and not isWordChar(after)
+        out += "let"
+        i += 5
+        continue
+    out += ch
+    i++
+  out
+
 export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
   res := compileForOutput(source, { dial: civetOptions, filename })
   if res.ok
@@ -239,6 +281,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeQuoteStyle(before) is normalizeQuoteStyle(after)
       when "semicolon-style"
         normalizeSemicolonStyle(before) is normalizeSemicolonStyle(after)
+      when "declaration-style"
+        normalizeDeclarationStyle(before) is normalizeDeclarationStyle(after)
       else
         false
 
@@ -390,6 +434,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           res = normalizeSemicolonStyle(res)
         if kinds.has("quote-style")
           res = normalizeQuoteStyle(res)
+        if kinds.has("declaration-style")
+          res = normalizeDeclarationStyle(res)
         res
       combinedAccepted := combinedRes.ok and (
         combinedRes.output is originalCompiled or (

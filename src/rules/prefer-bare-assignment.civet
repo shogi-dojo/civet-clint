@@ -25,6 +25,18 @@ export const preferBareAssignmentRule: Rule = {
     re := /(?:^|[\n;])([ \t]*)(export[ \t]+)?(const|let|var)[ \t]+([a-zA-Z_$][a-zA-Z0-9_$]*)[ \t]*(=)/g
     var match: RegExpExecArray | null = null
 
+    // Rewriting `const x =` to bare `x =` emits `let x =` instead of `const x =`,
+    // so the byte-identical gate would reject it. Declare a declaration-style
+    // reference: the engine independently confirms the only drift is const/let.
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("declaration-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
     while (match = re.exec(source)) !== null
       matchedLeader := match[2] or match[3]
       idxLeader := match[0].indexOf(matchedLeader)
@@ -38,6 +50,7 @@ export const preferBareAssignmentRule: Rule = {
 
       if isConstCase(ident)
         replacement := `${exportKw}${ident} :=`
+        edits.push({ start: pos, end: matchEnd, replacement })
         ctx.report({
           ruleId: "style/prefer-bare-assignment"
           message: `Use '${exportKw}${ident} :=' instead of '${exportKw}${declKw} ${ident} ='`
@@ -50,6 +63,7 @@ export const preferBareAssignmentRule: Rule = {
         })
       else
         replacement := `${exportKw}${ident} =`
+        edits.push({ start: pos, end: matchEnd, replacement })
         ctx.report({
           ruleId: "style/prefer-bare-assignment"
           message: `Use '${exportKw}${ident} =' instead of '${exportKw}${declKw} ${ident} ='`
