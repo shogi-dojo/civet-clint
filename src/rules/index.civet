@@ -14,6 +14,7 @@ import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./no-trailing-semicolons.civet"
 import { noTrailingCommasRule } from "./no-trailing-commas.civet"
 import { noBracedArrowBodyRule } from "./no-braced-arrow-body.civet"
+import { preferIndentedObjectRule } from "./prefer-indented-object.civet"
 import { preferBareAssignmentRule } from "./prefer-bare-assignment.civet"
 import { preferExplicitDeclarationsRule } from "./prefer-explicit-declarations.civet"
 import { preferExistentialCheckRule } from "./prefer-existential-check.civet"
@@ -45,6 +46,7 @@ export {
   noTrailingSemicolonsRule
   noTrailingCommasRule,
   noBracedArrowBodyRule,
+  preferIndentedObjectRule,
   preferBareAssignmentRule,
   preferExplicitDeclarationsRule,
   preferExistentialCheckRule,
