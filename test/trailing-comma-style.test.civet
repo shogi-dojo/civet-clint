@@ -7,6 +7,9 @@ DIAL := { autoLet: true }
 function fix(source: string, rules: Record<string, string> = { [RULE]: "error" })
   lintSource(source, { rules: rules as any, fix: true, civetOptions: DIAL })
 
+function unchanged(source: string)
+  expect(fix(source).fixedSource ?? source).toBe(source)
+
 function expectCommaEquivalent(source: string)
   res := fix(source)
   fixed := res.fixedSource ?? source
@@ -32,15 +35,29 @@ describe "style/no-trailing-commas", ->
   it "removes a trailing comma in an object literal", ->
     expect(expectCommaEquivalent("o := {\n  a: 1,\n}\n")).toBe("o := {\n  a: 1\n}\n")
 
-  it "removes a trailing comma in an array literal", ->
-    expect(expectCommaEquivalent("a := [\n  1,\n]\n")).toBe("a := [\n  1\n]\n")
+  it "leaves a trailing comma in an array literal", ->
+    // Arrays are genuinely comma-separated; only object literals have an
+    // indentation-based alternative.
+    unchanged("a := [\n  1,\n]\n")
 
-  it "removes a trailing comma in a call argument list", ->
-    expect(expectCommaEquivalent("f(\n  a,\n)\n")).toBe("f(\n  a\n)\n")
+  it "leaves a trailing comma in a call argument list", ->
+    unchanged("f(\n  a,\n)\n")
 
-  it "removes trailing commas in nested literals", ->
+  it "leaves a trailing comma in a destructuring pattern", ->
+    unchanged("{ a, b, } := o\n")
+
+  it "leaves a trailing comma in an import clause", ->
+    unchanged("{\n  a,\n  b,\n} from './m'\n")
+
+  it "removes only the object's comma in a nested literal", ->
+    // The inner array keeps its comma; the outer object loses its own.
     expect(expectCommaEquivalent("o := {\n  a: [\n    1,\n  ],\n}\n"))
-      .toBe("o := {\n  a: [\n    1\n  ]\n}\n")
+      .toBe("o := {\n  a: [\n    1,\n  ]\n}\n")
+
+  it "removes the comma of an object nested in a call", ->
+    // `vi.mock('m', => ({ ... , }))` — the brace still closes an object literal.
+    expect(expectCommaEquivalent("m := h(=> ({\n  a: 1,\n}))\n"))
+      .toBe("m := h(=> ({\n  a: 1\n}))\n")
 
   it "leaves an elision comma untouched", ->
     source := "a := [1, 2,,]\n"
@@ -106,8 +123,8 @@ describe "style/no-trailing-commas leaves regex literals alone", ->
   it "still removes a real trailing comma in a file containing a regex", ->
     // The guard must be scoped to the regex itself, not disable the rule for the
     // whole file.
-    source := "rx := /a{2,}/\nitems := [\n  1,\n  2,\n]\n"
+    source := "rx := /a{2,}/\no := {\n  a: 1,\n}\n"
     res := fix(source)
     fixed := res.fixedSource ?? source
     expect(fixed).toContain("{2,}")
-    expect(fixed).toContain("  2\n]")
+    expect(fixed).toContain("  a: 1\n}")
