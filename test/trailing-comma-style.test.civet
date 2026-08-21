@@ -86,3 +86,28 @@ describe "multiple delta-declaring rules in one pass", ->
     fixed := res.fixedSource ?? source
     norm := (code: string) -> normalizeTrailingCommaStyle(code).replace(/\bconst\b/g, "let")
     expect(norm(compileSource(fixed, DIAL))).toBe(norm(compileSource(source, DIAL)))
+
+describe "style/no-trailing-commas leaves regex literals alone", ->
+  it "does not turn a {5,} quantifier into {5}", ->
+    // A regex quantifier ends in a comma before `}`, but removing it changes
+    // "5 or more" to "exactly 5". The engine's trailing-comma-style delta strips
+    // commas from the EMITTED output too, so both sides normalized identically and
+    // the equivalence gate could not see the change -- this must be prevented in
+    // the rule, not caught downstream.
+    source := "f = (t: string?): string =>\n  m = String(t or '').match(/@([A-Za-z0-9_]{5,})/)\n  if m then '@' else ''\n"
+    res := fix(source)
+    expect(res.fixedSource ?? source).toContain("{5,}")
+
+  it "does not touch a \\s{2,} quantifier", ->
+    source := "isWide = (t: string): boolean => /\\s{2,}/.test t\n"
+    res := fix(source)
+    expect(res.fixedSource ?? source).toContain("{2,}")
+
+  it "still removes a real trailing comma in a file containing a regex", ->
+    // The guard must be scoped to the regex itself, not disable the rule for the
+    // whole file.
+    source := "rx := /a{2,}/\nitems := [\n  1,\n  2,\n]\n"
+    res := fix(source)
+    fixed := res.fixedSource ?? source
+    expect(fixed).toContain("{2,}")
+    expect(fixed).toContain("  2\n]")

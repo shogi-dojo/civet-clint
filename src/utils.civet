@@ -72,7 +72,14 @@ export function collectStringRanges(ast: any): { start: number, end: number }[]
   ranges: { start: number, end: number }[] := []
   walkAst ast, (node) ->
     return unless node? and typeof node is "object"
-    return unless node.type is "StringLiteral" or node.type is "TemplateLiteral"
+    // Regex literals are included because their contents look like code but are not.
+    // A `{5,}` quantifier ends in a comma before `}`, which style/no-trailing-commas
+    // would otherwise "fix" into `{5}` -- silently changing "5 or more" to "exactly
+    // 5". Every rule that skips string ranges wants regex skipped for the same
+    // reason, so it belongs here rather than in one rule.
+    return unless node.type is "StringLiteral"
+      or node.type is "TemplateLiteral"
+      or node.type is "RegularExpressionLiteral"
     span := nodeSpan(node)
     ranges.push(span) if span
   ranges.sort (a, b) -> a.start - b.start
