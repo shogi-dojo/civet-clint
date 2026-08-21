@@ -36,7 +36,7 @@ const REWRITE_EXTS = [".js", ".jsx", ".ts", ".tsx", ".mts", ".cts"]
 
 function isTargetFile(name: string, opts: FindFilesOptions = {}): boolean
   if opts.rewrite
-    return false if name.endsWith(".d.ts") or name.endsWith(".d.mts") or name.endsWith(".d.cts")
+    return false if name.endsWith(".d.ts") or name.endsWith(".d.mts") or name.endsWith(".d.cts") or name.endsWith(".mjs") or name.endsWith(".cjs")
     REWRITE_EXTS.some (ext) -> name.endsWith(ext)
   else if opts.extensions and opts.extensions.length > 0
     opts.extensions.some (ext) -> name.endsWith(ext)

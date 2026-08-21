@@ -51,15 +51,19 @@ describe "CLI --rewrite Suite", ->
       expect(await fs.access(oldPath).then(-> true, -> false)).toBe(false)
       expect(await fs.access(newPath).then(-> true, -> false)).toBe(true)
 
-  it "skips .d.ts, .d.mts, and .d.cts files", async ->
+  it "skips .d.ts, .d.mts, .d.cts, .mjs, and .cjs files", async ->
     dts := path.join(tmpDir, "globals.d.ts")
     dmts := path.join(tmpDir, "types.d.mts")
     dcts := path.join(tmpDir, "common.d.cts")
+    mjs := path.join(tmpDir, "build.mjs")
+    cjs := path.join(tmpDir, "legacy.cjs")
     normalTs := path.join(tmpDir, "app.ts")
 
     await fs.writeFile(dts, "declare const foo: string;\n", "utf8")
     await fs.writeFile(dmts, "declare const bar: string;\n", "utf8")
     await fs.writeFile(dcts, "declare const baz: string;\n", "utf8")
+    await fs.writeFile(mjs, "export const script = 1;\n", "utf8")
+    await fs.writeFile(cjs, "module.exports = 2;\n", "utf8")
     await fs.writeFile(normalTs, "const app = 1;\n", "utf8")
 
     discovered := await findCivetFiles([tmpDir], tmpDir, { rewrite: true })
@@ -71,6 +75,8 @@ describe "CLI --rewrite Suite", ->
     expect(await fs.access(dts).then(-> true, -> false)).toBe(true)
     expect(await fs.access(dmts).then(-> true, -> false)).toBe(true)
     expect(await fs.access(dcts).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(mjs).then(-> true, -> false)).toBe(true)
+    expect(await fs.access(cjs).then(-> true, -> false)).toBe(true)
     expect(await fs.access(path.join(tmpDir, "app.civet")).then(-> true, -> false)).toBe(true)
 
   it "refuses to clobber an existing .civet file", async ->
