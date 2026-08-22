@@ -51,6 +51,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Verified against the same codebase: 1402 blocks across 119 of 146 test files.
 
+  `style/no-single-param-arrow-without-parens` now exempts the four hook names, so
+  the de-parenthesized `beforeEach => …` it produces is not flagged: a hook callback
+  takes no parameters, so that form cannot be an arrow whose parameter is the hook
+  name -- the ambiguity the rule warns about cannot arise there.
+
+- **`style/prefer-implicit-call-args`**: drops the call parens on a trailing matcher
+  or a `render` call, so the argument list closes the line:
+
+  ```civet
+  expect(civetSourcePath(id)).toBe('/a/Foo.civet')   # ->  .toBe '/a/Foo.civet'
+  render(<Panel {rules} />)                          # ->  render <Panel {rules} />
+  ```
+
+  Restricted to single-line calls in statement position whose argument list is
+  non-empty (`toBeNull()` keeps its parens -- bare `toBeNull` is a property read)
+  and does not open with an operator (`toBe(-1)` would become a subtraction). JSX
+  arguments are exempt from that last check. Emitted JS is byte-identical.
+
+  Verified against the same codebase: 1256 sites across 87 files.
+
 ### Changed
 
 - **`style/no-trailing-commas` now covers every closer, not just object literals.**

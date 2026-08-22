@@ -9,6 +9,18 @@ const RESERVED_MODIFIERS = new Set<string>([
   "yield"
 ])
 
+// Test-framework hooks take a zero-argument callback, so `beforeEach => …` is the
+// implicit-call form (`beforeEach(() => …)`), never an arrow whose parameter is
+// named `beforeEach`. The ambiguity this rule warns about cannot arise for these,
+// so flagging them would only penalize the idiomatic spelling that
+// style/prefer-implicit-block-call produces.
+const ZERO_ARG_HOOKS = new Set<string>([
+  "beforeEach"
+  "afterEach"
+  "beforeAll"
+  "afterAll"
+])
+
 export const noSingleParamArrowWithoutParensRule: Rule = {
   id: "style/no-single-param-arrow-without-parens"
   meta: {
@@ -27,6 +39,7 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     while (match = re.exec(source)) !== null
       ident := match[1]
       continue if RESERVED_MODIFIERS.has(ident)
+      continue if ZERO_ARG_HOOKS.has(ident)
 
       identPos := match.index + match[0].indexOf(ident)
       continue if intersectsRange(commentRanges, identPos, identPos + ident.length)

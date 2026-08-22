@@ -40,11 +40,20 @@ describe "style/prefer-implicit-block-call", ->
     expect(res.fixedSource).toBe("describe 'o', =>\n  describe 'i', =>\n    it 'a', =>\n      f()\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
-  it "leaves a hook whose only argument is the arrow alone", ->
-    // `beforeEach => …` would read as a single-parameter arrow named `beforeEach`,
-    // which style/no-single-param-arrow-without-parens flags at error. The emitted
-    // JS is identical either way, but the source is ambiguous, so keep the parens.
-    expect(findings("beforeEach(=>\n  reset())\n")).toHaveLength(0)
+  it "drops the parens on a zero-argument hook", ->
+    input := "beforeEach(=>\n  reset())\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("beforeEach =>\n  reset()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "does not let no-single-param-arrow-without-parens flag a de-parenthesized hook", ->
+    combined := lintSource("beforeEach =>\n  reset()\n", {
+      rules: { "style/no-single-param-arrow-without-parens": "error" }
+      civetOptions: DIAL
+    })
+    hits := combined.diagnostics.filter (d) ->
+      d.ruleId is "style/no-single-param-arrow-without-parens"
+    expect(hits).toHaveLength(0)
 
   it "handles the it.each member form", ->
     input := "it.each([1])('b', =>\n  g())\n"

@@ -65,12 +65,10 @@ export const preferImplicitBlockCallRule: Rule = {
       call := callNodes[callNodes.length - 1]
       return unless lastArgumentIsArrow(call)
 
-      // A call whose ONLY argument is the arrow (`beforeEach(=> …)`) must keep its
-      // parens: `beforeEach => …` reads as a single-parameter arrow named
-      // `beforeEach`, which is exactly what style/no-single-param-arrow-without-parens
-      // flags. Civet emits the same JS either way, but the source is ambiguous, so
-      // only calls with a preceding argument (`it('name', => …)`) are rewritten.
-      return unless (call?.args?.length ?? 0) > 1
+      // A zero-argument hook (`beforeEach(=> …)`) may drop its parens too:
+      // style/no-single-param-arrow-without-parens exempts these names, because a
+      // hook callback takes no parameters, so `beforeEach => …` cannot be an arrow
+      // whose parameter is named `beforeEach`.
 
       callChildren := call?.children
       return unless Array.isArray(callChildren) and callChildren.length >= 4
