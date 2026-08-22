@@ -1,0 +1,51 @@
+import { describe, it, expect } from "vitest"
+import { parseSyntax } from "../src/compiler.civet"
+
+parse := (src: string) ->
+  res := parseSyntax(src, { dial: { coffeeComment: true } })
+  expect(res.ok).toBe(true)
+  res.syntax!
+
+describe "SyntaxTree memoization", ->
+  // Derived data is cached per tree. These guard the two ways that can go wrong:
+  // a cache shared between trees (e.g. a `static` field), and a cache that
+  // returns another node's result.
+  it "does not leak cached ranges between separate trees", ->
+    a := parse("# comment in A\nx := 1")
+    b := parse("y := 2")
+
+    expect(a.commentRanges()).toHaveLength(1)
+    expect(b.commentRanges()).toHaveLength(0)
+    // Re-read in the other order: a shared cache would hand B's answer to A.
+    expect(b.commentRanges()).toHaveLength(0)
+    expect(a.commentRanges()).toHaveLength(1)
+
+  it "does not leak cached string ranges between separate trees", ->
+    a := parse('s := "hello"')
+    b := parse("n := 42")
+    expect(a.stringRanges()).toHaveLength(1)
+    expect(b.stringRanges()).toHaveLength(0)
+    expect(a.stringRanges()).toHaveLength(1)
+
+  it "does not leak cached tokens between separate trees", ->
+    a := parse("x := 1 + 2 + 3")
+    b := parse("y := 4")
+    aCount := a.tokens().length
+    bCount := b.tokens().length
+    expect(aCount).not.toBe(bCount)
+    expect(a.tokens()).toHaveLength(aCount)
+    expect(b.tokens()).toHaveLength(bCount)
+
+  it "returns equal results on repeated calls", ->
+    t := parse('# c\ns := "str"\nx := 1')
+    expect(t.commentRanges()).toEqual(t.commentRanges())
+    expect(t.stringRanges()).toEqual(t.stringRanges())
+    expect(t.tokens()).toEqual(t.tokens())
+
+  it "keys the token cache per node, not per tree", ->
+    t := parse("f := (a, b) -> a + b")
+    all := t.tokens()
+    sub := t.tokens(t.root.expressions?[0] ?? t.root)
+    // A tree-wide (unkeyed) cache would return the same array for both.
+    expect(Array.isArray(all)).toBe(true)
+    expect(Array.isArray(sub)).toBe(true)

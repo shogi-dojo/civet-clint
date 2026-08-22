@@ -30,12 +30,22 @@ export class SyntaxTree
   source: string
   root: any
 
+  // Derived data is memoized per tree. Every accessor below is a pure function
+  // of (@root, @source), and both are assigned once in the constructor and never
+  // reassigned -- each parse yields a fresh SyntaxTree -- so a cache tied to the
+  // instance cannot go stale. Without this, commentRanges()/stringRanges() each
+  // re-walked the entire AST on every call, and ~20 rules call them per file.
+  #commentRanges: SourceRange[] | undefined
+  #stringRanges: SourceRange[] | undefined
+  #tokens: WeakMap<any, SourceToken[]>
+
   constructor(ast: any, source: string)
     // `ast` is Civet's unpruned tree. All raw tuple/parent handling stays in this
     // adapter so rules consume named nodes, source tokens, ranges, and normalized
     // helpers instead of depending on compiler layout directly.
     @source = source
     @root = ast
+    @#tokens = new WeakMap<any, SourceToken[]>()
 
   // Source span of a node or token.
   range(node: any): SourceRange | undefined
@@ -107,6 +117,8 @@ export class SyntaxTree
   // All source tokens beneath a node (or root if omitted).
   tokens(node?: any): SourceToken[]
     target := node or @root
+    cached := @#tokens.get(target)
+    return cached if cached?
     tokensList: SourceToken[] := []
     source := @source
 
@@ -122,6 +134,7 @@ export class SyntaxTree
         tokensList.push({ value, raw, range, synthetic })
 
     tokensList.sort (a, b) -> a.range.start - b.range.start
+    @#tokens.set(target, tokensList)
     tokensList
 
   findToken(node: any, tokenValue: string): SourceToken | undefined
@@ -273,8 +286,8 @@ export class SyntaxTree
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]
-    collectCommentRanges(@root)
+    @#commentRanges ??= collectCommentRanges(@root)
 
   // Ranges of all string/template literals.
   stringRanges(): SourceRange[]
-    collectStringRanges(@root)
+    @#stringRanges ??= collectStringRanges(@root)
