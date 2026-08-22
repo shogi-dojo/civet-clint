@@ -95,19 +95,23 @@ export const preferIndentedObjectRule: Rule = {
         bodyOk = true
       continue unless bodyOk
 
-      // An object holding a shorthand property cannot lose its braces: de-braced,
-      // `winnerPlayerId` on its own line is an identifier expression, not a
-      // property, so the file stops parsing. The braces are load-bearing.
-      var hasShorthand = false
+      // Two body shapes keep their braces because de-bracing stops the file parsing:
+      //   * a shorthand property — `winnerPlayerId` alone on a line is an identifier
+      //     expression, not a property;
+      //   * a spread in ANY position — leading `...makeGame(1)` fails to parse, and a
+      //     trailing `...rest` is worse: `{ a: 1 }` + `(...rest)` still compiles, but
+      //     as a CALL on the object literal. Silent corruption, so never touch these.
+      var loadBearing = false
       for let j = i + 1; j < closeLine; j++
         inner := lines[j].trim()
         continue if inner.length is 0
         continue if inner.startsWith("//") or inner.startsWith("#")
-        continue if indentOf(lines[j]) > openIndent + 2 and not /^[\w$]+,?$/.test(inner)
-        if /^[A-Za-z_$][\w$]*,?$/.test(inner) or /^\.\.\.[\w$]+,?$/.test(inner)
-          hasShorthand = true
+        // Only direct children can be shorthand; deeper lines belong to a nested value.
+        continue if indentOf(lines[j]) > openIndent + 2
+        if inner.startsWith("...") or /^[A-Za-z_$][\w$]*,?$/.test(inner)
+          loadBearing = true
           break
-      continue if hasShorthand
+      continue if loadBearing
 
       closeTrimmed := lines[closeLine].trim()
       closeStart := lineStarts[closeLine] + indentOf(lines[closeLine])

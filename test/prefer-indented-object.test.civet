@@ -83,3 +83,13 @@ describe "style/prefer-indented-object exclusions", ->
 
   it "leaves an object holding a spread shorthand", ->
     unchanged("o := {\n  ...rest\n  a: 1\n}\n")
+
+  it "leaves an object whose first entry is a spread", ->
+    // A leading `...makeGame(1)` fails to parse once de-braced; a spread in any
+    // later position is fine.
+    unchanged("g = {\n  ...makeGame(1),\n  a: 1\n}\n")
+
+  it "leaves an object whose spread is last", ->
+    // This one is the dangerous case: de-braced it still COMPILES, but as a call on
+    // the object literal -- `{ a: 1 }(...rest)`. Silent corruption, not a parse error.
+    unchanged("g = {\n  a: 1\n  ...rest\n}\n")
