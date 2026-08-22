@@ -1,0 +1,93 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { parseCliArgs, runCli } from "../src/cli.civet"
+
+describe "Concurrency", ->
+  describe "--concurrency parsing", ->
+    it "accepts a positive integer in both spellings", ->
+      expect(parseCliArgs(["--concurrency", "4", "src"]).concurrency).toBe(4)
+      expect(parseCliArgs(["--concurrency=4", "src"]).concurrency).toBe(4)
+      expect(parseCliArgs(["-j", "2", "src"]).concurrency).toBe(2)
+
+    it "rejects non-positive and non-integer values", ->
+      for bad of ["0", "-1", "abc", "2.5"]
+        opts := parseCliArgs(["--concurrency", bad, "src"])
+        expect(opts.errors.length).toBeGreaterThan(0)
+        expect(opts.concurrency).toBeUndefined()
+
+    it "reports a missing value rather than silently defaulting", ->
+      opts := parseCliArgs(["--concurrency"])
+      expect(opts.errors.length).toBeGreaterThan(0)
+
+    it "leaves concurrency unset when the flag is absent", ->
+      expect(parseCliArgs(["src"]).concurrency).toBeUndefined()
+
+  describe "parallel execution", ->
+    var dir: string
+
+    beforeEach ->
+      dir = await fs.mkdtemp(path.join(os.tmpdir(), "clint-conc-"))
+      await fs.mkdir(path.join(dir, "src"))
+      // Enough files to cross MIN_FILES_FOR_WORKERS so the pool is actually used.
+      for i of [0...20]
+        await fs.writeFile(path.join(dir, "src", `f${i}.civet`), `a${i} := 1 === ${i}\n`)
+      await fs.writeFile(path.join(dir, "cfg.json"),
+        JSON.stringify({ preset: "default", rules: { "style/prefer-word-operators": "error" } }))
+
+    afterEach ->
+      await fs.rm(dir, { recursive: true, force: true })
+
+    capture := (args: string[]) ->
+      lines: string[] := []
+      orig := console.log
+      console.log = (...a: any[]) -> lines.push(a.join(" "))
+      try
+        await runCli(args)
+      finally
+        console.log = orig
+      lines.join("\n")
+
+    it "produces byte-identical JSON regardless of worker count", ->
+      cfg := path.join(dir, "cfg.json")
+      target := path.join(dir, "src")
+      sequential := await capture(["-c", cfg, "-j", "1", "-f", "json", target])
+      for j of ["2", "4", "8"]
+        parallel := await capture(["-c", cfg, "-j", j, "-f", "json", target])
+        expect(parallel).toBe(sequential)
+
+    it "reports every file exactly once, in sorted order", ->
+      out := JSON.parse(await capture(["-c", path.join(dir, "cfg.json"), "-j", "4", "-f", "json", path.join(dir, "src")]))
+      expect(out.files).toHaveLength(20)
+      paths := out.files.map (f: any) -> f.filePath
+      expect(paths).toEqual([...paths].sort())
+      expect(new Set(paths).size).toBe(20)
+
+    it "surfaces a broken file as a diagnostic instead of aborting the run", ->
+      await fs.writeFile(path.join(dir, "src", "bad.civet"), "x := (((\n")
+      out := JSON.parse(await capture(["-c", path.join(dir, "cfg.json"), "-j", "4", "-f", "json", path.join(dir, "src")]))
+      expect(out.files).toHaveLength(21)
+      bad := out.files.find (f: any) -> f.filePath.endsWith("bad.civet")
+      expect(bad.diagnostics.some((d: any) -> d.ruleId is "syntax-error")).toBe(true)
+      // The other 20 were still linted normally rather than skipped: each has a
+      // real rule finding, not a syntax error.
+      others := out.files.filter (f: any) -> not f.filePath.endsWith("bad.civet")
+      expect(others).toHaveLength(20)
+      for f of others
+        expect(f.diagnostics.every((d: any) -> d.ruleId is "style/prefer-word-operators")).toBe(true)
+
+    it "applies identical fixes in parallel and sequential --write runs", ->
+      other := await fs.mkdtemp(path.join(os.tmpdir(), "clint-conc2-"))
+      try
+        await fs.cp(path.join(dir, "src"), path.join(other, "src"), { recursive: true })
+        await fs.cp(path.join(dir, "cfg.json"), path.join(other, "cfg.json"))
+        await capture(["-c", path.join(dir, "cfg.json"), "-j", "1", "--write", path.join(dir, "src")])
+        await capture(["-c", path.join(other, "cfg.json"), "-j", "8", "--write", path.join(other, "src")])
+        for i of [0...20]
+          seq := await fs.readFile(path.join(dir, "src", `f${i}.civet`), "utf8")
+          par := await fs.readFile(path.join(other, "src", `f${i}.civet`), "utf8")
+          expect(par).toBe(seq)
+          expect(par).toContain(" is ")
+      finally
+        await fs.rm(other, { recursive: true, force: true })
