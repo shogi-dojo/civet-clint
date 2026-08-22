@@ -1,0 +1,186 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// A JS-style braced statement block is a migration leftover: Civet delimits
+// `if` / `for` / `while` / `try` bodies by indentation, so the braces and the
+// head parens are both redundant.
+//
+//   if (a) {          becomes    if a
+//     g()                          g()
+//   }
+//
+// Emitted JS differs only in layout (the compiler re-adds its own braces), so
+// the fix declares the `whitespace-style` delta and the engine verifies it.
+//
+// NOT handled here, on purpose:
+//   * `=> { … }` arrow bodies — that is style/no-braced-arrow-body, and de-bracing
+//     one is a semantic repair rather than a layout change.
+//   * A single-statement body whose statement ends in `;`. `if (a) { g(); }`
+//     parses as an OBJECT with a method definition (`if (a) ({ g() {; } })`) and
+//     `g()` never runs, so the source is already broken; report it but never
+//     autofix, because the "before" side of the equivalence check is the bug.
+HEAD := /^(?:\}\s*)?(if|unless|else\s+if|else|for|while|switch|try|catch|finally)\b(.*)$/
+
+// Strip the outer parens of a head condition, but only when they wrap the WHOLE
+// expression — `if (a) and f(b)` must keep them.
+function unwrapCondition(cond: string): string
+  return cond unless cond.startsWith("(") and cond.endsWith(")")
+  var depth = 0
+  for let i = 0; i < cond.length; i++
+    ch := cond[i]
+    if ch is "("
+      depth++
+    else if ch is ")"
+      depth--
+      return cond if depth is 0 and i isnt cond.length - 1
+  cond.slice(1, -1).trim()
+
+// Rewrite a brace-stripped head into its Civet form.
+function civetHead(keyword: string, tail: string): string | undefined
+  trimmed := tail.trim()
+  return keyword if trimmed.length is 0
+  return undefined unless trimmed.startsWith("(") and trimmed.endsWith(")")
+  var cond = unwrapCondition(trimmed)
+  return undefined if cond is trimmed and not trimmed.startsWith("(")
+  if keyword is "for"
+    // `for (const x of xs)` -> `for x of xs`; a C-style head keeps its `let`.
+    cond = cond.replace(/^(?:const|var)\s+/, "")
+    cond = `let ${cond}` if /;/.test(cond) and not cond.startsWith("let ")
+  `${keyword} ${cond}`
+
+export const preferIndentedBlocksRule: Rule = {
+  id: "style/prefer-indented-blocks"
+  meta: {
+    description: "Prefer indentation over braces for statement blocks (if / for / while / try)"
+    fixable: true
+    defaultSeverity: "warn"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    lines := source.split("\n")
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("whitespace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    lineStarts: number[] := []
+    var acc = 0
+    for line of lines
+      lineStarts.push(acc)
+      acc += line.length + 1
+
+    indentOf := (line: string): number -> line.length - line.trimStart().length
+
+    for let i = 0; i < lines.length; i++
+      line := lines[i]
+      trimmed := line.trim()
+      continue unless trimmed.endsWith("{")
+
+      match := HEAD.exec(trimmed)
+      continue unless match
+      keyword := match[1].replace(/\s+/g, " ")
+      tail := match[2].replace(/\s*\{$/, "")
+
+      openIdx := lineStarts[i] + line.length - 1
+      continue if intersectsRange(ignoredRanges, openIdx, openIdx + 1)
+
+      openIndent := indentOf(line)
+
+      // Skip a block nested inside a JS-style braced ARROW body: de-bracing the
+      // inner statement while the enclosing `=> {` … `}` stays put leaves the
+      // indentation inconsistent and the file stops compiling. Those files belong
+      // to style/no-braced-arrow-body first; once the arrow is de-braced this rule
+      // sees the block on a later pass.
+      var insideBracedArrow = false
+      for let j = i - 1; j >= 0; j--
+        prev := lines[j]
+        continue if prev.trim().length is 0
+        prevIndent := indentOf(prev)
+        continue if prevIndent >= openIndent
+        insideBracedArrow = /=>\s*\{\s*$/.test(prev.trim()) or /\bfunction\b[^{]*\{\s*$/.test(prev.trim())
+        break
+      continue if insideBracedArrow
+
+      // Matching closer: the first later line at the opening indent starting `}`.
+      var closeLine = -1
+      for let j = i + 1; j < lines.length; j++
+        candidate := lines[j]
+        continue if candidate.trim().length is 0
+        candidateIndent := indentOf(candidate)
+        continue if candidateIndent > openIndent
+        break if candidateIndent < openIndent
+        closeLine = j if candidate.trim().startsWith("}")
+        break
+      continue if closeLine < 0
+
+      // Body must be non-empty and strictly more indented.
+      var bodyLines = 0
+      var bodyOk = true
+      var lastBody = ""
+      for let j = i + 1; j < closeLine; j++
+        inner := lines[j]
+        continue if inner.trim().length is 0
+        if indentOf(inner) <= openIndent
+          bodyOk = false
+          break
+        bodyLines++
+        lastBody = inner.trim()
+      continue unless bodyOk and bodyLines > 0
+
+      newHead := civetHead(keyword, tail)
+      continue unless newHead?
+
+      // A one-statement body ending in `;` is ALREADY an object mis-parse
+      // (`if (a) ({ g() {; } })` -- g() never runs), so the "before" side of the
+      // equivalence check is itself the bug. Report it; repair it by hand.
+      //
+      // Other braced blocks in expression position mis-parse the same way (a block
+      // that is the last statement of a function compiles to `return ({ g: g() })`).
+      // Those are NOT special-cased here: the engine's equivalence gate compiles
+      // both sides and rejects the fix on its own, which is exactly the desired
+      // outcome -- reported, not silently rewritten.
+      misparsed := bodyLines is 1 and lastBody.endsWith(";")
+
+      headStart := lineStarts[i] + openIndent
+      headEnd := lineStarts[i] + line.length
+      // Preserve a leading `}` from a `} else {` closer — the previous block's
+      // own edit removes it, so drop it here.
+      headEdit := { start: headStart, end: headEnd, replacement: newHead }
+
+      closeTrimmed := lines[closeLine].trim()
+      closeRest := closeTrimmed.replace(/^\}\s*/, "")
+      closeEdit := if closeRest.length > 0
+        // `} else {` / `} catch (e) {` — keep the tail, it becomes its own head.
+        { start: lineStarts[closeLine] + indentOf(lines[closeLine]), end: lineStarts[closeLine] + lines[closeLine].length, replacement: closeRest }
+      else
+        // Drop the whole line, including its newline.
+        { start: lineStarts[closeLine], end: lineStarts[closeLine] + lines[closeLine].length + 1, replacement: "" }
+
+      unless misparsed
+        edits.push(headEdit)
+        edits.push(closeEdit)
+
+      ctx.report({
+        ruleId: "style/prefer-indented-blocks"
+        message: misparsed
+          ? "Braced single-statement block with a trailing ';' parses as an object literal — drop the braces and indent the body"
+          : "Prefer indentation over braces for a statement block"
+        pos: headStart
+        ...(misparsed ? {} : { fix: headEdit })
+      })
+      unless misparsed
+        ctx.report({
+          ruleId: "style/prefer-indented-blocks"
+          message: "Prefer indentation over braces for a statement block"
+          pos: lineStarts[closeLine] + indentOf(lines[closeLine])
+          fix: closeEdit
+        })
+}
