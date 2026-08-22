@@ -29,6 +29,10 @@ import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./prefer-bare-jsx-values.civet"
 import { preferHashCommentsRule } from "./prefer-hash-comments.civet"
 import { preferSlashCommentsRule } from "./prefer-slash-comments.civet"
+import { preferWalrusDeclarationsRule } from "./prefer-walrus-declarations.civet"
+import { preferImplicitBlockCallRule } from "./prefer-implicit-block-call.civet"
+import { preferImplicitCallArgsRule } from "./prefer-implicit-call-args.civet"
+import { preferImplicitArrowArgRule } from "./prefer-implicit-arrow-arg.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -60,5 +64,9 @@ export {
   preferTerseImportsRule,
   preferBareJsxValuesRule,
   preferHashCommentsRule,
-  preferSlashCommentsRule
+  preferSlashCommentsRule,
+  preferWalrusDeclarationsRule,
+  preferImplicitBlockCallRule,
+  preferImplicitCallArgsRule,
+  preferImplicitArrowArgRule
 }

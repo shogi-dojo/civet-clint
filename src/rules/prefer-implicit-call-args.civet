@@ -1,0 +1,121 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// Civet lets a call drop its parens when the argument list is unambiguous, which
+// removes a closing paren from the end of the line:
+//
+//   expect(path).toBe('/a/Foo.civet')   ->  expect(path).toBe '/a/Foo.civet'
+//   render(<Panel {rules} />)           ->  render <Panel {rules} />
+//
+// Emitted JS is byte-identical, so no OutputDelta is involved. The rewrite is
+// deliberately conservative -- see the guards in `check`.
+const IMPLICIT_CALLEES = new Set<string>([
+  "render"
+  "rerender"
+])
+
+// Trailing matcher names whose argument list can be unwrapped. `expect(…)` itself
+// keeps its parens: it is the subject of the assertion, not the tail of the line.
+function isMatcherName(name: string): boolean
+  /^(?:to|resolves|rejects)/.test(name)
+
+export const preferImplicitCallArgsRule: Rule = {
+  id: "style/prefer-implicit-call-args"
+  meta: {
+    description: "Drop call parens on trailing matcher and render calls, letting the argument list close the line"
+    fixable: true
+    defaultSeverity: "warn"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+
+    tree.visit "CallExpression", (node) ->
+      children := node?.children
+      return unless Array.isArray(children) and children.length >= 2
+
+      last := children[children.length - 1]
+      return unless last?.type is "Call"
+
+      // `expect(a).toBe('x')` is one CallExpression whose children are
+      // [Identifier, Call, PropertyAccess, Call]: the matcher name lives on the
+      // trailing PropertyAccess, and the final Call carries its parens. A plain
+      // `render(<X />)` is [Identifier, Call].
+      before := children[children.length - 2]
+      var name: string | undefined = undefined
+
+      if before?.type is "PropertyAccess"
+        propName := before.name
+        return unless typeof propName is "string" and isMatcherName(propName)
+        name = propName
+      else if before?.type is "Identifier" and children.length is 2
+        calleeName := before.name
+        return unless typeof calleeName is "string" and IMPLICIT_CALLEES.has(calleeName)
+        name = calleeName
+      else
+        return
+
+      // An empty argument list must keep its parens: `toBeNull()` is the call,
+      // while `toBeNull` alone is a property read.
+      return unless (last?.args?.length ?? 0) > 0
+
+      callChildren := last?.children
+      return unless Array.isArray(callChildren) and callChildren.length >= 4
+      open := callChildren[0]
+      close := callChildren[callChildren.length - 1]
+      return unless open?.token is "(" and close?.token is ")"
+
+      openSpan := tree.range(open)
+      closeSpan := tree.range(close)
+      return unless openSpan? and closeSpan?
+
+      // Civet synthesizes these tokens for an already paren-free call, pointing at
+      // whatever character sits at that offset, so confirm the source really has them.
+      return unless source[openSpan.start] is "(" and source[closeSpan.start] is ")"
+
+      // Guard the two edited positions only. Checking the whole span would reject
+      // every call whose argument is a string literal, which is most of them.
+      return if intersectsRange(ignoredRanges, openSpan.start, openSpan.end)
+      return if intersectsRange(ignoredRanges, closeSpan.start, closeSpan.end)
+
+      // Single-line only. A wrapped argument list already closes on its own line.
+      return if source.slice(openSpan.start, closeSpan.end).includes("\n")
+
+      // The call must end its statement. A further `.chain`, an operator, or another
+      // argument after the closer all mean the parens are load-bearing.
+      lineEnd := source.indexOf("\n", closeSpan.start)
+      trailing := source.slice(closeSpan.start + 1, lineEnd < 0 ? source.length : lineEnd)
+      return unless /^[)\s]*$/.test(trailing)
+
+      // An argument starting with an operator, a paren, or whitespace becomes
+      // ambiguous once the call parens are gone (`f(-1)` -> `f -1` is a subtraction).
+      // A JSX element is exempt: `<` only reads as "less than" when it follows a
+      // value, and here it opens the argument.
+      inner := source.slice(openSpan.end, closeSpan.start)
+      return if inner.length is 0
+      isJsxArgument := /^<[A-Za-z]/.test(inner)
+      return if not isJsxArgument and /^[\s(+\-*/%<>=!&|^~?:,]/.test(inner)
+
+      ctx.report({
+        ruleId: "style/prefer-implicit-call-args"
+        message: `Drop the call parens on '${name}' and let the argument list close the line`
+        pos: openSpan.start
+        fix: {
+          start: openSpan.start
+          end: openSpan.end
+          replacement: " "
+        }
+      })
+      ctx.report({
+        ruleId: "style/prefer-implicit-call-args"
+        message: `Remove the closing paren for '${name}'`
+        pos: closeSpan.start
+        fix: {
+          start: closeSpan.start
+          end: closeSpan.end
+          replacement: ""
+        }
+      })
+}

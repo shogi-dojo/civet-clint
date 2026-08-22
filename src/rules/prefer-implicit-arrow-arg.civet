@@ -1,0 +1,101 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange, walkAst } from "../utils.civet"
+
+// A call whose only argument is a zero-parameter arrow can drop its parens:
+//
+//   decode = vi.fn(=> Promise.resolve())   ->  decode = vi.fn => Promise.resolve()
+//
+// Emitted JS is byte-identical. This is a general Civet idiom -- it is not specific
+// to test files -- so the rule matches any callee.
+//
+// The one shape that must NOT be rewritten is an object property whose entry is
+// followed by more properties. Without the parens the arrow swallows them as extra
+// arguments, which compiles silently to the wrong thing:
+//
+//   { play: vi.fn(=> p()), x: 1 }   ->   { play: vi.fn(() => p(), {x: 1}) }
+//
+// That is corruption rather than a parse error, so the trailing-context guard below
+// is load-bearing.
+export const preferImplicitArrowArgRule: Rule = {
+  id: "style/prefer-implicit-arrow-arg"
+  meta: {
+    description: "Drop call parens when the sole argument is a zero-parameter arrow (vi.fn => x)"
+    fixable: true
+    defaultSeverity: "warn"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+
+    tree.visit "CallExpression", (node) ->
+      children := node?.children
+      return unless Array.isArray(children) and children.length >= 2
+
+      last := children[children.length - 1]
+      return unless last?.type is "Call"
+
+      args := last?.args
+      return unless Array.isArray(args) and args.length is 1
+
+      // The single argument must be an arrow. A parameterised arrow (`f((a) => a)`)
+      // is rejected below by the `=>` check on the text right after the paren.
+      var hasArrow = false
+      walkAst args[0], (child) ->
+        hasArrow = true if child?.type is "ArrowFunction"
+      return unless hasArrow
+
+      callChildren := last?.children
+      return unless Array.isArray(callChildren) and callChildren.length >= 4
+      open := callChildren[0]
+      close := callChildren[callChildren.length - 1]
+      return unless open?.token is "(" and close?.token is ")"
+
+      openSpan := tree.range(open)
+      closeSpan := tree.range(close)
+      return unless openSpan? and closeSpan?
+
+      // Civet synthesizes these tokens for an already paren-free call, pointing at
+      // whatever character sits at that offset, so confirm the source really has them.
+      return unless source[openSpan.start] is "(" and source[closeSpan.start] is ")"
+      return if intersectsRange(ignoredRanges, openSpan.start, openSpan.end)
+      return if intersectsRange(ignoredRanges, closeSpan.start, closeSpan.end)
+
+      // The arrow must start immediately: `vi.fn(=> …)`, not `vi.fn((a) => …)`.
+      return unless source.slice(openSpan.end).trimStart().startsWith("=>")
+
+      // Single-line only. When the argument list wraps, the closing paren sits on
+      // its own line and dropping it shifts the emitted formatting, which the
+      // byte-exact gate rejects. Compare line numbers rather than scanning the span:
+      // the reported closer position can land past an intervening newline.
+      return unless ctx.getLineColumn(openSpan.start).line is ctx.getLineColumn(closeSpan.start).line
+
+      // Nothing may follow the closer on its line. A trailing comma is the dangerous
+      // case (the arrow would absorb the next object property), and a `.chain` or an
+      // operator means the parens are load-bearing.
+      lineEnd := source.indexOf("\n", closeSpan.start)
+      trailing := source.slice(closeSpan.start + 1, lineEnd < 0 ? source.length : lineEnd)
+      return unless /^[)\s]*$/.test(trailing)
+
+      ctx.report({
+        ruleId: "style/prefer-implicit-arrow-arg"
+        message: "Drop the call parens: the sole argument is a zero-parameter arrow"
+        pos: openSpan.start
+        fix: {
+          start: openSpan.start
+          end: openSpan.end
+          replacement: " "
+        }
+      })
+      ctx.report({
+        ruleId: "style/prefer-implicit-arrow-arg"
+        message: "Remove the closing paren for the implicit arrow argument"
+        pos: closeSpan.start
+        fix: {
+          start: closeSpan.start
+          end: closeSpan.end
+          replacement: ""
+        }
+      })
+}

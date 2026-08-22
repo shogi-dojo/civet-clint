@@ -1,18 +1,23 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { intersectsRange } from "../utils.civet"
 
-// A trailing comma before a closing brace is redundant in an OBJECT LITERAL, where
-// Civet lets indentation separate the entries instead:
+// A comma directly before a closing bracket, brace or paren separates nothing, so
+// Civet does not need it -- a newline already delimits the entries:
 //
-//   o :=            not      o := {
-//     a: 1                     a: 1,
-//     b: 2                     b: 2,
-//                            }
+//   o :=            f(          items := [
+//     a: 1            a           1
+//     b: 2            b           2
+//                   )           ]
 //
-// Scoped deliberately to object literals. A trailing comma in an argument list,
-// an array, a destructuring pattern or an import is idiomatic and stays: those are
-// genuinely comma-separated constructs, and stripping the comma there buys nothing
-// while making diffs noisier.
+// Applies to object literals, arrays, argument lists, destructuring patterns and
+// import clauses alike.
+//
+// Two constructs are never touched, because there the comma is load-bearing:
+//   * regex literals -- `{5,}` ends in a comma before `}`, and removing it changes
+//     "five or more" to "exactly five". Guarded by collectStringRanges.
+//   * array elision -- `[1, 2,,]` has length 3, and `[a, , b]` skips a slot, so a
+//     comma adjacent to another comma is left alone.
+//   * a comma after a rest element (`(a, ...rest,)`) is a syntax error to re-add.
 //
 // Removing the comma is emitted verbatim by the compiler, so the rule declares a
 // trailing-comma-style delta and the engine independently confirms that dropping the
@@ -20,7 +25,7 @@ import { intersectsRange } from "../utils.civet"
 export const noTrailingCommasRule: Rule = {
   id: "style/no-trailing-commas"
   meta: {
-    description: "Disallow a trailing comma before the closing brace of an object literal"
+    description: "Disallow a trailing comma before a closing bracket, brace, or paren"
     fixable: true
     defaultSeverity: "error"
   }
@@ -28,13 +33,6 @@ export const noTrailingCommasRule: Rule = {
     source := ctx.source
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
-
-    // Spans of object literals. A trailing comma is only reported when it closes one
-    // of these, which is what distinguishes `{ a: 1, }` from `f(a, b,)`.
-    objectRanges: { start: number, end: number }[] := []
-    tree.visit "ObjectExpression", (node) ->
-      span := tree.range(node)
-      objectRanges.push(span) if span
 
     edits: { start: number, end: number, replacement: string }[] := []
     ctx.declareEquivalenceReference?.("trailing-comma-style", (input: string) ->
@@ -53,17 +51,7 @@ export const noTrailingCommasRule: Rule = {
       var k = i + 1
       while k < source.length and /\s/.test(source[k])
         k++
-      // Only the closing brace of an object literal; `)` and `]` are left alone.
-      continue unless k < source.length and source[k] is "}"
-
-      // The brace must actually close an object literal, not a destructuring
-      // pattern, an import clause or a block.
-      var closesObject = false
-      for range of objectRanges
-        if range.start <= i and k < range.end
-          closesObject = true
-          break
-      continue unless closesObject
+      continue unless k < source.length and ")]}".includes(source[k])
 
       // Elision guard: `[1, 2,,]` and `[a, , b]` rely on the extra comma to hold a
       // slot, so a comma adjacent to another comma is never removed.

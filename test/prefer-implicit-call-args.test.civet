@@ -1,0 +1,70 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+DIAL := { autoLet: true, coffeeComment: true, react: true }
+
+lint := (input: string, fix = true) ->
+  lintSource(input, {
+    rules: { "style/prefer-implicit-call-args": "warn" }
+    civetOptions: DIAL
+    fix
+  })
+
+findings := (input: string) ->
+  lint(input, false).diagnostics.filter (d) ->
+    d.ruleId is "style/prefer-implicit-call-args"
+
+describe "style/prefer-implicit-call-args", ->
+  it "drops the parens on a matcher with a string argument", ->
+    res := lint("expect(a).toBe('x')\n")
+    expect(res.fixedSource).toBe("expect(a).toBe 'x'\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "drops the parens on a multi-argument matcher", ->
+    res := lint("expect(s).toHaveBeenCalledWith('x', 1)\n")
+    expect(res.fixedSource).toBe("expect(s).toHaveBeenCalledWith 'x', 1\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles a negated matcher", ->
+    res := lint("expect(a).not.toEqual({ x: 1 })\n")
+    expect(res.fixedSource).toBe("expect(a).not.toEqual { x: 1 }\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "drops the parens on a render call with a JSX argument", ->
+    res := lint("render(<A b=1 />)\n")
+    expect(res.fixedSource).toBe("render <A b=1 />\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "emits byte-identical compiler output", ->
+    input := "expect(f(p)).toBe('/a/Foo.civet')\nrender(<Panel x=1 />)\n"
+    res := lint(input)
+    before := compileForOutput(input, { dial: DIAL })
+    after := compileForOutput(res.fixedSource!, { dial: DIAL })
+    expect(before.output).toBe(after.output)
+
+  it "keeps the parens on an empty argument list", ->
+    // `toBeNull()` invokes; `toBeNull` alone is only a property read.
+    expect(findings("expect(a).toBeNull()\n")).toHaveLength(0)
+
+  it "keeps the parens when the call is followed by a chain", ->
+    expect(findings("expect(a).toBe(1).x\n")).toHaveLength(0)
+
+  it "keeps the parens when the argument opens with an operator", ->
+    expect(findings("expect(a).toBe(-1)\n")).toHaveLength(0)
+
+  it "ignores a callee that is neither a matcher nor a render helper", ->
+    expect(findings("compute(a, b)\n")).toHaveLength(0)
+
+  it "ignores expect itself", ->
+    // `expect` is the subject of the assertion, not the tail of the line.
+    hits := findings("expect(a).toBeTruthy()\n")
+    expect(hits).toHaveLength(0)
+
+  it "leaves a multi-line argument list alone", ->
+    expect(findings("expect(a).toBe(\n  b\n)\n")).toHaveLength(0)
+
+  it "is idempotent", ->
+    once := lint("expect(a).toBe('x')\n")
+    twice := lint(once.fixedSource!)
+    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)

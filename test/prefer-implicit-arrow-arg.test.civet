@@ -1,0 +1,78 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+DIAL := { autoLet: true, coffeeComment: true, react: true }
+
+lint := (input: string, fix = true) ->
+  lintSource(input, {
+    rules: { "style/prefer-implicit-arrow-arg": "warn" }
+    civetOptions: DIAL
+    fix
+  })
+
+findings := (input: string) ->
+  lint(input, false).diagnostics.filter (d) ->
+    d.ruleId is "style/prefer-implicit-arrow-arg"
+
+describe "style/prefer-implicit-arrow-arg", ->
+  it "drops the parens when the sole argument is a zero-parameter arrow", ->
+    res := lint("d = vi.fn(=> Promise.resolve())\n")
+    expect(res.fixedSource).toBe("d = vi.fn => Promise.resolve()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "applies to any callee, not just test doubles", ->
+    res := lint("f := useMemo(=> compute())\n")
+    expect(res.fixedSource).toBe("f := useMemo => compute()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles a parenthesised object return", ->
+    res := lint("s = vi.fn(=> ({}))\n")
+    expect(res.fixedSource).toBe("s = vi.fn => ({})\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "emits byte-identical compiler output", ->
+    input := "a = vi.fn(=> null)\nb = vi.fn(=> true)\n"
+    res := lint(input)
+    before := compileForOutput(input, { dial: DIAL })
+    after := compileForOutput(res.fixedSource!, { dial: DIAL })
+    expect(before.output).toBe(after.output)
+
+  it "never touches an object property followed by more properties", ->
+    // Without the parens the arrow absorbs the following entries as extra
+    // arguments -- `{ play: vi.fn(() => p(), {x: 1}) }` -- which compiles
+    // silently to the wrong thing rather than failing to parse.
+    input := "o := {\n  play: vi.fn(=> p()),\n  x: 1\n}\n"
+    expect(findings(input)).toHaveLength(0)
+
+  it "rewrites React.lazy imports and does not trip the single-param-arrow rule", ->
+    input := "Page := lazy(=> import('./pages/Page'))\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("Page := lazy => import('./pages/Page')\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+    // `lazy` is in the zero-arg callee exemption, so the terser form stays clean.
+    guarded := lintSource(res.fixedSource!, {
+      rules: { "style/no-single-param-arrow-without-parens": "error" }
+      civetOptions: DIAL
+    })
+    hits := guarded.diagnostics.filter (d) ->
+      d.ruleId is "style/no-single-param-arrow-without-parens"
+    expect(hits).toHaveLength(0)
+
+  it "keeps the parens on a parameterised arrow", ->
+    expect(findings("g = f((a) => a)\n")).toHaveLength(0)
+
+  it "keeps the parens when the call is chained", ->
+    expect(findings("h = f(=> 1).x\n")).toHaveLength(0)
+
+  it "ignores a call with more than one argument", ->
+    expect(findings("useEffect(=> run(), [])\n")).toHaveLength(0)
+
+  it "ignores a call whose argument is not an arrow", ->
+    expect(findings("f(value)\n")).toHaveLength(0)
+
+  it "is idempotent", ->
+    once := lint("d = vi.fn(=> 1)\n")
+    twice := lint(once.fixedSource!)
+    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)

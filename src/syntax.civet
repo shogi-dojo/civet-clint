@@ -242,6 +242,13 @@ export class SyntaxTree
     else
       undefined
 
+  // Normalized type of a node's immediate parent. Rules use this instead of
+  // reaching into Civet's parent layout, which the structural AST guard forbids.
+  parentType(node: any): string | undefined
+    parent := node?.parent
+    return undefined unless parent? and typeof parent is "object"
+    if typeof parent.type is "string" then parent.type else undefined
+
   // Whether a raw node is nested under one of the requested normalized node types.
   // Rules use this helper instead of depending on Civet's parent layout directly.
   hasAncestorType(node: any, types: string | string[]): boolean

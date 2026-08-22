@@ -7,6 +7,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-22
+
+### Added
+
+- **`style/prefer-walrus-declarations`**: rewrites `const x = …` to Civet's
+  declaration operator `x := …`, covering both bare identifiers and destructuring
+  patterns:
+
+  ```civet
+  const { setRule } = renderStep()   # ->  { setRule } := renderStep()
+  ```
+
+  Emitted JS is byte-identical, so the rewrite needs no `OutputDelta` and passes
+  the strict equivalence gate unchanged. Only `const` is rewritten: `let`/`var`
+  are mutable bindings with no `:=` analogue.
+
+  This is the counterpart to `style/prefer-bare-assignment`, which prefers bare
+  `=`. Bare `=` is *not* output-preserving for a `const`: besides the `const`
+  -> `let` keyword change, Civet hoists the binding, emitting `let renderStep`
+  on a line of its own, split from its assignment. `:=` has neither problem, so
+  projects wanting `const` gone from a file should prefer this rule. The two
+  rules are mutually `conflictsWith`.
+
+  Verified against a 146-file Civet codebase: 483 `const` keywords across 47
+  test files, emitted JS byte-identical on every one.
+
+- **`style/prefer-implicit-block-call`**: drops the call parens on multi-line test
+  blocks so indentation closes them, removing the stacked `)))` closers that make
+  migrated suites awkward to edit:
+
+  ```civet
+  describe('createCacheKey', =>        describe 'createCacheKey', =>
+    it('is stable', =>            ->     it 'is stable', =>
+      expect(k(b)).toBe(k(b))))            expect(k(b)).toBe(k(b))
+  ```
+
+  Applies to `describe`/`it`/`test` plus the `beforeEach`/`afterEach`/`beforeAll`/
+  `afterAll` hooks, including member forms (`it.each(cases)(name, fn)`). Fires only
+  when the call is in statement position, its last argument is an arrow, and the
+  body spans multiple lines -- a single-line call reads fine with its parens.
+  Emitted JS is byte-identical.
+
+  Verified against the same codebase: 1402 blocks across 119 of 146 test files.
+
+  `style/no-single-param-arrow-without-parens` now exempts the four hook names, so
+  the de-parenthesized `beforeEach => …` it produces is not flagged: a hook callback
+  takes no parameters, so that form cannot be an arrow whose parameter is the hook
+  name -- the ambiguity the rule warns about cannot arise there.
+
+- **`style/prefer-implicit-call-args`**: drops the call parens on a trailing matcher
+  or a `render` call, so the argument list closes the line:
+
+  ```civet
+  expect(civetSourcePath(id)).toBe('/a/Foo.civet')   # ->  .toBe '/a/Foo.civet'
+  render(<Panel {rules} />)                          # ->  render <Panel {rules} />
+  ```
+
+  Restricted to single-line calls in statement position whose argument list is
+  non-empty (`toBeNull()` keeps its parens -- bare `toBeNull` is a property read)
+  and does not open with an operator (`toBe(-1)` would become a subtraction). JSX
+  arguments are exempt from that last check. Emitted JS is byte-identical.
+
+  Verified against the same codebase: 1256 sites across 87 files.
+
+- **`style/prefer-implicit-arrow-arg`**: drops the call parens when a call's sole
+  argument is a zero-parameter arrow — a general Civet idiom, not a test-only one:
+
+  ```civet
+  decode = vi.fn(=> Promise.resolve())      # ->  vi.fn => Promise.resolve()
+  Page := lazy(=> import('./pages/Page'))   # ->  lazy => import('./pages/Page')
+  ```
+
+  The rule never fires on an object property followed by more properties: without
+  the parens the arrow absorbs them as extra arguments, so `{ play: vi.fn(=> p()),
+  x: 1 }` would compile to `{ play: vi.fn(() => p(), {x: 1}) }` — silent corruption
+  rather than a parse error. It is also restricted to single-line calls, since a
+  wrapped argument list shifts the emitted formatting.
+
+### Changed
+
+- **`style/no-single-param-arrow-without-parens` now exempts known zero-argument
+  callees** and accepts an `extraZeroArgCallees` option for project-local ones.
+  The rule flags `name => …` because it is ambiguous — a zero-arg call, or an arrow
+  whose parameter is `name`? For a callee whose callback provably takes no
+  arguments (`beforeEach`, `act`, `waitFor`, `renderHook`, `lazy`, `useState`,
+  `useRef`, `useMemo`, `useCallback`, `queueMicrotask`) that ambiguity cannot arise,
+  so the terser form the two implicit-call rules produce is no longer flagged.
+
+- **`style/no-trailing-commas` now covers every closer, not just object literals.**
+  A comma directly before `)`, `]` or `}` separates nothing when a newline already
+  delimits the entries, so the rule now also strips it from argument lists, arrays,
+  destructuring patterns and import clauses:
+
+  ```civet
+  render(
+    <Modal canEdit={=> false} />,   # the comma closes a single-argument call
+  )
+  ```
+
+  Three constructs stay untouched, because the comma is load-bearing there:
+  regex literals (`{5,}` means "five or more", `{5}` means "exactly five"),
+  array elisions (`[1, 2,,]` has length 3), and a comma after a rest element
+  (`(a, ...rest,)` is a syntax error).
+
+  Verified against a 146-file Civet codebase: 471 commas removed across 104 files,
+  emitted JS byte-identical on every one, and the test suite unchanged at
+  1694 passing.
+
 ## [0.4.0] - 2026-08-21
 
 ### Added
@@ -31,9 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and discards the value, so the function silently returns `undefined`
   (`() => new QueryClient({...});`). Only arises when renaming JS to Civet.
 - **`style/no-trailing-commas`**: removes a trailing comma before the closing brace
-  of an **object literal**, where Civet lets indentation separate entries.
-  Deliberately scoped: trailing commas in argument lists, arrays, destructuring
-  patterns and import clauses are idiomatic and left alone.
+  of an object literal, where Civet lets indentation separate the entries instead.
+  Never edits regex literals (`{5,}`), where the comma is load-bearing.
 - **`style/prefer-indented-object`**: drops the braces from a multi-line object
   literal bound to a declaration, letting indentation delimit it.
 - **Output deltas** `declaration-style` and `trailing-comma-style`, unblocking
