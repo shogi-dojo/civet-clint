@@ -82,6 +82,7 @@ export interface CliOptions
   config?: string
   format?: "text" | "json"
   printConfig?: boolean
+  verbose?: boolean
   help?: boolean
   version?: boolean
   targets: string[]
@@ -107,6 +108,8 @@ export function parseCliArgs(args: string[]): CliOptions
       options.rewrite = true
     else if arg is "--print-config"
       options.printConfig = true
+    else if arg is "--verbose"
+      options.verbose = true
     else if arg is "--help" or arg is "-h"
       options.help = true
     else if arg is "--version" or arg is "-v"
@@ -216,6 +219,8 @@ Options:
   --rewrite            Rename and convert JS/TS files to Civet, then apply autofixes
   --print-config       Print the resolved preset, compiler options, rules, and
                        skipped/incompatible rules, then exit
+  --verbose            Print the resolved config and Civet compiler options to
+                       stderr before linting
   -c, --config <path>  Path to civet-clint configuration file
   -f, --format <type>  Output format: text (default) | json
   -v, --version        Print version and exit
@@ -298,6 +303,19 @@ Options:
     else
       console.log(isRewriteMode ? "No files found to rewrite." : "No .civet files found.")
     return 0
+
+  if options.verbose
+    // Report the configs that were actually resolved, not the ones the user
+    // assumes were found: silent discovery failure is the whole point of this flag.
+    // stderr keeps --format json parseable on stdout.
+    sample := resolveConfigForFile(config, files[0]!, process.cwd(), defaultRuleRegistry)
+    console.error(`clint: config       ${config.configPath ?? "<defaults, none found>"}`)
+    console.error(`clint: civet config ${config.civetConfigPath ?? "<defaults, none found>"}`)
+    console.error(`clint: preset       ${sample.preset}`)
+    console.error(`clint: civet options ${Object.keys(sample.civetOptions ?? {}).sort().join(", ") or "<none>"}`)
+    if sample.matchingOverrides?.length
+      console.error(`clint: overrides    ${sample.matchingOverrides.join(", ")} (matching ${path.relative(process.cwd(), files[0]!)})`)
+    console.error(`clint: files        ${files.length}`)
 
   results: LintResult[] := []
   var totalRewritten = 0
