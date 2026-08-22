@@ -28,6 +28,7 @@ import { preferSlashCommentsRule } from "./rules/prefer-slash-comments.civet"
 import { preferWalrusDeclarationsRule } from "./rules/prefer-walrus-declarations.civet"
 import { preferImplicitBlockCallRule } from "./rules/prefer-implicit-block-call.civet"
 import { preferImplicitCallArgsRule } from "./rules/prefer-implicit-call-args.civet"
+import { preferImplicitArrowArgRule } from "./rules/prefer-implicit-arrow-arg.civet"
 
 export class RuleRegistry
   private rules: Map<string, Rule>
@@ -101,6 +102,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferWalrusDeclarationsRule)
   registry.register(preferImplicitBlockCallRule)
   registry.register(preferImplicitCallArgsRule)
+  registry.register(preferImplicitArrowArgRule)
   registry.register(preferExplicitDeclarationsRule)
   registry.register(preferExistentialCheckRule)
   registry.register(preferJsxAttrShorthandRule)

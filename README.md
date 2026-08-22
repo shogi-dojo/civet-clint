@@ -142,6 +142,7 @@ form, so options can be scoped to a glob.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `unquoteSingleQuotes` | boolean | `false` | Also unquote single-quoted module specifiers. |
+| `extraZeroArgCallees` | string[] | `[]` | For `style/no-single-param-arrow-without-parens`: project-local callees whose callback takes no arguments, exempted from the ambiguity warning. |
 
 By default the rule only unquotes double-quoted specifiers, because that rewrite is
 byte-identical: Civet echoes the original quote character, and the terse form emits
@@ -270,6 +271,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-walrus-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-walrus-declarations.civet) | Convert `const x = …` to `x := …`, including destructuring patterns. Byte-identical output, so unlike bare `=` it needs no delta. Conflicts with `prefer-bare-assignment`. | `autoLet` |
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
 | [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on a trailing matcher (`expect(a).toBe 'x'`) or a `render(<JSX/>)` call, letting the argument list close the line. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
+| [`style/prefer-implicit-arrow-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-arrow-arg.civet) | Drop call parens when the sole argument is a zero-parameter arrow (`vi.fn => x`, `lazy => import(…)`). Never fires on an object property followed by more properties — the arrow would absorb them. | — |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |

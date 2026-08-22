@@ -9,16 +9,29 @@ const RESERVED_MODIFIERS = new Set<string>([
   "yield"
 ])
 
-// Test-framework hooks take a zero-argument callback, so `beforeEach => …` is the
-// implicit-call form (`beforeEach(() => …)`), never an arrow whose parameter is
-// named `beforeEach`. The ambiguity this rule warns about cannot arise for these,
+// These callees take a zero-argument callback, so `beforeEach => …` / `lazy => …`
+// is the implicit-call form (`beforeEach(() => …)`), never an arrow whose parameter
+// is named `beforeEach`. The ambiguity this rule warns about cannot arise for them,
 // so flagging them would only penalize the idiomatic spelling that
-// style/prefer-implicit-block-call produces.
-const ZERO_ARG_HOOKS = new Set<string>([
+// style/prefer-implicit-block-call and style/prefer-implicit-arrow-arg produce.
+//
+// Add a name here only when the callee's callback genuinely takes no parameters.
+const ZERO_ARG_CALLEES = new Set<string>([
+  // Test framework hooks and helpers.
   "beforeEach"
   "afterEach"
   "beforeAll"
   "afterAll"
+  "act"
+  "waitFor"
+  "renderHook"
+  // React and platform APIs whose callback takes no arguments.
+  "lazy"
+  "useState"
+  "useRef"
+  "useMemo"
+  "useCallback"
+  "queueMicrotask"
 ])
 
 export const noSingleParamArrowWithoutParensRule: Rule = {
@@ -27,11 +40,24 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     description: "Flag unparenthesized single parameter arrows (n => ...) that may parse as function calls"
     fixable: false
     defaultSeverity: "warn"
+    defaultOptions: {
+      // Project-local callees whose callback takes no arguments, added to the
+      // built-in exemption list. Declare a name here only after confirming the
+      // callback really takes zero parameters.
+      extraZeroArgCallees: [] as string[]
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
     tree := ctx.syntax
     commentRanges := tree.commentRanges()
+
+    // Projects declare their own zero-argument callees via
+    // `{ "extraZeroArgCallees": ["runMutationFeedback"] }` in the rule options.
+    configured := ctx.options.extraZeroArgCallees
+    extraZeroArgCallees := new Set<string>(
+      Array.isArray(configured) ? configured.filter((n) -> typeof n is "string") : []
+    )
 
     re := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)[^\S\n]*=>/g
     var match: RegExpExecArray | null = null
@@ -39,7 +65,8 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     while (match = re.exec(source)) !== null
       ident := match[1]
       continue if RESERVED_MODIFIERS.has(ident)
-      continue if ZERO_ARG_HOOKS.has(ident)
+      continue if ZERO_ARG_CALLEES.has(ident)
+      continue if extraZeroArgCallees.has(ident)
 
       identPos := match.index + match[0].indexOf(ident)
       continue if intersectsRange(commentRanges, identPos, identPos + ident.length)

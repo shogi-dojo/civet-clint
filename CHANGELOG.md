@@ -71,7 +71,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Verified against the same codebase: 1256 sites across 87 files.
 
+- **`style/prefer-implicit-arrow-arg`**: drops the call parens when a call's sole
+  argument is a zero-parameter arrow — a general Civet idiom, not a test-only one:
+
+  ```civet
+  decode = vi.fn(=> Promise.resolve())      # ->  vi.fn => Promise.resolve()
+  Page := lazy(=> import('./pages/Page'))   # ->  lazy => import('./pages/Page')
+  ```
+
+  The rule never fires on an object property followed by more properties: without
+  the parens the arrow absorbs them as extra arguments, so `{ play: vi.fn(=> p()),
+  x: 1 }` would compile to `{ play: vi.fn(() => p(), {x: 1}) }` — silent corruption
+  rather than a parse error. It is also restricted to single-line calls, since a
+  wrapped argument list shifts the emitted formatting.
+
 ### Changed
+
+- **`style/no-single-param-arrow-without-parens` now exempts known zero-argument
+  callees** and accepts an `extraZeroArgCallees` option for project-local ones.
+  The rule flags `name => …` because it is ambiguous — a zero-arg call, or an arrow
+  whose parameter is `name`? For a callee whose callback provably takes no
+  arguments (`beforeEach`, `act`, `waitFor`, `renderHook`, `lazy`, `useState`,
+  `useRef`, `useMemo`, `useCallback`, `queueMicrotask`) that ambiguity cannot arise,
+  so the terser form the two implicit-call rules produce is no longer flagged.
 
 - **`style/no-trailing-commas` now covers every closer, not just object literals.**
   A comma directly before `)`, `]` or `}` separates nothing when a newline already

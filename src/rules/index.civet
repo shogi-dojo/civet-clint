@@ -32,6 +32,7 @@ import { preferSlashCommentsRule } from "./prefer-slash-comments.civet"
 import { preferWalrusDeclarationsRule } from "./prefer-walrus-declarations.civet"
 import { preferImplicitBlockCallRule } from "./prefer-implicit-block-call.civet"
 import { preferImplicitCallArgsRule } from "./prefer-implicit-call-args.civet"
+import { preferImplicitArrowArgRule } from "./prefer-implicit-arrow-arg.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -66,5 +67,6 @@ export {
   preferSlashCommentsRule,
   preferWalrusDeclarationsRule,
   preferImplicitBlockCallRule,
-  preferImplicitCallArgsRule
+  preferImplicitCallArgsRule,
+  preferImplicitArrowArgRule
 }
