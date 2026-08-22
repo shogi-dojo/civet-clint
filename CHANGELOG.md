@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-22
+
+### Fixed
+
+- **`style/no-braced-arrow-body` no longer fires on deliberate object literals.**
+  A multi-line object returned from a callback (`xs.map (p) => { userId: p.id ... }`)
+  reaches the rule with the same AST shape as a mis-parsed statement block --
+  `ParenthesizedExpression` -> `ObjectExpression` -> `Property` -- because Civet has
+  already collapsed the two readings. The rule now separates them by how each key was
+  derived: a property whose key Civet synthesized from a *call* (`callExpression`)
+  cannot be written deliberately, since an object literal names its keys.
+
+  Note that `implicitName` alone is not a usable signal. Civet sets it for legitimate
+  shorthand as well, so `{ a, b }` spread across lines carries it on every property;
+  keying off it would trade one false positive for another.
+
+  On a real 146-file codebase this removed 6 false positives (129 -> 123 findings),
+  every one a genuine object literal in a `.map`/`useMemo` callback. All remaining
+  findings are true mis-parses.
+
 ## [0.4.1] - 2026-08-22
 
 ### Added

@@ -49,6 +49,24 @@ function findMatchingBrace(source: string, openIdx: number): number
     i++
   -1
 
+// Does this object literal look like statements Civet reinterpreted as properties?
+//
+// The marker is `callExpression`: a property whose key was synthesized from a CALL,
+// which is what a statement like `setActiveModal null` becomes. That cannot be
+// written deliberately -- an object literal names its keys.
+//
+// `implicitName` alone is NOT sufficient. Civet sets it for legitimate shorthand
+// too, so `{ a, b }` written across lines carries it on every property; keying off
+// it would trade one false positive for another.
+function objectLooksLikeStatements(node: any): boolean
+  return false unless node?.type is "ObjectExpression"
+  properties := node.properties
+  return false unless Array.isArray(properties) and properties.length > 0
+  for property of properties
+    continue unless property?
+    return true if property.callExpression?
+  false
+
 export const noBracedArrowBodyRule: Rule = {
   id: "style/no-braced-arrow-body"
   meta: {
@@ -78,6 +96,21 @@ export const noBracedArrowBodyRule: Rule = {
       firstEntry := expressions[0]
       first := Array.isArray(firstEntry) ? firstEntry[1] : firstEntry
       return unless first?.type is "ParenthesizedExpression"
+
+      // A deliberate object literal and a mis-parsed statement block reach this point
+      // with the SAME shape: ParenthesizedExpression -> ObjectExpression -> Property.
+      // Civet has already collapsed them, so the node types cannot tell them apart.
+      //
+      // The one signal it leaves is how each key was derived. Writing `userId: p.id`
+      // gives a Property with an explicit source-level name. A statement like
+      // `setActiveModal null` has no key at all, so Civet synthesizes one from the
+      // callee and marks the Property `callExpression` -- the accidental shape this
+      // rule exists to catch.
+      //
+      // Without this check the rule fires on every correct multi-line object returned
+      // from a `.map`/`useMemo` callback -- roughly two thirds of its findings on a
+      // real codebase were such false positives, which is what kept it at `warn`.
+      return unless objectLooksLikeStatements(first?.expression)
 
       span := tree.range(node)
       return unless span?
