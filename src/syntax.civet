@@ -63,6 +63,16 @@ export class SyntaxTree
     return undefined unless hi > lo
     { start: lo, end: hi }
 
+  // Range of a node ONLY when it is a source token carrying its own location.
+  // Unlike `range`, this never falls back to a subtree walk: callers that just
+  // want token spans (scanning for an operator, say) would otherwise pay an
+  // O(subtree) cost on every interior node that can never be a token.
+  tokenRange(node: any): SourceRange | undefined
+    return undefined unless node? and node.$loc and typeof node.token is "string"
+    pos := node.$loc.pos
+    len := node.$loc.length or 0
+    { start: pos, end: pos + len }
+
   // Slice of source text corresponding to a node or range.
   text(nodeOrRange: any): string
     return "" unless nodeOrRange?
