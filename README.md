@@ -582,6 +582,22 @@ For design details regarding AST constraints, compiler dials, and upstream Civet
 - 🤝 [Upstream Collaboration & Roadmap](https://github.com/shogi-dojo/civet-clint/blob/main/docs/upstream.md) — Civet maintainer asks and integration roadmap.
 - 🚀 [Release Guide](https://github.com/shogi-dojo/civet-clint/blob/main/docs/releasing.md) — Release policies, SemVer tagging, and npm publishing guidelines.
 
+### Releasing, in one line
+
+**Publishing is triggered by pushing a `v<version>` tag — never by merging to `main`.**
+
+```bash
+npm version <version> --no-git-tag-version   # bump package.json + lock
+# update CHANGELOG.md, commit, push main
+git tag -a v<version> -m "Release v<version>" && git push origin v<version>
+```
+
+CI then runs `npm run release:check` and publishes via npm **Trusted Publishing
+(OIDC)** — there is no npm token, and `npm login` / `npm whoami` are irrelevant.
+A local `npm publish` is neither needed nor expected. The workflow refuses to run
+from any non-tag ref by design. Full detail in the
+[Release Guide](https://github.com/shogi-dojo/civet-clint/blob/main/docs/releasing.md).
+
 ---
 
 ## License
