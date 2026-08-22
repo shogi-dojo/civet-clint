@@ -93,3 +93,15 @@ describe "style/prefer-indented-object exclusions", ->
     // This one is the dangerous case: de-braced it still COMPILES, but as a call on
     // the object literal -- `{ a: 1 }(...rest)`. Silent corruption, not a parse error.
     unchanged("g = {\n  a: 1\n  ...rest\n}\n")
+
+  it "leaves an object whose shorthand sits mid-line among other entries", ->
+    // De-braced this still COMPILES, as `{ background: bg }(border, {...})` -- the
+    // object literal is CALLED. Silent corruption, so the braces are load-bearing.
+    unchanged("cardStyle = {\n  background: bg, border, boxShadow: shadow\n}\n")
+
+  it "still fixes a multi-entry line with no shorthand", ->
+    expect(fix("o := {\n  a: 1, b: 2\n}\n").fixedSource).toBe("o :=\n  a: 1, b: 2\n")
+
+  it "does not mistake a comma inside a nested value for an entry separator", ->
+    expect(fix("o := {\n  a: f(1, 2), b: [3, 4]\n}\n").fixedSource)
+      .toBe("o :=\n  a: f(1, 2), b: [3, 4]\n")

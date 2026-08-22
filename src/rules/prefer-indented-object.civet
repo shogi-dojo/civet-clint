@@ -101,6 +101,25 @@ export const preferIndentedObjectRule: Rule = {
       //   * a spread in ANY position — leading `...makeGame(1)` fails to parse, and a
       //     trailing `...rest` is worse: `{ a: 1 }` + `(...rest)` still compiles, but
       //     as a CALL on the object literal. Silent corruption, so never touch these.
+      // A shorthand can also sit mid-line among comma-separated entries
+      // (`background: bg, border, boxShadow: shadow`), so each line is split on its
+      // TOP-LEVEL commas — commas nested inside (), [] or {} belong to a value.
+      splitTopLevelEntries := (text: string): string[] ->
+        parts: string[] := []
+        var depth = 0
+        var start = 0
+        for let k = 0; k < text.length; k++
+          ch := text[k]
+          if ch is "(" or ch is "[" or ch is "{"
+            depth++
+          else if ch is ")" or ch is "]" or ch is "}"
+            depth--
+          else if ch is "," and depth is 0
+            parts.push(text.slice(start, k))
+            start = k + 1
+        parts.push(text.slice(start))
+        parts.map((x) -> x.trim()).filter((x) -> x.length > 0)
+
       var loadBearing = false
       for let j = i + 1; j < closeLine; j++
         inner := lines[j].trim()
@@ -108,9 +127,11 @@ export const preferIndentedObjectRule: Rule = {
         continue if inner.startsWith("//") or inner.startsWith("#")
         // Only direct children can be shorthand; deeper lines belong to a nested value.
         continue if indentOf(lines[j]) > openIndent + 2
-        if inner.startsWith("...") or /^[A-Za-z_$][\w$]*,?$/.test(inner)
-          loadBearing = true
-          break
+        for entry of splitTopLevelEntries(inner)
+          if entry.startsWith("...") or /^[A-Za-z_$][\w$]*$/.test(entry)
+            loadBearing = true
+            break
+        break if loadBearing
       continue if loadBearing
 
       closeTrimmed := lines[closeLine].trim()
