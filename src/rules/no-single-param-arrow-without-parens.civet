@@ -53,7 +53,7 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     commentRanges := tree.commentRanges()
 
     // Projects declare their own zero-argument callees via
-    // `{ "extraZeroArgCallees": ["runMutationFeedback"] }` in the rule options.
+    // `{ "extraZeroArgCallees": ["withRetry"] }` in the rule options.
     configured := ctx.options.extraZeroArgCallees
     extraZeroArgCallees := new Set<string>(
       Array.isArray(configured) ? configured.filter((n) -> typeof n is "string") : []

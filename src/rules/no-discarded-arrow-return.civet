@@ -12,7 +12,7 @@ import { intersectsRange } from "../utils.civet"
 // a concise arrow has nothing else to return.
 //
 // This is silent: the code compiles, the call runs, and only a consumer of the
-// return value notices. In the Ranked test corpus it broke every helper of the
+// return value notices. In one migrated test corpus it broke every helper of the
 // form `createX = () => new X(...)`, which then failed far from the cause.
 //
 // The AST distinguishes the shapes precisely. Civet marks a concise body

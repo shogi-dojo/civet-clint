@@ -369,7 +369,7 @@ out of scope; their absence is a design boundary, not a missing feature.
 
 ## Migrating a JS/TS Codebase to Civet
 
-Because Civet is a superset of JS/TSX, migrating codebases to Civet does not require a separate decompiler or manual line-by-line translation. In empirical testing against real-world projects, over 97% of JS/TSX files (e.g. 133 of 137 in Ranked) parse and compile cleanly as Civet with zero manual source edits.
+Because Civet is a superset of JS/TSX, migrating codebases to Civet does not require a separate decompiler or manual line-by-line translation. In empirical testing against real-world projects, over 97% of JS/TSX files (133 of 137 in one real-world React codebase) parse and compile cleanly as Civet with zero manual source edits.
 
 Use `clint --rewrite` to convert and format files in one pass:
 
