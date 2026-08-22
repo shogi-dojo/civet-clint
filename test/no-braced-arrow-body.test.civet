@@ -24,6 +24,31 @@ describe "style/no-braced-arrow-body", ->
     source := "describe 'a', => {\n  it 'b', => {\n    f()\n  }\n}\n"
     expect(findings(source)).toHaveLength(2)
 
+  it "does not flag a deliberate multi-line object literal", ->
+    // Every key is written explicitly, so this is the object the author meant. The
+    // rule fired on these before, which is what made two thirds of its findings on a
+    // real codebase false positives.
+    source := "toRows = (xs) => xs.map (p) => {\n  userId: p.userId\n  points: p.score\n}\n"
+    expect(findings(source)).toHaveLength(0)
+
+  it "does not flag an object literal opening with a spread", ->
+    source := "next = (xs) => xs.map (p) => {\n  ...p\n  score: 1\n}\n"
+    expect(findings(source)).toHaveLength(0)
+
+  it "does not flag an object literal of shorthand properties", ->
+    source := "pick = (a, b) => [1].map (n) => {\n  a\n  b\n}\n"
+    expect(findings(source)).toHaveLength(0)
+
+  it "still flags a block of bare calls that Civet reads as keys", ->
+    // `setSelected event` has no source-level key, so Civet synthesizes one from the
+    // callee -- the accidental shape. This is the case the rule exists for.
+    source := "onDelete = (event) => {\n  setSelected event\n  setModal 'Delete'\n}\n"
+    expect(findings(source)).toHaveLength(1)
+
+  it "flags a body mixing a bare call with an explicit key", ->
+    source := "f = (e) => {\n  setA e\n  mode: 'edit'\n}\n"
+    expect(findings(source)).toHaveLength(1)
+
   it "does not flag a body that compiles to a real block", ->
     // A declaration cannot be read as an object key, so Civet keeps the braces as a
     // statement block and the arrow behaves as written.
