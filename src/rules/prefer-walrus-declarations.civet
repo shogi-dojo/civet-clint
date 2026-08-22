@@ -1,0 +1,60 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// `const x = …` and `const { a } = …` both compile identically to `x := …` and
+// `{ a } := …`, so this rewrite needs no OutputDelta: the emitted JS is
+// byte-identical and the strict equivalence gate accepts it unchanged.
+//
+// Only `const` is rewritten. `let`/`var` are mutable bindings with no `:=`
+// analogue -- `:=` is Civet's *const* declaration operator.
+export const preferWalrusDeclarationsRule: Rule = {
+  id: "style/prefer-walrus-declarations"
+  meta: {
+    description: "Prefer Civet's ':=' declaration operator over the 'const' keyword"
+    fixable: true
+    defaultSeverity: "error"
+    capabilities: {
+      requires: ["autoLet"]
+    }
+    conflictsWith: ["style/prefer-explicit-declarations", "style/prefer-bare-assignment"]
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
+    ignoredRanges := [...commentRanges, ...stringRanges]
+
+    // Two shapes: a bare identifier, or a destructuring pattern. The pattern
+    // branch stops at the first newline so a multi-line pattern -- where the
+    // closing brace position is not knowable by regex -- is left alone.
+    identRe := /(?:^|[\n;])([ \t]*)(export[ \t]+)?const[ \t]+([a-zA-Z_$][a-zA-Z0-9_$]*)[ \t]*(=)(?!=)/g
+    patternRe := /(?:^|[\n;])([ \t]*)(export[ \t]+)?const[ \t]+([{\[][^}\]\n]*[}\]])[ \t]*(=)(?!=)/g
+
+    report := (match: RegExpExecArray) ->
+      exportKw := match[2] or ""
+      target := match[3]
+      idxConst := match[0].indexOf("const")
+      pos := match.index + idxConst - exportKw.length
+      matchEnd := match.index + match[0].length
+      return if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      replacement := `${exportKw}${target} :=`
+      ctx.report({
+        ruleId: "style/prefer-walrus-declarations"
+        message: `Use '${exportKw}${target} :=' instead of '${exportKw}const ${target} ='`
+        pos
+        fix: {
+          start: pos
+          end: matchEnd
+          replacement
+        }
+      })
+
+    var match: RegExpExecArray | null = null
+    while (match = identRe.exec(source)) !== null
+      report(match)
+    match = null
+    while (match = patternRe.exec(source)) !== null
+      report(match)
+}

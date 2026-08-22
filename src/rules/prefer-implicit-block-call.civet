@@ -1,0 +1,118 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { walkAst } from "../utils.civet"
+
+// Test-suite blocks read as `describe('x', =>` … and currently close with a pile
+// of stacked parens (`)))`) on the last assertion. Civet lets a call drop its
+// parens when the arguments are unambiguous, so the block can close by
+// indentation instead. Emitted JS is byte-identical, so no OutputDelta is needed.
+const BLOCK_CALLERS = new Set<string>([
+  "describe"
+  "it"
+  "test"
+  "beforeEach"
+  "afterEach"
+  "beforeAll"
+  "afterAll"
+])
+
+// Resolve the leading identifier of a callee: `it` for a plain call, and also
+// `it` for the `it.each(…)(…)` / `describe.only(…)` member forms.
+function calleeBaseName(callee: any): string | undefined
+  return undefined unless callee?
+  return callee.name if callee.type is "Identifier" and typeof callee.name is "string"
+  return undefined unless callee.type is "MemberExpression" or callee.type is "CallExpression"
+  var found: string | undefined = undefined
+  walkAst callee, (node) ->
+    return if found?
+    if node?.type is "Identifier" and typeof node.name is "string"
+      found = node.name
+  found
+
+// The final argument must be an arrow function -- that is the block body.
+function lastArgumentIsArrow(call: any): boolean
+  args := call?.args
+  return false unless Array.isArray(args) and args.length > 0
+  last := args[args.length - 1]
+  var found = false
+  walkAst last, (node) ->
+    found = true if node?.type is "ArrowFunction"
+  found
+
+export const preferImplicitBlockCallRule: Rule = {
+  id: "style/prefer-implicit-block-call"
+  meta: {
+    description: "Prefer implicit call syntax for test blocks (describe 'x', => …) over stacked closing parens"
+    fixable: true
+    defaultSeverity: "warn"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+
+    tree.visit "CallExpression", (node) ->
+      children := node?.children
+      return unless Array.isArray(children) and children.length >= 2
+
+      name := calleeBaseName(children[0])
+      return unless name? and BLOCK_CALLERS.has(name)
+
+      // `it.each(cases)(name, fn)` is a single CallExpression carrying two `Call`
+      // children. The block body always lives in the last one, so that is the
+      // argument list whose parens may be dropped.
+      callNodes := children.filter (child) -> child?.type is "Call"
+      return unless callNodes.length > 0
+      call := callNodes[callNodes.length - 1]
+      return unless lastArgumentIsArrow(call)
+
+      callChildren := call?.children
+      return unless Array.isArray(callChildren) and callChildren.length >= 4
+      open := callChildren[0]
+      close := callChildren[callChildren.length - 1]
+      return unless open?.token is "(" and close?.token is ")"
+
+      openSpan := tree.range(open)
+      closeSpan := tree.range(close)
+      return unless openSpan? and closeSpan?
+
+      // Only a statement-position call may drop its parens. Civet gives the last
+      // statement of a block an implicit return, so ReturnStatement counts too.
+      enclosing := tree.parentType(node)
+      return unless enclosing is "BlockStatement" or enclosing is "ReturnStatement"
+
+      // Restrict to multi-line blocks: those are the ones that accumulate the
+      // stacked closers. A single-line call reads fine with its parens.
+      return unless source.slice(openSpan.start, closeSpan.start).includes("\n")
+
+      // The closer must end its line, ignoring the parens of enclosing blocks
+      // that stack up after it. Anything else (a chained `.then`, a trailing
+      // comma) means the call is not the whole statement.
+      lineEnd := source.indexOf("\n", closeSpan.start)
+      trailing := source.slice(closeSpan.start + 1, lineEnd < 0 ? source.length : lineEnd)
+      return unless /^[)\s]*$/.test(trailing)
+
+      // A `(` directly followed by a newline is the wrapped-argument form; the
+      // implicit-call rewrite would leave a dangling line.
+      return if /^[ \t]*(\r?\n|$)/.test(source.slice(openSpan.end))
+
+      ctx.report({
+        ruleId: "style/prefer-implicit-block-call"
+        message: `Drop the call parens on '${name}' and let indentation close the block`
+        pos: openSpan.start
+        fix: {
+          start: openSpan.start
+          end: openSpan.end
+          replacement: " "
+        }
+      })
+      ctx.report({
+        ruleId: "style/prefer-implicit-block-call"
+        message: `Remove the closing paren for '${name}'`
+        pos: closeSpan.start
+        fix: {
+          start: closeSpan.start
+          end: closeSpan.end
+          replacement: ""
+        }
+      })
+}

@@ -1,0 +1,83 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { compileForOutput } from "../src/compiler.civet"
+
+DIAL := { autoLet: true, coffeeComment: true, react: true }
+
+lint := (input: string, fix = true) ->
+  lintSource(input, {
+    rules: { "style/prefer-implicit-block-call": "warn" }
+    civetOptions: DIAL
+    fix
+  })
+
+findings := (input: string) ->
+  lint(input, false).diagnostics.filter (d) ->
+    d.ruleId is "style/prefer-implicit-block-call"
+
+describe "style/prefer-implicit-block-call", ->
+  it "drops the parens on a describe/it block and its stacked closers", ->
+    input := "describe('d', =>\n  it('a', =>\n    expect(1).toBe(1)))\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("describe 'd', =>\n  it 'a', =>\n    expect(1).toBe(1)\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles two sibling it blocks", ->
+    input := "describe('d', =>\n  it('a', =>\n    f(1))\n\n  it('b', =>\n    f(2)))\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("describe 'd', =>\n  it 'a', =>\n    f(1)\n\n  it 'b', =>\n    f(2)\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles an async callback", ->
+    input := "it('a', async =>\n  await f())\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("it 'a', async =>\n  await f()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles nested describes", ->
+    input := "describe('o', =>\n  describe('i', =>\n    it('a', =>\n      f())))\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("describe 'o', =>\n  describe 'i', =>\n    it 'a', =>\n      f()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles hooks with no leading argument", ->
+    input := "beforeEach(=>\n  reset())\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("beforeEach =>\n  reset()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "handles the it.each member form", ->
+    input := "it.each([1])('b', =>\n  g())\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("it.each([1]) 'b', =>\n  g()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "preserves comments inside the block body", ->
+    input := "it('a', =>\n  # note\n  f())\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("it 'a', =>\n  # note\n  f()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "emits byte-identical compiler output", ->
+    input := "describe('d', =>\n  it('a', async =>\n    x := await f()\n    expect(x).toBe(1)))\n"
+    res := lint(input)
+    before := compileForOutput(input, { dial: DIAL })
+    after := compileForOutput(res.fixedSource!, { dial: DIAL })
+    expect(before.output).toBe(after.output)
+
+  it "leaves a single-line block alone", ->
+    expect(findings("it('a', => f(1))\n")).toHaveLength(0)
+
+  it "does not fire when the final argument is not an arrow", ->
+    expect(findings("describe('d', suite)\n")).toHaveLength(0)
+
+  it "does not fire for a non-test caller", ->
+    expect(findings("wrap('d', =>\n  f())\n")).toHaveLength(0)
+
+  it "does not fire when the call is not a statement", ->
+    expect(findings("x := it('a', =>\n  f())\n")).toHaveLength(0)
+
+  it "is idempotent", ->
+    once := lint("describe('d', =>\n  it('a', =>\n    f()))\n")
+    twice := lint(once.fixedSource!)
+    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)

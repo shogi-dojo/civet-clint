@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.1] - 2026-08-22
 
+### Added
+
+- **`style/prefer-walrus-declarations`**: rewrites `const x = …` to Civet's
+  declaration operator `x := …`, covering both bare identifiers and destructuring
+  patterns:
+
+  ```civet
+  const { setRule } = renderStep()   # ->  { setRule } := renderStep()
+  ```
+
+  Emitted JS is byte-identical, so the rewrite needs no `OutputDelta` and passes
+  the strict equivalence gate unchanged. Only `const` is rewritten: `let`/`var`
+  are mutable bindings with no `:=` analogue.
+
+  This is the counterpart to `style/prefer-bare-assignment`, which prefers bare
+  `=`. Bare `=` is *not* output-preserving for a `const`: besides the `const`
+  -> `let` keyword change, Civet hoists the binding, emitting `let renderStep`
+  on a line of its own, split from its assignment. `:=` has neither problem, so
+  projects wanting `const` gone from a file should prefer this rule. The two
+  rules are mutually `conflictsWith`.
+
+  Verified against a 146-file Civet codebase: 483 `const` keywords across 47
+  test files, emitted JS byte-identical on every one.
+
+- **`style/prefer-implicit-block-call`**: drops the call parens on multi-line test
+  blocks so indentation closes them, removing the stacked `)))` closers that make
+  migrated suites awkward to edit:
+
+  ```civet
+  describe('createCacheKey', =>        describe 'createCacheKey', =>
+    it('is stable', =>            ->     it 'is stable', =>
+      expect(k(b)).toBe(k(b))))            expect(k(b)).toBe(k(b))
+  ```
+
+  Applies to `describe`/`it`/`test` plus the `beforeEach`/`afterEach`/`beforeAll`/
+  `afterAll` hooks, including member forms (`it.each(cases)(name, fn)`). Fires only
+  when the call is in statement position, its last argument is an arrow, and the
+  body spans multiple lines -- a single-line call reads fine with its parens.
+  Emitted JS is byte-identical.
+
+  Verified against the same codebase: 1402 blocks across 119 of 146 test files.
+
 ### Changed
 
 - **`style/no-trailing-commas` now covers every closer, not just object literals.**
