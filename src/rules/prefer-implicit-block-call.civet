@@ -50,6 +50,19 @@ export const preferImplicitBlockCallRule: Rule = {
     source := ctx.source
     tree := ctx.syntax
 
+    // Dropping the parens moves the closer from its own line onto the previous
+    // one, so Civet emits `})` where it used to emit `}\n)`. That is a layout
+    // change only — the statements are identical — so the fix is verified against
+    // a whitespace-normalized emit rather than a byte-identical one.
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("whitespace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
     tree.visit "CallExpression", (node) ->
       children := node?.children
       return unless Array.isArray(children) and children.length >= 2
@@ -106,6 +119,7 @@ export const preferImplicitBlockCallRule: Rule = {
       // implicit-call rewrite would leave a dangling line.
       return if /^[ \t]*(\r?\n|$)/.test(source.slice(openSpan.end))
 
+      edits.push({ start: openSpan.start, end: openSpan.end, replacement: " " })
       ctx.report({
         ruleId: "style/prefer-implicit-block-call"
         message: `Drop the call parens on '${name}' and let indentation close the block`
@@ -116,13 +130,28 @@ export const preferImplicitBlockCallRule: Rule = {
           replacement: " "
         }
       })
+      // Removing only the `)` would leave its indentation behind as a
+      // whitespace-only line. When the closer is alone on its line, take the
+      // line with it — from the end of the previous line to the end of this one.
+      var removeStart = closeSpan.start
+      var removeEnd = closeSpan.end
+      lineStart := source.lastIndexOf("\n", closeSpan.start - 1) + 1
+      before := source.slice(lineStart, closeSpan.start)
+      if /^[ \t]*$/.test(before)
+        after := source.indexOf("\n", closeSpan.end)
+        rest := source.slice(closeSpan.end, after < 0 ? source.length : after)
+        if /^[ \t]*$/.test(rest)
+          removeStart = lineStart > 0 ? lineStart - 1 : 0
+          removeEnd = after < 0 ? source.length : after
+
+      edits.push({ start: removeStart, end: removeEnd, replacement: "" })
       ctx.report({
         ruleId: "style/prefer-implicit-block-call"
         message: `Remove the closing paren for '${name}'`
         pos: closeSpan.start
         fix: {
-          start: closeSpan.start
-          end: closeSpan.end
+          start: removeStart
+          end: removeEnd
           replacement: ""
         }
       })

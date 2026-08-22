@@ -159,6 +159,55 @@ export function normalizeTrailingCommaStyle(code: string): string
     i++
   out
 
+// Normalize away insignificant whitespace, so a fix that only changes how a call
+// is delimited can be verified. Civet emits the layout of the source verbatim, so
+// `it('a', =>\n  body\n)` and `it 'a', =>\n  body` produce identical statements
+// that differ only as `}\n)` vs `})` — the byte-identical gate would otherwise
+// reject every implicit-block fix.
+//
+// String and comment contents are copied through untouched: whitespace is
+// significant inside them, and collapsing it would change the program.
+export function normalizeWhitespaceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if /\s/.test(ch)
+      var k = i
+      while k < code.length and /\s/.test(code[k])
+        k++
+      // Keep one space only where removing it would join two tokens.
+      prev := out.slice(-1)
+      next := code[k] ?? ""
+      isWordChar := (c: string): boolean -> /[A-Za-z0-9_$]/.test(c)
+      if isWordChar(prev) and isWordChar(next)
+        out += " "
+      i = k
+      continue
+    out += ch
+    i++
+  out
+
 export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
   res := compileForOutput(source, { dial: civetOptions, filename })
   if res.ok
@@ -254,6 +303,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeDeclarationStyle(before) is normalizeDeclarationStyle(after)
       when "trailing-comma-style"
         normalizeTrailingCommaStyle(before) is normalizeTrailingCommaStyle(after)
+      when "whitespace-style"
+        normalizeWhitespaceStyle(before) is normalizeWhitespaceStyle(after)
       else
         false
 
@@ -515,6 +566,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           res = normalizeDeclarationStyle(res)
         if kinds.has("trailing-comma-style")
           res = normalizeTrailingCommaStyle(res)
+        // Last: the normalizers above can leave whitespace differences behind,
+        // so collapsing must happen after they have run.
+        if kinds.has("whitespace-style")
+          res = normalizeWhitespaceStyle(res)
         res
       // Same distinction as acceptCandidate: a repair phase is verified by the
       // mis-parse disappearing, not by the emit staying identical.
