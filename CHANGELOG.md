@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-22
+
+### Changed
+
+- **`style/no-trailing-commas` now covers every closer, not just object literals.**
+  A comma directly before `)`, `]` or `}` separates nothing when a newline already
+  delimits the entries, so the rule now also strips it from argument lists, arrays,
+  destructuring patterns and import clauses:
+
+  ```civet
+  render(
+    <Modal canEdit={=> false} />,   # the comma closes a single-argument call
+  )
+  ```
+
+  Three constructs stay untouched, because the comma is load-bearing there:
+  regex literals (`{5,}` means "five or more", `{5}` means "exactly five"),
+  array elisions (`[1, 2,,]` has length 3), and a comma after a rest element
+  (`(a, ...rest,)` is a syntax error).
+
+  Verified against a 146-file Civet codebase: 471 commas removed across 104 files,
+  emitted JS byte-identical on every one, and the test suite unchanged at
+  1694 passing.
+
 ## [0.4.0] - 2026-08-21
 
 ### Added
@@ -31,9 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and discards the value, so the function silently returns `undefined`
   (`() => new QueryClient({...});`). Only arises when renaming JS to Civet.
 - **`style/no-trailing-commas`**: removes a trailing comma before the closing brace
-  of an **object literal**, where Civet lets indentation separate entries.
-  Deliberately scoped: trailing commas in argument lists, arrays, destructuring
-  patterns and import clauses are idiomatic and left alone.
+  of an object literal, where Civet lets indentation separate the entries instead.
+  Never edits regex literals (`{5,}`), where the comma is load-bearing.
 - **`style/prefer-indented-object`**: drops the braces from a multi-line object
   literal bound to a declaration, letting indentation delimit it.
 - **Output deltas** `declaration-style` and `trailing-comma-style`, unblocking

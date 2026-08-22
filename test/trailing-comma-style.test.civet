@@ -35,24 +35,27 @@ describe "style/no-trailing-commas", ->
   it "removes a trailing comma in an object literal", ->
     expect(expectCommaEquivalent("o := {\n  a: 1,\n}\n")).toBe("o := {\n  a: 1\n}\n")
 
-  it "leaves a trailing comma in an array literal", ->
-    // Arrays are genuinely comma-separated; only object literals have an
-    // indentation-based alternative.
-    unchanged("a := [\n  1,\n]\n")
+  it "removes a trailing comma in an array literal", ->
+    expect(expectCommaEquivalent("a := [\n  1,\n]\n")).toBe("a := [\n  1\n]\n")
 
-  it "leaves a trailing comma in a call argument list", ->
-    unchanged("f(\n  a,\n)\n")
+  it "removes a trailing comma in a call argument list", ->
+    expect(expectCommaEquivalent("f(\n  a,\n)\n")).toBe("f(\n  a\n)\n")
 
-  it "leaves a trailing comma in a destructuring pattern", ->
-    unchanged("{ a, b, } := o\n")
+  it "removes a trailing comma in a destructuring pattern", ->
+    expect(expectCommaEquivalent("{ a, b, } := o\n")).toBe("{ a, b } := o\n")
 
-  it "leaves a trailing comma in an import clause", ->
-    unchanged("{\n  a,\n  b,\n} from './m'\n")
+  it "removes a trailing comma in an import clause", ->
+    expect(expectCommaEquivalent("{\n  a,\n  b,\n} from './m'\n"))
+      .toBe("{\n  a,\n  b\n} from './m'\n")
 
-  it "removes only the object's comma in a nested literal", ->
-    // The inner array keeps its comma; the outer object loses its own.
+  it "removes a trailing comma after a JSX element argument", ->
+    // A single-argument call: the comma separates nothing at all.
+    expect(expectCommaEquivalent("render(\n  <C a=1 />,\n)\n"))
+      .toBe("render(\n  <C a=1 />\n)\n")
+
+  it "removes commas at every level of a nested literal", ->
     expect(expectCommaEquivalent("o := {\n  a: [\n    1,\n  ],\n}\n"))
-      .toBe("o := {\n  a: [\n    1,\n  ]\n}\n")
+      .toBe("o := {\n  a: [\n    1\n  ]\n}\n")
 
   it "removes the comma of an object nested in a call", ->
     // `vi.mock('m', => ({ ... , }))` — the brace still closes an object literal.
@@ -128,3 +131,7 @@ describe "style/no-trailing-commas leaves regex literals alone", ->
     fixed := res.fixedSource ?? source
     expect(fixed).toContain("{2,}")
     expect(fixed).toContain("  a: 1\n}")
+
+  it "leaves a comma after a rest element", ->
+    // Re-adding a comma after `...rest` would be a syntax error.
+    unchanged("f = (a, ...rest) => a\n")
