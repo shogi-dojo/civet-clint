@@ -100,3 +100,25 @@ describe "style/prefer-implicit-block-call", ->
     once := lint("describe('d', =>\n  it('a', =>\n    f()))\n")
     twice := lint(once.fixedSource!)
     expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)
+
+  it "applies the fix when the closer sits on its own line", ->
+    // Regression: the emitted JS differs only as `}\n)` vs `})`, which the
+    // byte-identical equivalence gate rejected. The rule declares a
+    // "whitespace-style" delta so this layout-only change is accepted.
+    input := "describe 'd', =>\n  it('a', =>\n    expect(1).toBe(1)\n  )\n"
+    res := lint(input)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("describe 'd', =>\n  it 'a', =>\n    expect(1).toBe(1)\n")
+
+  it "leaves no whitespace-only line behind when removing a lone closer", ->
+    input := "describe 'd', =>\n  it('a', =>\n    expect(1).toBe(1)\n  )\n"
+    fixed := lint(input).fixedSource!
+    expect(fixed.split("\n").some (l) -> /^[ \t]+$/.test(l)).toBe(false)
+
+  it "keeps whitespace inside strings intact when normalizing", ->
+    // normalizeWhitespaceStyle must not collapse spaces inside a literal.
+    input := "describe 'd', =>\n  it('a  b', =>\n    expect(f()).toBe('x   y')\n  )\n"
+    res := lint(input)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toContain("'a  b'")
+    expect(res.fixedSource).toContain("'x   y'")

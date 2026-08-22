@@ -123,6 +123,47 @@ describe "CLI Suite", ->
 
     await fs.rm(tmpDir, { recursive: true, force: true })
 
+  it "reports the resolved config paths on stderr with --verbose", async ->
+    // Silent config-discovery failure is the defect this flag exists to expose,
+    // so the banner must name the files that were actually loaded.
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-verbose-"))
+    await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
+      parseOptions: { coffeeIsnt: true, coffeeEq: true }
+    }))
+    configPath := path.join(tmpDir, "civet-clint.config.json")
+    await fs.writeFile(configPath, JSON.stringify({
+      preset: "default"
+      civetConfig: "./civet.json"
+      rules: { "style/no-is-not": "warn" }
+    }))
+    testFile := path.join(tmpDir, "sample.civet")
+    await fs.writeFile(testFile, "a := 1\n")
+
+    originalError := console.error
+    originalLog := console.log
+    errs: string[] := []
+    outs: string[] := []
+    console.error = (...args) -> errs.push(args.join(" "))
+    console.log = (...args) -> outs.push(args.join(" "))
+    var code = 2
+    try
+      code = await runCli(["--check", "--verbose", "--config", configPath, testFile])
+    finally
+      console.error = originalError
+      console.log = originalLog
+
+    expect(code).toBe(0)
+    banner := errs.join("\n")
+    expect(banner).toContain(configPath)
+    expect(banner).toContain(path.join(tmpDir, "civet.json"))
+    expect(banner).toContain("preset       default")
+    expect(banner).toContain("coffeeEq")
+    expect(banner).toContain("files        1")
+    // The banner must not pollute stdout, or --format json stops parsing.
+    expect(outs.join("\n")).not.toContain("clint: config")
+
+    await fs.rm(tmpDir, { recursive: true, force: true })
+
   it "does not report stripped execution-mode options as active", async ->
     // The adapter refuses `sync`/`ast` from project config; printing them as
     // active would misreport what the compiler actually runs with.

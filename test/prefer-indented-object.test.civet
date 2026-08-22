@@ -61,3 +61,47 @@ describe "style/prefer-indented-object exclusions", ->
 
   it "leaves a braced arrow body to the dedicated rule", ->
     unchanged("it 'x', => {\n  f()\n}\n")
+
+  it "leaves a JSX attribute expression container", ->
+    // `editor={` is not a binding: the braces delimit an embedded JSX expression,
+    // and dropping them emits invalid JSX. Regression for 24 false positives across
+    // 11 files in Ranked-Telegram-App (TournamentSettingsEditors.civet had 20).
+    unchanged("<Section\n  editor={\n    <div>\n      <b />\n    </div>\n  }\n/>\n")
+
+  it "still fixes a binding whose value is a multi-line object in a JSX file", ->
+    // The guard keys on whitespace around `=`, so real bindings are untouched.
+    expect(fix("<A />\no = {\n  a: 1\n}\n").fixedSource)
+      .toBe("<A />\no =\n  a: 1\n")
+
+  it "leaves an object built from shorthand properties", ->
+    // De-braced, `a` on its own line is an identifier expression rather than a
+    // property, so the file stops parsing. The braces are load-bearing.
+    unchanged("export i = {\n  a\n  b\n}\n")
+
+  it "leaves an object mixing shorthand and normal properties", ->
+    unchanged("r = {\n  winnerPlayerId\n  yakumanCount: 0\n}\n")
+
+  it "leaves an object holding a spread shorthand", ->
+    unchanged("o := {\n  ...rest\n  a: 1\n}\n")
+
+  it "leaves an object whose first entry is a spread", ->
+    // A leading `...makeGame(1)` fails to parse once de-braced; a spread in any
+    // later position is fine.
+    unchanged("g = {\n  ...makeGame(1),\n  a: 1\n}\n")
+
+  it "leaves an object whose spread is last", ->
+    // This one is the dangerous case: de-braced it still COMPILES, but as a call on
+    // the object literal -- `{ a: 1 }(...rest)`. Silent corruption, not a parse error.
+    unchanged("g = {\n  a: 1\n  ...rest\n}\n")
+
+  it "leaves an object whose shorthand sits mid-line among other entries", ->
+    // De-braced this still COMPILES, as `{ background: bg }(border, {...})` -- the
+    // object literal is CALLED. Silent corruption, so the braces are load-bearing.
+    unchanged("cardStyle = {\n  background: bg, border, boxShadow: shadow\n}\n")
+
+  it "still fixes a multi-entry line with no shorthand", ->
+    expect(fix("o := {\n  a: 1, b: 2\n}\n").fixedSource).toBe("o :=\n  a: 1, b: 2\n")
+
+  it "does not mistake a comma inside a nested value for an entry separator", ->
+    expect(fix("o := {\n  a: f(1, 2), b: [3, 4]\n}\n").fixedSource)
+      .toBe("o :=\n  a: f(1, 2), b: [3, 4]\n")

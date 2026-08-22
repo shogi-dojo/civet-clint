@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-23
+
+### Added
+
+- **`style/prefer-indented-blocks`** -- a new rule for JS-style braced statement
+  blocks (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` /
+  `finally`). Civet delimits these bodies by indentation, so both the braces and
+  the head parens are migration leftovers. The fix declares the `whitespace-style`
+  delta, so the engine verifies that only layout changed.
+
+  Two shapes are reported but deliberately *not* autofixed, because in each the
+  "before" side of the equivalence check is itself the bug:
+
+  - A single-statement body ending in `;`. `if (a) { g(); }` parses as an object
+    with a method definition (`if (a) ({ g() {; } })`) and `g()` never runs.
+  - A block in expression position (the last statement of a function), which
+    already mis-parses into a returned object literal. De-bracing *repairs* it, so
+    the emitted output legitimately changes and the gate correctly rejects the fix.
+
+  Blocks nested inside a braced `=> { … }` arrow body are skipped entirely --
+  de-bracing the inner block while the arrow keeps its braces breaks compilation.
+  Those belong to `style/no-braced-arrow-body` first.
+
+- **`--verbose`** reports the resolved config path, the Civet compiler-options
+  path, the active preset, the compiler options in effect, any overrides matching
+  the first file, and the file count. Written to stderr, so `--format json` stays
+  parseable on stdout.
+
+- **`whitespace-style` output delta.** `style/prefer-implicit-block-call` could
+  never apply its own fix: dropping the parens moves the closer up a line, so Civet
+  emits `})` where it used to emit `}\n)`. The statements are identical, but the
+  equivalence gate compared emitted text byte-for-byte and rejected every fix with
+  `compiler-equivalence-mismatch`. Adds a fifth `OutputDelta` kind alongside
+  quote-, semicolon-, declaration- and trailing-comma-style, with a
+  `normalizeWhitespaceStyle` that collapses insignificant whitespace while copying
+  string and comment contents through untouched. It runs last in
+  `normalizeCombined`, since the earlier normalizers can leave whitespace behind.
+
+### Fixed
+
+- **`style/prefer-indented-object` no longer de-braces objects whose braces are
+  load-bearing.** Three separate false positives, each of which silently changed
+  meaning rather than failing loudly:
+
+  - **JSX attribute containers.** `editor={` matched the binding regex, so the rule
+    proposed de-bracing a JSX attribute value. 24 sites across 11 files -- every one
+    a false positive. Fixed by requiring whitespace after `=`, which distinguishes
+    `x = {` (a binding) from `attr={` (a JSX container).
+  - **Shorthand properties.** De-bracing `{ winnerPlayerId, seat }` leaves
+    `winnerPlayerId` alone on a line as a bare identifier expression, and the file
+    stops compiling.
+  - **Spreads in any position.** The worst of the three: `{ a: 1, ...rest }`
+    de-braces to `{a: 1}(...rest)` -- a *call*, which compiles cleanly and is wrong
+    at runtime. Found only because a test asserted the wrong thing and failed.
+
+  Detection now splits object entries on top-level commas (depth-tracked, so commas
+  inside `()` / `[]` / `{}` don't count), which also catches shorthand appearing
+  mid-line: `background: bg, border, boxShadow: shadow` was de-bracing to
+  `{background: bg}(border, {…})`.
+
 ## [0.4.2] - 2026-08-22
 
 ### Fixed

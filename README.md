@@ -76,6 +76,7 @@ npx clint --print-config src/components/Button.civet
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
 | `--rewrite` | Rename and convert JS/TS files (`.js`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`) to `.civet` after verifying they parse, then run the autofix pipeline in place. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
+| `--verbose` | Print the resolved config path, Civet compiler-options path, active preset, compiler options in effect, matching overrides, and file count to stderr before linting. Leaves `--format json` parseable on stdout. |
 | `-c`, `--config <path>` | Path to a configuration file. Only needed for names outside the auto-discovered list. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |
 | `-v`, `--version` | Print `clint` version and exit. |
@@ -281,8 +282,45 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert `:=` and exported auto-bindings to explicit `const`/`let` declarations. Bare `autoLet` requires scope/hoisting analysis and remains untouched. | `autoLet` |
 | [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove a comma before a closing bracket, brace or paren — object literals, arrays, argument lists, destructuring patterns and import clauses. Never edits regex literals, array elisions, or a comma after a rest element. Verified via `trailing-comma-style` output delta. | — |
 | [`style/prefer-indented-object`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-object.civet) | Drop the braces from a multi-line object literal bound to a declaration, letting indentation delimit it. | — |
+| [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces and head parens from a JS-style statement block (`if` / `for` / `while` / `switch` / `try` / `catch` / `finally`), letting indentation delimit the body. Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
 | [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--rewrite`; not by `--write`. | — |
 | [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--rewrite`; not by `--write`. | — |
+
+#### `style/prefer-indented-blocks` — the two shapes reported without a fix
+
+Both are cases where the *before* side of the equivalence check is itself the bug,
+so autofixing would be verifying a repair against broken output.
+
+A **single-statement body ending in `;`** parses as an object with a method
+definition — `if (a) { g(); }` becomes `if (a) ({ g() {; } })`, and `g()` never
+runs.
+
+A **block in expression position** (the last statement of a function) already
+mis-parses into a returned object literal:
+
+```civet
+afterEach =>
+  if (original) {
+    Object.defineProperty(proto, 'scrollTo', original)
+  } else {
+    delete proto.scrollTo
+  }
+```
+
+```js
+// what Civet actually emits — both branches become returned objects
+if (original) { return ({
+  defineProperty: Object.defineProperty(proto, 'scrollTo', original)
+})} else return ({ scrollTo: delete proto.scrollTo })
+```
+
+De-bracing *repairs* this, so the emitted output legitimately changes and the gate
+correctly rejects the fix. Repair it by hand, adding a trailing `;` where the block
+should return nothing.
+
+Blocks nested inside a braced `=> { … }` arrow body are skipped entirely: de-bracing
+the inner block while the arrow keeps its braces breaks compilation. Run
+`style/no-braced-arrow-body` first, and this rule sees them on a later pass.
 
 #### `style/prefer-jsx-attr-shorthand` — why only one of the two forms is fixed
 

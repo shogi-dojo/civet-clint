@@ -1,0 +1,63 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
+
+RULE := "style/prefer-indented-blocks"
+DIAL := { autoLet: true, react: true, coffeeComment: true, coffeeEq: true, coffeeNot: true, coffeeIsnt: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+  expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-indented-blocks", ->
+  it "de-braces an if block and drops the head parens", ->
+    expect(fix("f = =>\n  if (a) {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a for-of loop", ->
+    expect(fix("f = =>\n  for (const x of xs) {\n    g(x)\n    k(x)\n  }\n").fixedSource)
+      .toBe("f = =>\n  for x of xs\n    g(x)\n    k(x)\n")
+
+  it "keeps `let` on a C-style for head", ->
+    expect(fix("f = =>\n  for (let i = 0; i < n; i++) {\n    g(i)\n    k(i)\n  }\n").fixedSource)
+      .toBe("f = =>\n  for let i = 0; i < n; i++\n    g(i)\n    k(i)\n")
+
+  it "de-braces a while loop", ->
+    expect(fix("f = =>\n  while (a) {\n    g()\n    k()\n  }\n").fixedSource)
+      .toBe("f = =>\n  while a\n    g()\n    k()\n")
+
+  it "reports every braced block it finds", ->
+    result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
+    expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
+
+describe "style/prefer-indented-blocks exclusions", ->
+  it "leaves an arrow body to style/no-braced-arrow-body", ->
+    // De-bracing `=> { … }` is a semantic repair, not a layout change.
+    unchanged("f = => {\n  g()\n  k()\n}\n")
+
+  it "leaves an object literal alone", ->
+    unchanged("o := {\n  a: 1\n  b: 2\n}\n")
+
+  it "does not autofix a single-statement body ending in ';'", ->
+    // `if (a) { g(); }` compiles to `if (a) ({ g() {; } })` -- an object with a
+    // method definition, so g() never runs. The source is already broken; the
+    // rule reports it but must not autofix against broken "before" output.
+    result := fix "f = =>\n  if (a) {\n    g();\n  }\n  h()\n"
+    diags := result.diagnostics.filter((d) -> d.ruleId is RULE)
+    expect(diags.length).toBeGreaterThan(0)
+    expect(result.fixedSource).toBeUndefined()
+
+  it "reports but does not autofix a block in expression position", ->
+    // A braced block that is the LAST statement of a function already mis-parses
+    // into an object (`if (a) return ({ g: g(), k: k() })`). De-bracing repairs
+    // that, so emitted output legitimately changes and the equivalence gate
+    // rejects the fix -- reported for a hand repair, never silently rewritten.
+    result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
+    expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
+    expect(result.fixedSource).toBeUndefined()
+
+  it "leaves an empty block", ->
+    unchanged("f = =>\n  if (a) {\n  }\n")

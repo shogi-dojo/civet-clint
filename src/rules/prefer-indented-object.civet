@@ -60,7 +60,12 @@ export const preferIndentedObjectRule: Rule = {
       continue if /\[\s*\{$/.test(trimmedEnd)
       continue if /=>\s*\(\s*\{$/.test(trimmedEnd)
       continue if /\(\s*\{$/.test(trimmedEnd)
-      continue unless /(?::=|(?<![=!<>])=)\s*\{$/.test(trimmedEnd)
+      // A JSX attribute container (`editor={`) is not an object literal: the braces
+      // delimit an embedded expression, and dropping them emits invalid JSX. It is
+      // told apart from a binding by the absence of whitespace around `=` — Civet
+      // requires `x = {` / `x := {`, while JSX forbids spaces in `name={`.
+      continue if /(?:^|[\s(])[A-Za-z_$][\w$.-]*=\{$/.test(trimmedEnd)
+      continue unless /(?::=\s*|(?<![=!<>])=\s+)\{$/.test(trimmedEnd)
 
       openIdx := lineStarts[i] + trimmedEnd.length - 1
       continue if intersectsRange(ignoredRanges, openIdx, openIdx + 1)
@@ -89,6 +94,45 @@ export const preferIndentedObjectRule: Rule = {
           break
         bodyOk = true
       continue unless bodyOk
+
+      // Two body shapes keep their braces because de-bracing stops the file parsing:
+      //   * a shorthand property — `winnerPlayerId` alone on a line is an identifier
+      //     expression, not a property;
+      //   * a spread in ANY position — leading `...makeGame(1)` fails to parse, and a
+      //     trailing `...rest` is worse: `{ a: 1 }` + `(...rest)` still compiles, but
+      //     as a CALL on the object literal. Silent corruption, so never touch these.
+      // A shorthand can also sit mid-line among comma-separated entries
+      // (`background: bg, border, boxShadow: shadow`), so each line is split on its
+      // TOP-LEVEL commas — commas nested inside (), [] or {} belong to a value.
+      splitTopLevelEntries := (text: string): string[] ->
+        parts: string[] := []
+        var depth = 0
+        var start = 0
+        for let k = 0; k < text.length; k++
+          ch := text[k]
+          if ch is "(" or ch is "[" or ch is "{"
+            depth++
+          else if ch is ")" or ch is "]" or ch is "}"
+            depth--
+          else if ch is "," and depth is 0
+            parts.push(text.slice(start, k))
+            start = k + 1
+        parts.push(text.slice(start))
+        parts.map((x) -> x.trim()).filter((x) -> x.length > 0)
+
+      var loadBearing = false
+      for let j = i + 1; j < closeLine; j++
+        inner := lines[j].trim()
+        continue if inner.length is 0
+        continue if inner.startsWith("//") or inner.startsWith("#")
+        // Only direct children can be shorthand; deeper lines belong to a nested value.
+        continue if indentOf(lines[j]) > openIndent + 2
+        for entry of splitTopLevelEntries(inner)
+          if entry.startsWith("...") or /^[A-Za-z_$][\w$]*$/.test(entry)
+            loadBearing = true
+            break
+        break if loadBearing
+      continue if loadBearing
 
       closeTrimmed := lines[closeLine].trim()
       closeStart := lineStarts[closeLine] + indentOf(lines[closeLine])
