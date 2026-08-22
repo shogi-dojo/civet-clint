@@ -40,11 +40,11 @@ describe "style/prefer-implicit-block-call", ->
     expect(res.fixedSource).toBe("describe 'o', =>\n  describe 'i', =>\n    it 'a', =>\n      f()\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
-  it "handles hooks with no leading argument", ->
-    input := "beforeEach(=>\n  reset())\n"
-    res := lint(input)
-    expect(res.fixedSource).toBe("beforeEach =>\n  reset()\n")
-    expect(res.isEquivalencePreserved).toBe(true)
+  it "leaves a hook whose only argument is the arrow alone", ->
+    // `beforeEach => …` would read as a single-parameter arrow named `beforeEach`,
+    // which style/no-single-param-arrow-without-parens flags at error. The emitted
+    // JS is identical either way, but the source is ambiguous, so keep the parens.
+    expect(findings("beforeEach(=>\n  reset())\n")).toHaveLength(0)
 
   it "handles the it.each member form", ->
     input := "it.each([1])('b', =>\n  g())\n"
@@ -76,6 +76,16 @@ describe "style/prefer-implicit-block-call", ->
 
   it "does not fire when the call is not a statement", ->
     expect(findings("x := it('a', =>\n  f())\n")).toHaveLength(0)
+
+  it "does not re-report an already paren-free block", ->
+    // Civet synthesizes `(`/`)` tokens for a paren-free call, pointing at whatever
+    // character sits at that offset. Without a source check the rule reports fixes
+    // on text it already converted, and the fix corrupts the line.
+    expect(findings("describe 'x', =>\n  it 'a', =>\n    f(1)\n")).toHaveLength(0)
+
+  it "does not re-report a converted block containing non-ASCII text", ->
+    input := "describe 'x', =>\n  it 'a', =>\n    expect(f(e)).toBe('Сталася помилка.')\n"
+    expect(findings(input)).toHaveLength(0)
 
   it "is idempotent", ->
     once := lint("describe('d', =>\n  it('a', =>\n    f()))\n")
