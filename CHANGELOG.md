@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-23
+
+### Added
+
+- `-j, --concurrency <n>` runs the lint across a `worker_threads` pool, enabled by
+  default at the machine's CPU count. `--concurrency 1` restores the previous
+  fully sequential behavior in the main process.
+- `scripts/bench.mjs` reports the parse+emit floor, total rule work, and per-rule
+  cost for a corpus (`--target`, `--config`, `--runs`, `--json`), so a new rule's
+  cost is measurable before release.
+
+### Changed
+
+- Files are linted in parallel by default. Report order is unchanged: results are
+  collected by index, so `--format json` output is byte-identical to a sequential
+  run at any worker count. Runs of fewer than 8 files stay on the main thread.
+- A full check of a 441-file / 54k-line codebase went from **76s to ~15s**.
+  Contributing changes, each verified byte-identical over that corpus:
+  - `style/no-is-not` no longer walks the whole subtree of every node. It called
+    `range()` per node, whose fallback walks a node's entire subtree, making the
+    rule quadratic; it now uses the new `SyntaxTree.tokenRange()`, which resolves
+    only real source tokens.
+  - `SyntaxTree` memoizes `commentRanges()`, `stringRanges()`, and `tokens()`.
+    These re-walked the AST on every call and ~20 rules call them per file. Over
+    a 120-file corpus this cut `walkAst` calls from 450,695 to 9,191.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
