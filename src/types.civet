@@ -31,6 +31,12 @@ export interface RuleContext
   filename?: string
   options: RuleOptions
   parseOptions: CompileDial
+  // The engine's own baseline compile of `source`, under the same dial and
+  // compile options it uses everywhere else. Rules that need to compare a
+  // candidate against unmodified output should use this rather than recompiling:
+  // it is the identical value, already paid for. Absent only if a caller built a
+  // context without one.
+  baselineOutput?: string
   report: (diag: {
     ruleId: string
     severity?: Severity

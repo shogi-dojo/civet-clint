@@ -25,7 +25,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
 - 🧭 **Dial-Aware Capability Checks**: Rules declare the compiler options they require (e.g., `autoLet`, `react`, `coffeeRange`). Incompatible rules are skipped rather than emitting invalid autofixes.
-- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
+- 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, parallel linting via `--concurrency`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
 ---
 
@@ -76,6 +76,7 @@ npx clint --print-config src/components/Button.civet
 | `-w`, `--write`, `--fix` | Apply autofixes to source files in place after verifying compiler equivalence. |
 | `--rewrite` | Rename and convert JS/TS files (`.js`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`) to `.civet` after verifying they parse, then run the autofix pipeline in place. |
 | `--print-config [file]` | Print the resolved preset, compiler options, rules, and skipped/incompatible rules as JSON, then exit. If a target file is passed, resolves matching per-file overrides. |
+| `-j, --concurrency <n>` | Number of worker threads used to lint files in parallel. Defaults to the CPU count; `1` lints sequentially in the main process. Results are always reported in sorted file order regardless of this value. |
 | `--verbose` | Print the resolved config path, Civet compiler-options path, active preset, compiler options in effect, matching overrides, and file count to stderr before linting. Leaves `--format json` parseable on stdout. |
 | `-c`, `--config <path>` | Path to a configuration file. Only needed for names outside the auto-discovered list. |
 | `-f`, `--format <text\|json>` | Output format: human-readable `text` (default) or `json`. |

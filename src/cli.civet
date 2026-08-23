@@ -1,5 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import os from "node:os"
+import { Worker } from "node:worker_threads"
+import { fileURLToPath } from "node:url"
 import { loadConfig, resolveConfigForFile, resolveRuleOptions } from "./config.civet"
 import { pipelineOptions, controlledOptionKeys } from "./compiler.civet"
 import { lintFile, rewriteFile } from "./engine.civet"
@@ -83,10 +86,23 @@ export interface CliOptions
   format?: "text" | "json"
   printConfig?: boolean
   verbose?: boolean
+  concurrency?: number
   help?: boolean
   version?: boolean
   targets: string[]
   errors: string[]
+
+// Shared by `--concurrency N` and `--concurrency=N`. Returns undefined (leaving
+// the default in place) whenever the value is unusable, after recording why.
+function parseConcurrency(raw: string | undefined, flag: string, errors: string[]): number | undefined
+  unless raw?
+    errors.push(`${flag} requires a positive integer`)
+    return undefined
+  parsed := Number(raw)
+  unless Number.isInteger(parsed) and parsed > 0
+    errors.push(`${flag} requires a positive integer, got: ${raw}`)
+    return undefined
+  parsed
 
 export function parseCliArgs(args: string[]): CliOptions
   options: CliOptions := {
@@ -122,6 +138,11 @@ export function parseCliArgs(args: string[]): CliOptions
         options.errors.push(`${arg} requires a path`)
     else if arg.startsWith("--config=")
       options.config = arg.slice("--config=".length)
+    else if arg is "--concurrency" or arg is "-j"
+      i++
+      options.concurrency = parseConcurrency(args[i], arg, options.errors)
+    else if arg.startsWith("--concurrency=")
+      options.concurrency = parseConcurrency(arg.slice("--concurrency=".length), "--concurrency", options.errors)
     else if arg is "--format" or arg is "-f"
       i++
       formatVal := args[i]
@@ -198,6 +219,129 @@ export function formatTextReport(
   exitCode := hasFatalError ? 2 : totalErrors > 0 ? 1 : 0
   { output: lines.join("\n").trim(), exitCode }
 
+// Files are independent, and most of a run is Civet compiler time, so the work
+// parallelizes almost perfectly. Below this many files the worker startup cost
+// dominates -- a handful of files is faster on the main thread.
+const MIN_FILES_FOR_WORKERS = 8
+
+function resolveWorkerCount(requested: number | undefined, fileCount: number): number
+  if requested?
+    // An explicit --concurrency 1 is the documented escape hatch and must spawn
+    // no workers at all.
+    return Math.max(1, Math.min(requested, fileCount))
+  return 1 if fileCount < MIN_FILES_FOR_WORKERS
+  available := os.availableParallelism?() ?? os.cpus().length ?? 1
+  Math.max(1, Math.min(available, fileCount))
+
+function lintOneFile(
+  file: string,
+  config: ResolvedConfig,
+  isRewriteMode: boolean,
+  isWriteMode: boolean
+): Promise<LintResult>
+  try
+    if isRewriteMode
+      await rewriteFile(file, { config })
+    else
+      await lintFile(file, { config, fix: isWriteMode })
+  catch err: any
+    {
+      filePath: file
+      source: ""
+      diagnostics: [{
+        ruleId: "io-error"
+        severity: "error"
+        message: `Failed to process file: ${err.message or err}`
+        line: 1
+        column: 1
+      }]
+      appliedFixesCount: 0
+      isEquivalencePreserved: false
+      errorCount: 1
+      warningCount: 0
+      fixableCount: 0
+    }
+
+interface WorkerPoolOptions
+  configPath: string | undefined
+  cwd: string
+  mode: "lint" | "rewrite"
+  fix: boolean
+  workerCount: number
+
+// Bounded pool: every worker is kept fed from a shared cursor until the queue
+// drains, so a slow file cannot leave other workers idle.
+function runInWorkers(
+  files: string[],
+  results: LintResult[],
+  opts: WorkerPoolOptions
+): Promise<void>
+  // Always the built worker: a worker_threads Worker gets no loader hooks, so it
+  // cannot execute .civet. When this module is itself running from src/ (tests,
+  // or importing the Civet sources directly) the sibling dist/ build is used.
+  here := path.dirname(fileURLToPath(import.meta.url))
+  workerPath := here.endsWith(`${path.sep}src`)
+    ? path.join(here, "..", "dist", "worker.js")
+    : path.join(here, "worker.js")
+
+  new Promise<void>((resolve, reject) ->
+    var next = 0
+    var settled = 0
+    var done = false
+    workers: Worker[] := []
+    // terminate() resolves the worker with a non-zero exit code, which is
+    // indistinguishable from a crash in the 'exit' handler. Track the workers we
+    // retire on purpose so a drained queue is never reported as a failure.
+    retired := new Set<Worker>()
+
+    retire := (w: Worker) ->
+      retired.add(w)
+      void w.terminate()
+
+    finish := (err?: any) ->
+      return if done
+      done = true
+      for w of workers
+        retire(w)
+      err ? reject(err) : resolve()
+
+    for i of [0...opts.workerCount]
+      worker := new Worker(workerPath, {
+        workerData: {
+          configPath: opts.configPath
+          cwd: opts.cwd
+          mode: opts.mode
+          fix: opts.fix
+        }
+      })
+      workers.push(worker)
+
+      dispatch := ->
+        if next >= files.length
+          retire(worker)
+          return
+        index := next++
+        worker.postMessage({ index, filePath: files[index]! })
+
+      worker.on "message", (msg: { index: number, result: LintResult }) ->
+        results[msg.index] = msg.result
+        settled++
+        if settled is files.length
+          finish()
+        else
+          dispatch()
+
+      // A worker that dies mid-file leaves a hole in `results`; fail loudly
+      // rather than emit a report with a missing entry.
+      worker.on "error", (err) -> finish(err)
+      worker.on "exit", (code) ->
+        return if retired.has(worker) or done
+        if code isnt 0
+          finish(new Error(`Worker stopped unexpectedly with exit code ${code}`))
+
+      dispatch()
+  )
+
 export async function runCli(argv: string[] = process.argv.slice(2)): Promise<number>
   options := parseCliArgs(argv)
 
@@ -221,6 +365,8 @@ Options:
                        skipped/incompatible rules, then exit
   --verbose            Print the resolved config and Civet compiler options to
                        stderr before linting
+  -j, --concurrency <n> Number of worker threads (default: CPU count).
+                       Use 1 to lint sequentially in the main process.
   -c, --config <path>  Path to civet-clint configuration file
   -f, --format <type>  Output format: text (default) | json
   -v, --version        Print version and exit
@@ -317,41 +463,30 @@ Options:
       console.error(`clint: overrides    ${sample.matchingOverrides.join(", ")} (matching ${path.relative(process.cwd(), files[0]!)})`)
     console.error(`clint: files        ${files.length}`)
 
-  results: LintResult[] := []
-  var totalRewritten = 0
+  // Results are written by index, never appended, so report order always follows
+  // the sorted file list regardless of which worker finishes first. `--format
+  // json` output is diffed in CI, so this determinism is a correctness property.
+  results: LintResult[] := new Array(files.length)
 
-  for file of files
-    try
-      if isRewriteMode
-        res := await rewriteFile(file, { config })
-        results.push(res)
-        hasFatal := res.diagnostics.some (d) ->
-          d.ruleId is "syntax-error" or d.ruleId is "io-error" or d.ruleId is "compile-error"
-        if not hasFatal
-          totalRewritten++
-      else
-        res := await lintFile(file, {
-          config
-          fix: isWriteMode
-        })
-        results.push(res)
-    catch err: any
-      results.push({
-        filePath: file
-        source: ""
-        diagnostics: [{
-          ruleId: "io-error"
-          severity: "error"
-          message: `Failed to process file: ${err.message or err}`
-          line: 1
-          column: 1
-        }]
-        appliedFixesCount: 0
-        isEquivalencePreserved: false
-        errorCount: 1
-        warningCount: 0
-        fixableCount: 0
-      })
+  workerCount := resolveWorkerCount(options.concurrency, files.length)
+  if workerCount > 1
+    await runInWorkers(files, results, {
+      configPath: options.config
+      cwd: process.cwd()
+      mode: isRewriteMode ? "rewrite" : "lint"
+      fix: isWriteMode
+      workerCount
+    })
+  else
+    for each file, index of files
+      results[index] = await lintOneFile(file, config, isRewriteMode, isWriteMode)
+
+  var totalRewritten = 0
+  if isRewriteMode
+    for res of results
+      hasFatal := res.diagnostics.some (d) ->
+        d.ruleId is "syntax-error" or d.ruleId is "io-error" or d.ruleId is "compile-error"
+      totalRewritten++ unless hasFatal
 
   if options.format is "json"
     var totalErrors = 0

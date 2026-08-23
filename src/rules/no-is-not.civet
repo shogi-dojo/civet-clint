@@ -16,8 +16,12 @@ export const noIsNotRule: Rule = {
     tree := ctx.syntax
     reportedStarts := new Set<number>()
 
+    // Only source tokens can match: the rule compares a node's own source slice
+    // against "is not"/"is". Asking for every node's range instead made this
+    // quadratic -- range()'s fallback walks the whole subtree for each of the
+    // interior nodes that can never match anyway.
     tree.visit (node) ->
-      span := tree.range(node)
+      span := tree.tokenRange(node)
       if span
         pos := span.start
         len := span.end - span.start

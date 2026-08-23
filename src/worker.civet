@@ -1,0 +1,59 @@
+import { parentPort, workerData } from "node:worker_threads"
+import { lintFile, rewriteFile } from "./engine.civet"
+import { loadConfig } from "./config.civet"
+import { defaultRuleRegistry } from "./registry.civet"
+import type { LintResult } from "./types.civet"
+
+// One worker handles many files. The config is loaded once here rather than
+// posted from the parent: ResolvedConfig carries registry references that do not
+// survive structured cloning, and re-loading from the same path is both cheaper
+// than cloning per file and guaranteed to match what the parent resolved.
+interface WorkerInit
+  configPath: string | undefined
+  cwd: string
+  mode: "lint" | "rewrite"
+  fix: boolean
+
+interface WorkerRequest
+  index: number
+  filePath: string
+
+init := workerData as WorkerInit
+config := loadConfig(init.configPath, init.cwd, defaultRuleRegistry)
+
+// `source`/`fixedSource` are dropped before posting: LintResult carries the full
+// file text on both fields, the CLI reporter reads neither, and --write has
+// already been applied to disk inside lintFile. Sending them would copy the
+// whole corpus across the thread boundary for nothing.
+stripSource := (res: LintResult) ->
+  { ...res, source: "", fixedSource: undefined }
+
+parentPort!.on "message", (req: WorkerRequest) ->
+  try
+    res := if init.mode is "rewrite"
+      await rewriteFile(req.filePath, { config })
+    else
+      await lintFile(req.filePath, { config, fix: init.fix })
+    parentPort!.postMessage({ index: req.index, result: stripSource(res) })
+  catch err: any
+    // Mirror the sequential path's behavior: a failure is reported as a
+    // diagnostic against that file, never an aborted run.
+    parentPort!.postMessage({
+      index: req.index
+      result: {
+        filePath: req.filePath
+        source: ""
+        diagnostics: [{
+          ruleId: "io-error"
+          severity: "error"
+          message: `Failed to process file: ${err?.message or err}`
+          line: 1
+          column: 1
+        }]
+        appliedFixesCount: 0
+        isEquivalencePreserved: false
+        errorCount: 1
+        warningCount: 0
+        fixableCount: 0
+      }
+    })
