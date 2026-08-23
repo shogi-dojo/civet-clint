@@ -35,7 +35,7 @@ export const preferBareConditionsRule: Rule = {
       kwTok := tokens.find (t) ->
         r := t.raw.trim()
         v := t.value.trim()
-        (r is "if" or r is "unless" or r is "while" or r is "switch" or v is "if" or v is "while" or v is "switch") and not t.synthetic
+        (r is "if" or r is "unless" or r is "while" or r is "switch" or v is "if" or v is "while" or v is "switch") and t.range.end > t.range.start
       return unless kwTok?
 
       openParen := tokens.find (t) ->

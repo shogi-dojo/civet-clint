@@ -1,0 +1,48 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-property-shorthand"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectPropertyEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-property-shorthand", ->
+  it "rewrites '{ b: a.b }' to '{ a.b }'", ->
+    expect(expectPropertyEquivalent("const obj = { b: a.b }\n")).toBe("const obj = { a.b }\n")
+
+  it "rewrites deep member access '{ c: a.b.c }' to '{ a.b.c }'", ->
+    expect(expectPropertyEquivalent("const obj = { c: a.b.c }\n")).toBe("const obj = { a.b.c }\n")
+
+  it "rewrites this access '{ foo: this.foo }' to '{ this.foo }'", ->
+    expect(expectPropertyEquivalent("const obj = { foo: this.foo }\n")).toBe("const obj = { this.foo }\n")
+
+  it "is idempotent", ->
+    once := fix("const obj = { b: a.b }\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-property-shorthand guards", ->
+  it "bails on plain identifier form '{ a: a }' because Civet emits '{ a }' vs '{ a: a }'", ->
+    unchanged("const obj = { a: a }\n")
+
+  it "bails when key does not match final member property '{ b: a.other }'", ->
+    unchanged("const obj = { b: a.other }\n")
+
+  it "leaves comments alone", ->
+    unchanged("// { b: a.b } in comment\n")
+
+  it "leaves strings alone", ->
+    unchanged("s := \"{ b: a.b } in string\"\n")

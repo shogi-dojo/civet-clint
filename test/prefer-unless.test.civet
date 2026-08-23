@@ -1,0 +1,85 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-unless"
+DIAL := { react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectUnlessEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-unless", ->
+  it "rewrites 'if not a' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if not a\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites 'if (!a)' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if (!a)\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites 'if !a' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if !a\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites member access in condition", ->
+    expect(expectUnlessEquivalent("if not a.b.c\n  b()\n")).toBe("unless a.b.c\n  b()\n")
+
+  it "rewrites function call in condition", ->
+    expect(expectUnlessEquivalent("if not fn(1, 2)\n  b()\n")).toBe("unless fn(1, 2)\n  b()\n")
+
+  it "rewrites parenthesized binary expression in condition", ->
+    expect(expectUnlessEquivalent("if not (a + b)\n  b()\n")).toBe("unless (a + b)\n  b()\n")
+
+  it "rewrites 'if !(a + b)' in condition", ->
+    expect(expectUnlessEquivalent("if !(a + b)\n  b()\n")).toBe("unless (a + b)\n  b()\n")
+
+  it "rewrites postfix 'g() if not a' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if not a\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix 'g() if (!a)' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if (!a)\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix 'g() if !a' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if !a\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix member access 'g() if not a.b'", ->
+    expect(expectUnlessEquivalent("g() if not a.b\n")).toBe("g() unless a.b\n")
+
+  it "is idempotent", ->
+    once := fix("if not a\n  b()\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-unless guards (negative cases)", ->
+  it "bails on 'if not a and b' because precedence changes emit", ->
+    // `if not a and b` is `(!a) && b`, whereas `unless a and b` is `!(a && b)`.
+    unchanged("if not a and b\n  c()\n")
+
+  it "bails on 'if not a or b' because precedence changes emit", ->
+    // `if not a or b` is `(!a) || b`, whereas `unless a or b` is `!(a || b)`.
+    unchanged("if not a or b\n  c()\n")
+
+  it "bails on 'if not a is b' because precedence changes emit", ->
+    // `if not a is b` is `(!a) === b`, whereas `unless a is b` is `!(a === b)`.
+    unchanged("if not a is b\n  c()\n")
+
+  it "bails on 'if not a == b' because precedence changes emit", ->
+    unchanged("if not a == b\n  c()\n")
+
+  it "bails on 'if not a?' because existential negation changes emit", ->
+    // `if not a?` compiles to `a == null`, whereas `unless a?` compiles to `!(a != null)`.
+    unchanged("if not a?\n  b()\n")
+
+  it "leaves positive 'if a' unchanged", ->
+    unchanged("if a\n  b()\n")
+
+  it "leaves already-idiomatic 'unless a' unchanged", ->
+    unchanged("unless a\n  b()\n")

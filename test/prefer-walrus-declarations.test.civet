@@ -16,14 +16,24 @@ findings := (input: string) ->
     d.ruleId is "style/prefer-walrus-declarations"
 
 describe "style/prefer-walrus-declarations", ->
-  it "rewrites a bare identifier declaration to ':='", ->
+  it "rewrites a bare const declaration to ':='", ->
     res := lint("const row = 1\n")
     expect(res.fixedSource).toBe("row := 1\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
-  it "rewrites a destructuring declaration", ->
+  it "rewrites a bare let declaration to '.='", ->
+    res := lint("let row = 1\n")
+    expect(res.fixedSource).toBe("row .= 1\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rewrites a const destructuring declaration", ->
     res := lint("const { setRule } = make()\n")
     expect(res.fixedSource).toBe("{ setRule } := make()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rewrites a let destructuring declaration", ->
+    res := lint("let { setRule } = make()\n")
+    expect(res.fixedSource).toBe("{ setRule } .= make()\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
   it "rewrites an array destructuring declaration", ->
@@ -31,25 +41,37 @@ describe "style/prefer-walrus-declarations", ->
     expect(res.fixedSource).toBe("[a, b] := pair()\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
-  it "preserves the export keyword", ->
-    res := lint("export const CATALOG = { rules: [] }\n")
-    expect(res.fixedSource).toBe("export CATALOG := { rules: [] }\n")
+  it "rewrites a let array destructuring declaration", ->
+    res := lint("let [a, b] = pair()\n")
+    expect(res.fixedSource).toBe("[a, b] .= pair()\n")
     expect(res.isEquivalencePreserved).toBe(true)
+
+  it "preserves the export keyword for const and let", ->
+    res1 := lint("export const CATALOG = { rules: [] }\n")
+    expect(res1.fixedSource).toBe("export CATALOG := { rules: [] }\n")
+    expect(res1.isEquivalencePreserved).toBe(true)
+
+    res2 := lint("export let counter = 0\n")
+    expect(res2.fixedSource).toBe("export counter .= 0\n")
+    expect(res2.isEquivalencePreserved).toBe(true)
 
   it "rewrites CONST_CASE names the same way", ->
     res := lint("const CORE_SECTION = { a: 1 }\n")
     expect(res.fixedSource).toBe("CORE_SECTION := { a: 1 }\n")
 
   it "emits byte-identical compiler output, so no OutputDelta is needed", ->
-    input := "const a = 1\nconst { b } = o\nexport const C = 2\n"
+    input := "const a = 1\nlet b = 2\nconst { c } = o\nexport let d = 3\n"
     res := lint(input)
     before := compileForOutput(input, { dial: DIAL })
     after := compileForOutput(res.fixedSource!, { dial: DIAL })
     expect(before.output).toBe(after.output)
     expect(res.isEquivalencePreserved).toBe(true)
 
-  it "leaves let and var untouched", ->
-    expect(findings("let a = 1\nvar b = 2\n")).toHaveLength(0)
+  it "leaves uninitialized let alone", ->
+    expect(findings("let a\n")).toHaveLength(0)
+
+  it "leaves var untouched", ->
+    expect(findings("var b = 2\n")).toHaveLength(0)
 
   it "does not fire inside a comment", ->
     expect(findings("# const a = 1\n")).toHaveLength(0)
@@ -61,6 +83,6 @@ describe "style/prefer-walrus-declarations", ->
     expect(findings("if const_a == 1\n  x := 1\n")).toHaveLength(0)
 
   it "is idempotent", ->
-    once := lint("const a = 1\n")
+    once := lint("const a = 1\nlet b = 2\n")
     twice := lint(once.fixedSource!)
     expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)

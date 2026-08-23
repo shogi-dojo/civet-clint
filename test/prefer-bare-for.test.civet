@@ -1,0 +1,54 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-bare-for"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectForEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-bare-for", ->
+  it "rewrites 'for const x of xs' to 'for x of xs'", ->
+    expect(expectForEquivalent("for const x of xs\n  log(x)\n")).toBe("for x of xs\n  log(x)\n")
+
+  it "rewrites 'for (const x of xs)' to 'for x of xs'", ->
+    expect(expectForEquivalent("for (const x of xs)\n  log(x)\n")).toBe("for x of xs\n  log(x)\n")
+
+  it "rewrites 'for await const x of xs' to 'for await x of xs'", ->
+    expect(expectForEquivalent("for await const x of xs\n  log(x)\n")).toBe("for await x of xs\n  log(x)\n")
+
+  it "rewrites 'for await (const x of xs)' to 'for await x of xs'", ->
+    expect(expectForEquivalent("for await (const x of xs)\n  log(x)\n")).toBe("for await x of xs\n  log(x)\n")
+
+  it "rewrites destructuring pattern 'for const { a, b } of xs'", ->
+    expect(expectForEquivalent("for const { a, b } of xs\n  log(a)\n")).toBe("for { a, b } of xs\n  log(a)\n")
+
+  it "rewrites array destructuring pattern 'for (const [a, b] of xs)'", ->
+    expect(expectForEquivalent("for (const [a, b] of xs)\n  log(a)\n")).toBe("for [a, b] of xs\n  log(a)\n")
+
+  it "is idempotent", ->
+    once := fix("for const x of xs\n  log(x)\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-bare-for guards", ->
+  it "bails on 'for let x of xs' because emit differs (let vs const)", ->
+    unchanged("for let x of xs\n  log(x)\n")
+
+  it "leaves C-style for loop alone", ->
+    unchanged("for (let i = 0; i < n; i++)\n  log(i)\n")
+
+  it "leaves already-bare 'for x of xs' alone", ->
+    unchanged("for x of xs\n  log(x)\n")

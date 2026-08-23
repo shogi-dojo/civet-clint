@@ -49,7 +49,7 @@ export const preferTypeofShorthandRule: Rule = {
       start := leftSpan.start
       end := rightSpan.end
       return if seen.has(start)
-      return if intersectsRange(ignoredRanges, start, end)
+      return if intersectsRange(ignoredRanges, start, leftSpan.end)
       seen.add(start)
 
       replacement := `${operandText} <? ${rightText}`

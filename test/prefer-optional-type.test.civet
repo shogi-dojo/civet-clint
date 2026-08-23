@@ -1,0 +1,39 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+
+RULE := "style/prefer-optional-type"
+DIAL := { react: true }
+
+function lint(source: string)
+  lintSource(source, { rules: { [RULE]: "warn" }, fix: false, civetOptions: DIAL })
+
+findings := (source: string) ->
+  lint(source).diagnostics.filter (d) -> d.ruleId is RULE
+
+describe "style/prefer-optional-type", ->
+  it "reports 'T | undefined' with suggestion 'T?'", ->
+    diags := findings("type Foo = string | undefined\n")
+    expect(diags).toHaveLength(1)
+    expect(diags[0].message).toContain("string?")
+    expect(diags[0].message).toContain("autofix disabled")
+
+  it "reports 'undefined | T' with suggestion 'T?'", ->
+    diags := findings("type Bar = undefined | number\n")
+    expect(diags).toHaveLength(1)
+    expect(diags[0].message).toContain("number?")
+    expect(diags[0].message).toContain("autofix disabled")
+
+  it "reports in function parameter types", ->
+    diags := findings("function f(x: number | undefined): void {}\n")
+    expect(diags).toHaveLength(1)
+    expect(diags[0].message).toContain("number?")
+
+describe "style/prefer-optional-type guards", ->
+  it "leaves comments alone", ->
+    expect(findings("// type Foo = string | undefined\n")).toHaveLength(0)
+
+  it "leaves strings alone", ->
+    expect(findings("s := \"string | undefined\"\n")).toHaveLength(0)
+
+  it "leaves other unions alone", ->
+    expect(findings("type Baz = string | number\n")).toHaveLength(0)

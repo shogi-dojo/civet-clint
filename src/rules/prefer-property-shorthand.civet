@@ -27,11 +27,12 @@ export const preferPropertyShorthandRule: Rule = {
       return unless last? and last.type is "PropertyAccess"
       return unless last.name is keyName
 
-      span := tree.range(node)
-      return unless span?
+      nameSpan := tree.range(node.name)
+      valSpan := tree.range(val)
+      return unless nameSpan? and valSpan?
 
-      pos := span.start
-      end := span.end
+      pos := nameSpan.start
+      end := valSpan.end
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, end)
       seen.add(pos)

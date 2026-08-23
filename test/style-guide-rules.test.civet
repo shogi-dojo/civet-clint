@@ -230,6 +230,36 @@ describe "Style Guide Rules Coverage", ->
       expect(diags.length).toBe(1)
       expect(diags[0].message).toContain("not x?")
 
+    it "autofixes null and undefined equality/inequality checks", ->
+      source := "if x != null\n  b()\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("if x?\n  b()\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "flags reversed null checks (null !== foo)", ->
+      source := "valid := null !== foo\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("foo?")
+
+    it "flags non-identifier operands (a.b.c != null)", ->
+      source := "valid := a.b.c != null\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("a.b.c?")
+
   describe "style/prefer-jsx-attr-shorthand", ->
     it "flags onClick={onClick} and disabled={true}", ->
       source := "<button onClick={onClick} disabled={true}>Click</button>\n"
