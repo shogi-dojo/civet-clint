@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `style/no-trailing-semicolons` reuses the engine's baseline compile instead of
+  recompiling the unmodified source. `RuleContext` gained `baselineOutput` for
+  this; rules comparing a candidate against untouched output should use it rather
+  than calling the compiler again. Compiles inside the rule dropped from 46 to 13
+  over an 80-file sample (6744ms to 1298ms), taking it from ~16.5% of a run to
+  ~13%. Safety decisions are unchanged -- semicolons that suppress an implicit
+  return are still preserved.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added

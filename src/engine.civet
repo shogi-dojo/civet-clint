@@ -313,6 +313,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     syntax
     filename
     parseOptions: civetOptions
+    baselineOutput: originalCompiled
     options: {}
     getLineColumn
     declareEquivalenceReference: (delta, build) ->

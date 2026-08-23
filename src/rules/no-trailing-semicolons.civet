@@ -105,13 +105,24 @@ function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number
 // only a group that fails is split. Files where every semicolon is removable — the
 // common case — cost two compiles regardless of size, and a file with k unsafe
 // semicolons costs O(k log n) rather than O(n).
-function safeSemicolons(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+function safeSemicolons(
+  source: string,
+  tree: SyntaxTree,
+  dial: Record<string, any>,
+  baselineOutput?: string
+): { pos: number, fix: Fix }[]
   found := findTrailingSemicolons(source, tree)
   return found if found.length is 0
 
-  base := compileForOutput(source, { dial })
-  return [] unless base.ok
-  baseline := normalizeSemicolonStyle(base.output!)
+  // The engine already compiled this exact source under the same options before
+  // running any rule, and hands the result over on the context. Recompiling it
+  // here was the single most expensive thing this rule did.
+  baseline := if baselineOutput?
+    normalizeSemicolonStyle(baselineOutput)
+  else
+    base := compileForOutput(source, { dial })
+    return [] unless base.ok
+    normalizeSemicolonStyle(base.output!)
 
   groupIsSafe := (group: { pos: number, fix: Fix }[]): boolean ->
     return true if group.length is 0
@@ -150,10 +161,15 @@ function safeSemicolons(source: string, tree: SyntaxTree, dial: Record<string, a
 var lastKey: string | undefined = undefined
 var lastValue: { pos: number, fix: Fix }[] = []
 
-function safeSemicolonsCached(source: string, tree: SyntaxTree, dial: Record<string, any>): { pos: number, fix: Fix }[]
+function safeSemicolonsCached(
+  source: string,
+  tree: SyntaxTree,
+  dial: Record<string, any>,
+  baselineOutput?: string
+): { pos: number, fix: Fix }[]
   key := source
   return lastValue if lastKey is key
-  value := safeSemicolons(source, tree, dial)
+  value := safeSemicolons(source, tree, dial, baselineOutput)
   lastKey = key
   lastValue = value
   value
@@ -183,7 +199,7 @@ export const noTrailingSemicolonsRule: Rule = {
       ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
         buildReference(input, ctx.parseOptions)
 
-    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions)
+    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions, ctx.baselineOutput)
     for item of found
       ctx.report({
         ruleId: "style/no-trailing-semicolons"
