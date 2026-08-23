@@ -1,0 +1,54 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferPostfixConditionalRule: Rule = {
+  id: "style/prefer-postfix-conditional"
+  meta: {
+    description: "Prefer postfix conditional 'return if a' over one-liner 'if (a) return'"
+    fixable: false
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
+    ignoredRanges := [...commentRanges, ...stringRanges]
+    seen := new Set<number>()
+
+    tree.visit "IfStatement", (node) ->
+      span := tree.range(node)
+      return unless span?
+
+      slice := source.slice(span.start, span.end)
+      return if slice.includes("\n")
+
+      tokens := tree.tokens(node)
+      ifTok := tokens.find (t) ->
+        (t.raw.trim() is "if" or t.value.trim() is "if") and not t.synthetic
+      return unless ifTok? and ifTok.range.start is span.start
+
+      thenBlock := node.then or node.block
+      return unless thenBlock?
+
+      returnTok := tree.tokens(thenBlock).find (t) ->
+        t.raw.trim() is "return" or t.value.trim() is "return"
+      return unless returnTok?
+
+      pos := span.start
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, span.end)
+      seen.add(pos)
+
+      returnText := tree.text(thenBlock).trim()
+      var condText = tree.text(node.condition).trim()
+      if condText.startsWith("(") and condText.endsWith(")")
+        condText = condText.slice(1, -1).trim()
+
+      ctx.report({
+        ruleId: "style/prefer-postfix-conditional"
+        message: `Use postfix conditional '${returnText} if ${condText}' instead of '${slice}' (autofix disabled: emit differs by block braces)`
+        pos
+        severity: "warn"
+      })
+}
