@@ -1,12 +1,22 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { intersectsRange } from "../utils.civet"
 
+const OP_MAP = new Map<string, boolean>([
+  ["!=", true]
+  ["!==", true]
+  ["isnt", true]
+  ["==", false]
+  ["===", false]
+  ["is", false]
+])
+
 export const preferExistentialCheckRule: Rule = {
   id: "style/prefer-existential-check"
   meta: {
     description: "Prefer existential postfix (x? / not x?) over null equality checks"
-    fixable: false
+    fixable: true
     defaultSeverity: "warn"
+    phase: "idiom"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -14,23 +24,67 @@ export const preferExistentialCheckRule: Rule = {
     commentRanges := tree.commentRanges()
     stringRanges := tree.stringRanges()
     ignoredRanges := [...commentRanges, ...stringRanges]
+    seen := new Set<number>()
 
-    re := /([a-zA-Z_$][a-zA-Z0-9_$.?]*)\s*(!==|!=|===|==|isnt|is)\s*null\b/g
-    var match: RegExpExecArray | null = null
+    for tok of tree.tokens()
+      rawOp := tok.raw?.trim()
+      valOp := tok.value?.trim()
+      op := (rawOp and OP_MAP.has(rawOp)) ? rawOp : ((valOp and OP_MAP.has(valOp)) ? valOp : undefined)
+      continue unless op?
 
-    while (match = re.exec(source)) !== null
-      ident := match[1]
-      op := match[2]
+      pos := tok.range.start
+      end := tok.range.end
+      continue if intersectsRange(ignoredRanges, pos, end)
 
-      pos := match.index
-      matchEnd := match.index + match[0].length
-      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+      isInequality := OP_MAP.get(op)!
 
-      isInequality := op is "!=" or op is "!==" or op is "isnt"
-      replacement := isInequality ? `${ident}?` : `not ${ident}?`
-      ctx.report({
-        ruleId: "style/prefer-existential-check"
-        message: `Use existential postfix '${replacement}' instead of '${match[0]}'`
-        pos
-      })
+      before := source.slice(0, pos)
+      after := source.slice(end)
+
+      afterNull := after.match(/^\s*(null|undefined)\b/)
+      beforeNull := before.match(/(?:^|[^a-zA-Z0-9_$])(null|undefined)\s*$/)
+
+      if afterNull and not beforeNull
+        beforeExpr := before.match(/([a-zA-Z_$][a-zA-Z0-9_$.?()]*)\s*$/)
+        continue unless beforeExpr
+        start := pos - beforeExpr[0].length
+        fullEnd := end + afterNull[0].length
+        continue if seen.has(start)
+        continue if intersectsRange(ignoredRanges, start, fullEnd)
+        seen.add(start)
+
+        ident := beforeExpr[1]
+        replacement := isInequality ? `${ident}?` : `not ${ident}?`
+        ctx.report({
+          ruleId: "style/prefer-existential-check"
+          message: `Use existential postfix '${replacement}' instead of '${source.slice(start, fullEnd)}'`
+          pos: start
+          fix: {
+            start
+            end: fullEnd
+            replacement
+          }
+        })
+      else if beforeNull and not afterNull
+        afterExpr := after.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$.?()]*)/)
+        continue unless afterExpr
+        idx := before.lastIndexOf(beforeNull[1])
+        start := idx
+        fullEnd := end + afterExpr[0].length
+        continue if seen.has(start)
+        continue if intersectsRange(ignoredRanges, start, fullEnd)
+        seen.add(start)
+
+        ident := afterExpr[1]
+        replacement := isInequality ? `${ident}?` : `not ${ident}?`
+        ctx.report({
+          ruleId: "style/prefer-existential-check"
+          message: `Use existential postfix '${replacement}' instead of '${source.slice(start, fullEnd)}'`
+          pos: start
+          fix: {
+            start
+            end: fullEnd
+            replacement
+          }
+        })
 }
