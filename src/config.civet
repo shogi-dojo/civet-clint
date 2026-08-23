@@ -99,6 +99,42 @@ export const PRESETS: Record<string, PresetDefinition> = {
     }
     compileOptions: {}
   }
+  // Idiomatic Civet preset: bundles neutral-dial idiom rules covering standard
+  // Civet style without legacy CoffeeScript options.
+  "civet-idiomatic": {
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/prefer-walrus-declarations": "error"
+      "style/prefer-terse-imports": "error"
+      "style/no-trailing-commas": "error"
+      "style/prefer-indented-object": "error"
+      "style/prefer-indented-blocks": "error"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-implicit-block-call": "error"
+      "style/prefer-implicit-call-args": "error"
+      "style/prefer-implicit-arrow-arg": "error"
+      "style/prefer-jsx-shorthand": "error"
+      "style/prefer-bare-jsx-values": "error"
+      "style/prefer-unless": "error"
+      "style/prefer-at-shorthand": "error"
+      "style/prefer-length-shorthand": "error"
+      "style/prefer-typeof-shorthand": "error"
+      "style/prefer-property-shorthand": "error"
+      "style/prefer-implicit-return": "error"
+      "style/prefer-bare-for": "error"
+      "style/prefer-bare-conditions": "error"
+      "style/prefer-existential-check": "warn"
+      "style/prefer-optional-type": "warn"
+      "style/prefer-postfix-conditional": "warn"
+      "style/prefer-ampersand-shorthand": "warn"
+      "style/prefer-jsx-attr-shorthand": "warn"
+    }
+    civetOptions: {
+      react: true
+    }
+    compileOptions: {}
+  }
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined

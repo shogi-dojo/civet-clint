@@ -30,6 +30,16 @@ import { preferImplicitBlockCallRule } from "./rules/prefer-implicit-block-call.
 import { preferIndentedBlocksRule } from "./rules/prefer-indented-blocks.civet"
 import { preferImplicitCallArgsRule } from "./rules/prefer-implicit-call-args.civet"
 import { preferImplicitArrowArgRule } from "./rules/prefer-implicit-arrow-arg.civet"
+import { preferUnlessRule } from "./rules/prefer-unless.civet"
+import { preferAtShorthandRule } from "./rules/prefer-at-shorthand.civet"
+import { preferLengthShorthandRule } from "./rules/prefer-length-shorthand.civet"
+import { preferTypeofShorthandRule } from "./rules/prefer-typeof-shorthand.civet"
+import { preferPropertyShorthandRule } from "./rules/prefer-property-shorthand.civet"
+import { preferImplicitReturnRule } from "./rules/prefer-implicit-return.civet"
+import { preferBareForRule } from "./rules/prefer-bare-for.civet"
+import { preferBareConditionsRule } from "./rules/prefer-bare-conditions.civet"
+import { preferOptionalTypeRule } from "./rules/prefer-optional-type.civet"
+import { preferPostfixConditionalRule } from "./rules/prefer-postfix-conditional.civet"
 
 export class RuleRegistry
   private rules: Map<string, Rule>
@@ -118,6 +128,16 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferBareJsxValuesRule)
   registry.register(preferHashCommentsRule)
   registry.register(preferSlashCommentsRule)
+  registry.register(preferUnlessRule)
+  registry.register(preferAtShorthandRule)
+  registry.register(preferLengthShorthandRule)
+  registry.register(preferTypeofShorthandRule)
+  registry.register(preferPropertyShorthandRule)
+  registry.register(preferImplicitReturnRule)
+  registry.register(preferBareForRule)
+  registry.register(preferBareConditionsRule)
+  registry.register(preferOptionalTypeRule)
+  registry.register(preferPostfixConditionalRule)
   registry
 
 export const defaultRuleRegistry: RuleRegistry = createDefaultRuleRegistry()
