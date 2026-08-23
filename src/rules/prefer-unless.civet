@@ -1,0 +1,75 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+const DISALLOWED_OPERAND_TYPES = new Set([
+  "Existence"
+  "BinaryExpression"
+  "CompareOp"
+  "LogicOp"
+])
+
+export const preferUnlessRule: Rule = {
+  id: "style/prefer-unless"
+  meta: {
+    description: "Prefer 'unless' over 'if not' / 'if (!...)' for negated conditions"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit "IfStatement", (node) ->
+      return if node.negated
+
+      cond := node.condition
+      return unless cond?
+
+      condSpan := tree.range(cond)
+      return unless condSpan?
+
+      tokens := tree.tokens(node)
+      ifTok := tokens.find (t) ->
+        (t.raw.trim() is "if" or t.value.trim() is "if") and not t.synthetic
+      return unless ifTok?
+
+      expr := cond.expression
+      return unless expr? and expr.type is "UnaryExpression"
+
+      pre := expr.pre
+      return unless Array.isArray(pre) and pre.length > 0
+      preFlat := pre.flat(2).filter(Boolean)
+      opToken := preFlat.find (p: any) ->
+        p.token is "!" or p.token is "not" or p.token is "not "
+      return unless opToken?
+
+      operand := expr.expression
+      return unless operand? and not Array.isArray(operand)
+      return if DISALLOWED_OPERAND_TYPES.has(operand.type)
+
+      opSpan := tree.range(operand)
+      return unless opSpan?
+
+      start := ifTok.range.start
+      end := condSpan.end
+      return if seen.has(start)
+      return if intersectsRange(ignoredRanges, start, end)
+      seen.add(start)
+
+      operandText := tree.text(operand)
+      replacement := `unless ${operandText}`
+
+      ctx.report({
+        ruleId: "style/prefer-unless"
+        message: `Use 'unless ${operandText}' instead of '${source.slice(start, end)}'`
+        pos: start
+        fix: {
+          start
+          end
+          replacement
+        }
+      })
+}

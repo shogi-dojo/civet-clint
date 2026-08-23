@@ -1,0 +1,43 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferLengthShorthandRule: Rule = {
+  id: "style/prefer-length-shorthand"
+  meta: {
+    description: "Prefer '#' postfix shorthand over '.length'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit "PropertyAccess", (node) ->
+      return unless node.name is "length"
+      span := tree.range(node)
+      return unless span?
+
+      pos := span.start
+      end := span.end
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, end)
+
+      raw := source.slice(pos, end)
+      return unless raw is ".length" or raw is "?.length"
+      seen.add(pos)
+
+      replacement := raw is "?.length" ? "?#" : "#"
+      ctx.report({
+        ruleId: "style/prefer-length-shorthand"
+        message: `Use '${replacement}' instead of '${raw}'`
+        pos
+        fix: {
+          start: pos
+          end
+          replacement
+        }
+      })
+}

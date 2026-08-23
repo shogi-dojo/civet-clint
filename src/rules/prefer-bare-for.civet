@@ -1,0 +1,87 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferBareForRule: Rule = {
+  id: "style/prefer-bare-for"
+  meta: {
+    description: "Prefer 'for x of' over 'for const x of' and strip head parentheses"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit "ForStatement", (node) ->
+      decl := node.declaration
+      return unless decl? and decl.decl is "const"
+
+      declSpan := tree.range(decl)
+      return unless declSpan?
+
+      declTokens := tree.tokens(decl)
+      constTok := declTokens.find (t) ->
+        (t.raw.trim() is "const" or t.value.trim() is "const") and not t.synthetic
+      return unless constTok?
+
+      forTokens := tree.tokens(node)
+      forTok := forTokens.find (t) ->
+        (t.raw.trim() is "for" or t.value.trim() is "for") and not t.synthetic
+      return unless forTok?
+
+      openParen := forTokens.find (t) ->
+        t.raw is "(" and not t.synthetic and t.range.start >= forTok.range.end and t.range.start < constTok.range.start
+
+      blockSpan := tree.range(node.block)
+      blockStart := blockSpan ? blockSpan.start : source.length
+
+      closeParen := openParen
+        ? forTokens.find (t) -> t.raw is ")" and not t.synthetic and t.range.start > declSpan.end and t.range.end <= blockStart
+        : undefined
+
+      var afterConst = constTok.range.end
+      while source[afterConst] is " " or source[afterConst] is "\t"
+        afterConst++
+
+      pos := openParen ? openParen.range.start : constTok.range.start
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, afterConst)
+      seen.add(pos)
+
+      if openParen? and closeParen?
+        return if intersectsRange(ignoredRanges, closeParen.range.start, closeParen.range.end)
+        ctx.report({
+          ruleId: "style/prefer-bare-for"
+          message: "Omit 'const' and parentheses in for-loop header"
+          pos: openParen.range.start
+          fix: {
+            start: openParen.range.start
+            end: afterConst
+            replacement: ""
+          }
+        })
+        ctx.report({
+          ruleId: "style/prefer-bare-for"
+          message: "Omit closing parenthesis in for-loop header"
+          pos: closeParen.range.start
+          fix: {
+            start: closeParen.range.start
+            end: closeParen.range.end
+            replacement: ""
+          }
+        })
+      else
+        ctx.report({
+          ruleId: "style/prefer-bare-for"
+          message: "Omit 'const' in for-loop header"
+          pos: constTok.range.start
+          fix: {
+            start: constTok.range.start
+            end: afterConst
+            replacement: ""
+          }
+        })
+}

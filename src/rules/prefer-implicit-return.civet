@@ -1,0 +1,80 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+const FN_NODE_TYPES = [
+  "FunctionExpression"
+  "FunctionDeclaration"
+  "MethodDefinition"
+  "ArrowFunction"
+]
+
+const LOOP_TYPES = [
+  "ForStatement"
+  "IterationStatement"
+  "WhileStatement"
+  "DoWhileStatement"
+  "ForOfStatement"
+  "ForInStatement"
+]
+
+export const preferImplicitReturnRule: Rule = {
+  id: "style/prefer-implicit-return"
+  meta: {
+    description: "Prefer implicit return at the end of functions and methods over explicit 'return'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit FN_NODE_TYPES, (fnNode) ->
+      if fnNode.generator
+        isGen := Array.isArray(fnNode.generator) ? fnNode.generator.length > 0 : Boolean(fnNode.generator)
+        return if isGen
+
+      block := fnNode.block
+      return unless block? and Array.isArray(block.expressions) and block.expressions.length > 0
+
+      lastEntry := block.expressions[block.expressions.length - 1]
+      var lastStmt: any = undefined
+      if Array.isArray(lastEntry)
+        lastStmt = lastEntry.find (e: any) -> e?.type is "ReturnStatement"
+      else if lastEntry?.type is "ReturnStatement"
+        lastStmt = lastEntry
+
+      return unless lastStmt? and lastStmt.type is "ReturnStatement"
+      return unless lastStmt.expression?
+
+      exprType := lastStmt.expression.type
+      return if exprType is "ObjectLiteral" or exprType is "ObjectExpression" or exprType is "BareObjectLiteral"
+
+      return if tree.hasAncestorType(lastStmt, LOOP_TYPES)
+
+      returnTok := tree.tokens(lastStmt).find (t) ->
+        (t.raw.trim() is "return" or t.value.trim() is "return") and not t.synthetic
+      return unless returnTok?
+
+      pos := returnTok.range.start
+      var after = returnTok.range.end
+      while source[after] is " " or source[after] is "\t"
+        after++
+
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, after)
+      seen.add(pos)
+
+      ctx.report({
+        ruleId: "style/prefer-implicit-return"
+        message: "Drop explicit 'return' at end of function body"
+        pos
+        fix: {
+          start: pos
+          end: after
+          replacement: ""
+        }
+      })
+}

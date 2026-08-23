@@ -1,0 +1,50 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferPropertyShorthandRule: Rule = {
+  id: "style/prefer-property-shorthand"
+  meta: {
+    description: "Prefer property shorthand '{ a.b }' over '{ b: a.b }'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit "Property", (node) ->
+      return unless node.name? and node.name.type is "Identifier"
+      keyName := node.name.name
+      val := node.value
+      return unless val? and val.type is "MemberExpression"
+
+      children := (val.children or []).filter(Boolean)
+      return if children.length is 0
+      last := children[children.length - 1]
+      return unless last? and last.type is "PropertyAccess"
+      return unless last.name is keyName
+
+      span := tree.range(node)
+      return unless span?
+
+      pos := span.start
+      end := span.end
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, end)
+      seen.add(pos)
+
+      valText := tree.text(val).trim()
+      ctx.report({
+        ruleId: "style/prefer-property-shorthand"
+        message: `Use shorthand '{ ${valText} }' instead of '{ ${source.slice(pos, end)} }'`
+        pos
+        fix: {
+          start: pos
+          end
+          replacement: valText
+        }
+      })
+}
