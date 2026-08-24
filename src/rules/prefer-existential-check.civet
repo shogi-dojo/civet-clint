@@ -1,14 +1,25 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { intersectsRange } from "../utils.civet"
 
-const OP_MAP = new Map<string, boolean>([
-  ["!=", true]
-  ["!==", true]
-  ["isnt", true]
-  ["==", false]
-  ["===", false]
-  ["is", false]
-])
+// `x?` lowers to `x != null` -- a LOOSE check that is true for a defined, non-null
+// value and false for both `null` and `undefined`. That makes only two source
+// shapes safe to rewrite:
+//
+//   x != null   ->  x?          (identical emit)
+//   x == null   ->  not x?      (identical emit)
+//
+// Every other shape is reported without a fix, because the rewrite would change
+// behaviour and the equivalence gate rejects it:
+//
+//   x !== null       is true for undefined; `x?` is false        -> report only
+//   x !== undefined  is true for null;      `x?` is false        -> report only
+//
+// Under `coffeeEq`, `is`/`isnt` lower to `==`/`!=` rather than `===`/`!==`, so
+// they become loose and therefore fixable. Without it they stay strict.
+const INEQUALITY_OPS = new Set(["!=", "!==", "isnt"])
+const EQUALITY_OPS = new Set(["==", "===", "is"])
+const LOOSE_OPS = new Set(["!=", "=="])
+const COFFEE_EQ_OPS = new Set(["is", "isnt"])
 
 export const preferExistentialCheckRule: Rule = {
   id: "style/prefer-existential-check"
@@ -21,22 +32,57 @@ export const preferExistentialCheckRule: Rule = {
   check: (ctx: RuleContext) ->
     source := ctx.source
     tree := ctx.syntax
-    commentRanges := tree.commentRanges()
-    stringRanges := tree.stringRanges()
-    ignoredRanges := [...commentRanges, ...stringRanges]
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+
+    // A rewrite to `x?` is only sound when the comparison is loose AND against
+    // `null`. `undefined` is never safe: `x?` cannot distinguish it from `null`.
+    isFixable := (op: string, literal: string): boolean ->
+      return false unless literal is "null"
+      return true if LOOSE_OPS.has(op)
+      COFFEE_EQ_OPS.has(op) and ctx.parseOptions.coffeeEq is true
+
+    noFixReason := (op: string, literal: string): string ->
+      if literal isnt "null"
+        `'?' lowers to '!= null', which is not equivalent to a comparison against ${literal}`
+      else
+        `'${op}' is strict, but '?' lowers to the loose '!= null'`
+
+    reportAt := (start: number, fullEnd: number, ident: string, op: string, literal: string, inequality: boolean) ->
+      return if seen.has(start)
+      return if intersectsRange(ignoredRanges, start, fullEnd)
+      seen.add(start)
+
+      replacement := inequality ? `${ident}?` : `not ${ident}?`
+      original := source.slice(start, fullEnd)
+
+      if isFixable(op, literal)
+        ctx.report({
+          ruleId: "style/prefer-existential-check"
+          message: `Use existential postfix '${replacement}' instead of '${original}'`
+          pos: start
+          fix: { start, end: fullEnd, replacement }
+        })
+      else
+        ctx.report({
+          ruleId: "style/prefer-existential-check"
+          message: `Consider existential postfix '${replacement}' instead of '${original}' (no autofix: ${noFixReason(op, literal)})`
+          pos: start
+        })
 
     for tok of tree.tokens()
       rawOp := tok.raw?.trim()
       valOp := tok.value?.trim()
-      op := (rawOp and OP_MAP.has(rawOp)) ? rawOp : ((valOp and OP_MAP.has(valOp)) ? valOp : undefined)
+      op := (rawOp and (INEQUALITY_OPS.has(rawOp) or EQUALITY_OPS.has(rawOp)))
+        ? rawOp
+        : ((valOp and (INEQUALITY_OPS.has(valOp) or EQUALITY_OPS.has(valOp))) ? valOp : undefined)
       continue unless op?
 
       pos := tok.range.start
       end := tok.range.end
       continue if intersectsRange(ignoredRanges, pos, end)
 
-      isInequality := OP_MAP.get(op)!
+      inequality := INEQUALITY_OPS.has(op)
 
       before := source.slice(0, pos)
       after := source.slice(end)
@@ -47,44 +93,23 @@ export const preferExistentialCheckRule: Rule = {
       if afterNull and not beforeNull
         beforeExpr := before.match(/([a-zA-Z_$][a-zA-Z0-9_$.?()]*)\s*$/)
         continue unless beforeExpr
-        start := pos - beforeExpr[0].length
-        fullEnd := end + afterNull[0].length
-        continue if seen.has(start)
-        continue if intersectsRange(ignoredRanges, start, fullEnd)
-        seen.add(start)
-
-        ident := beforeExpr[1]
-        replacement := isInequality ? `${ident}?` : `not ${ident}?`
-        ctx.report({
-          ruleId: "style/prefer-existential-check"
-          message: `Use existential postfix '${replacement}' instead of '${source.slice(start, fullEnd)}'`
-          pos: start
-          fix: {
-            start
-            end: fullEnd
-            replacement
-          }
-        })
+        reportAt(
+          pos - beforeExpr[0].length
+          end + afterNull[0].length
+          beforeExpr[1]
+          op
+          afterNull[1]
+          inequality
+        )
       else if beforeNull and not afterNull
         afterExpr := after.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$.?()]*)/)
         continue unless afterExpr
-        idx := before.lastIndexOf(beforeNull[1])
-        start := idx
-        fullEnd := end + afterExpr[0].length
-        continue if seen.has(start)
-        continue if intersectsRange(ignoredRanges, start, fullEnd)
-        seen.add(start)
-
-        ident := afterExpr[1]
-        replacement := isInequality ? `${ident}?` : `not ${ident}?`
-        ctx.report({
-          ruleId: "style/prefer-existential-check"
-          message: `Use existential postfix '${replacement}' instead of '${source.slice(start, fullEnd)}'`
-          pos: start
-          fix: {
-            start
-            end: fullEnd
-            replacement
-          }
-        })
+        reportAt(
+          before.lastIndexOf(beforeNull[1])
+          end + afterExpr[0].length
+          afterExpr[1]
+          op
+          beforeNull[1]
+          inequality
+        )
 }

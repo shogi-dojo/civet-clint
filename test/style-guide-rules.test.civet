@@ -209,6 +209,66 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-bare-assignment"
       expect(diags.length).toBe(0)
 
+  describe "style/prefer-existential-check soundness", ->
+    // `x?` lowers to the LOOSE `x != null`. Only a loose comparison against `null`
+    // may carry a fix; everything else is a real behaviour change and the
+    // equivalence gate rejects it, so the rule must not advertise it as fixable.
+    function diags(source: string, civetOptions: any = {})
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions
+      })
+      res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+
+    it "attaches a fix to loose '!= null'", ->
+      found := diags("if x != null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeDefined()
+
+    it "attaches a fix to loose '== null'", ->
+      found := diags("if x == null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeDefined()
+
+    it "reports strict '!== null' without a fix", ->
+      // x is undefined: `x !== null` is true, `x?` is false.
+      found := diags("if x !== null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+      expect(found[0].message).toContain("no autofix")
+
+    it "reports strict '=== null' without a fix", ->
+      found := diags("if x === null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+
+    it "reports comparisons against undefined without a fix", ->
+      // x is null: `x !== undefined` is true, `x?` is false.
+      found := diags("if x !== undefined\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+      expect(found[0].message).toContain("undefined")
+
+    it "treats 'isnt' as fixable only under coffeeEq", ->
+      strict := diags("if x isnt null\n  b()\n", { coffeeIsnt: true })
+      expect(strict.length).toBe(1)
+      expect(strict[0].fix).toBeUndefined()
+      loose := diags("if x isnt null\n  b()\n", { coffeeIsnt: true, coffeeEq: true })
+      expect(loose.length).toBe(1)
+      expect(loose[0].fix).toBeDefined()
+
+    it "never leaves a fix the equivalence gate will reject", ->
+      // Regression: the rule used to fix every shape, so `clint` reported
+      // "fixable with --write" on diagnostics that --write could never apply.
+      for source of ["if x !== null\n  b()\n", "if x === undefined\n  b()\n"]
+        res := lintSource(source, {
+          // word-operators would rewrite `===` to `is` and mask what we assert.
+          rules: { "style/prefer-existential-check": "error", "style/prefer-word-operators": "off" }
+          fix: true
+        })
+        expect(res.fixedSource ?? source).toBe(source)
+        expect(res.isEquivalencePreserved).toBe(true)
+
   describe "style/prefer-existential-check", ->
     it "flags inequality null checks with suggestion x?", ->
       source := "valid := x != null\n"
