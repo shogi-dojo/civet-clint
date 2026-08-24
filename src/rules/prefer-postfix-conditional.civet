@@ -1,12 +1,24 @@
 import type { Rule, RuleContext } from "../types.civet"
 import { intersectsRange } from "../utils.civet"
 
+// Erik Demaine's Civet style guide, item 17: "For one-liners like `if (...) return`,
+// prefer `return if ...`."
+//
+//   if (a) return x   ->   return x if a
+//
+// The emitted JS differs by exactly one thing -- the prefix form emits
+// `if (a) return x`, the postfix form `if (a) { return x }` -- so the fix declares
+// the `block-brace-style` delta and the engine proves the rest.
+//
+// A project that would rather not loosen the gate at all has a byte-identical
+// alternative: `if a then return x` emits the unbraced form. The message says so.
 export const preferPostfixConditionalRule: Rule = {
   id: "style/prefer-postfix-conditional"
   meta: {
     description: "Prefer postfix conditional 'return if a' over one-liner 'if (a) return'"
-    fixable: false
-    defaultSeverity: "warn"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -16,12 +28,26 @@ export const preferPostfixConditionalRule: Rule = {
     ignoredRanges := [...commentRanges, ...stringRanges]
     seen := new Set<number>()
 
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("block-brace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
     tree.visit "IfStatement", (node) ->
       span := tree.range(node)
       return unless span?
 
       slice := source.slice(span.start, span.end)
       return if slice.includes("\n")
+      // An `else` branch has nowhere to go in the postfix form.
+      return if /\belse\b/.test(slice)
+      // `if a then return x` is already a one-liner AND already byte-identical.
+      // Rewriting it is churn, and the extraction below mis-reads the `then`.
+      return if /\bthen\b/.test(slice)
 
       tokens := tree.tokens(node)
       ifTok := tokens.find (t) ->
@@ -45,10 +71,27 @@ export const preferPostfixConditionalRule: Rule = {
       if condText.startsWith("(") and condText.endsWith(")")
         condText = condText.slice(1, -1).trim()
 
+      return unless returnText.length > 0 and condText.length > 0
+      // The postfix head has to stay a single statement.
+      return if returnText.includes("\n") or condText.includes("\n")
+      // A returned JSX element swallows the trailing `if` as another attribute:
+      // `return <Navigate to=r replace if cond` parses `if` as a prop name. `<` in
+      // any other position (a comparison, a type argument) is rare enough here that
+      // refusing all of them costs little.
+      return if returnText.includes("<") or condText.includes("<")
+      // The `block-brace-style` normalizer only strips a brace pair whose contents
+      // hold no further braces, so a returned object literal (`if (a) return {…}`)
+      // is outside what it can prove. Reporting it is right; autofixing it would be
+      // a fix the gate then rejects, which surfaces as an error.
+      return if /[{};]/.test(returnText) or /[{};]/.test(condText)
+
+      replacement := `${returnText} if ${condText}`
+      edit := { start: span.start, end: span.end, replacement }
+      edits.push(edit)
       ctx.report({
         ruleId: "style/prefer-postfix-conditional"
-        message: `Use postfix conditional '${returnText} if ${condText}' instead of '${slice}' (autofix disabled: emit differs by block braces)`
+        message: `Use postfix conditional '${replacement}' instead of '${slice}' ('if ${condText} then ${returnText}' is the byte-identical alternative)`
         pos
-        severity: "warn"
+        fix: edit
       })
 }
