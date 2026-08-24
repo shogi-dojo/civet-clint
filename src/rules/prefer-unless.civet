@@ -55,6 +55,14 @@ export const preferUnlessRule: Rule = {
 
       start := ifTok.range.start
       end := condSpan.end
+
+      // A braced head belongs to style/prefer-indented-blocks first. That rule only
+      // recognizes a head that still has its parens, so rewriting `if (!a) {` into
+      // `unless a {` here would strand the braces with no rule able to remove them.
+      headLineEnd := source.indexOf("\n", start)
+      headLine := source.slice(start, headLineEnd < 0 ? source.length : headLineEnd)
+      return if headLine.trim().endsWith("{")
+
       return if seen.has(start)
       return if intersectsRange(ignoredRanges, start, end)
       seen.add(start)

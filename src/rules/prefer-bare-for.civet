@@ -46,6 +46,13 @@ export const preferBareForRule: Rule = {
       while source[afterConst] is " " or source[afterConst] is "\t"
         afterConst++
 
+      // A braced head belongs to style/prefer-indented-blocks first. That rule only
+      // recognizes a head that still has its parens, so stripping them here would
+      // strand the braces with no rule able to remove them.
+      headLineEnd := source.indexOf("\n", forTok.range.start)
+      headLine := source.slice(forTok.range.start, headLineEnd < 0 ? source.length : headLineEnd)
+      return if headLine.trim().endsWith("{")
+
       pos := openParen ? openParen.range.start : constTok.range.start
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, afterConst)

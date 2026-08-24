@@ -83,3 +83,12 @@ describe "style/prefer-unless guards (negative cases)", ->
 
   it "leaves already-idiomatic 'unless a' unchanged", ->
     unchanged("unless a\n  b()\n")
+
+  it "leaves a braced head to style/prefer-indented-blocks", ->
+    // prefer-indented-blocks only recognizes a head that still has its parens.
+    // Rewriting `if (!a) {` to `unless a {` here would strand the braces: no rule
+    // can de-brace a bare head, so the file would keep them forever.
+    unchanged("if (not a) {\n  g()\n}\n")
+
+  it "leaves a braced 'if not' head alone too", ->
+    unchanged("if not a {\n  g()\n}\n")

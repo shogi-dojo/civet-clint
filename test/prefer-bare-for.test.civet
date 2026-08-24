@@ -52,3 +52,8 @@ describe "style/prefer-bare-for guards", ->
 
   it "leaves already-bare 'for x of xs' alone", ->
     unchanged("for x of xs\n  log(x)\n")
+
+  it "leaves a braced for head to style/prefer-indented-blocks", ->
+    // Stripping the parens here would strand the braces: prefer-indented-blocks
+    // only matches a head that still has them.
+    unchanged("for (const x of xs) {\n  g(x)\n}\n")
