@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **8 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
+- **9 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
   - `style/prefer-unless`: rewrites `if not X` and `if (!X)` to `unless X` with AST precedence guards on binary operators and existential checks.
   - `style/prefer-at-shorthand`: rewrites `this.x`, `this?.x`, `this[k]`, `this.#p`, and bare `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`.
   - `style/prefer-length-shorthand`: rewrites `arr.length` and `arr?.length` to `arr#` and `arr?#`.
@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `style/prefer-implicit-return`: drops explicit trailing `return` keywords from function bodies, method declarations, and arrows, with guards for generators, object literal returns, and loop bodies.
   - `style/prefer-bare-for`: rewrites `for const x of xs` and `for (const x of xs)` to `for x of xs`.
   - `style/prefer-bare-conditions`: strips outer parentheses from `if`, `unless`, `while`, and `switch` condition expressions under the `whitespace-style` output delta.
+  - `style/prefer-bare-self-closing-jsx`: drops the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`, style-guide item 22). Civet reads the slashless form as self-closing only from what follows it, so the rule fires only when the `/>` ends its line and the next non-blank line is neither deeper, a closing tag of the same name, nor a `)` / `}` closer -- each of those either reparents the following node or stops the parse. Verified on a 441-file React/Civet codebase: 822 sites rewritten, zero rejected by the equivalence gate.
 - **2 new report-only diagnostic rules**:
   - `style/prefer-optional-type`: flags `T | undefined` and `undefined | T` in favor of `T?` shorthand (diagnostic with explanation of TypeScript union emit wrapping).
   - `style/prefer-postfix-conditional`: flags one-liner `if (a) return` in favor of postfix `return if a` (diagnostic with explanation of block-brace emit differences).

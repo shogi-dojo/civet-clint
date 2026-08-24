@@ -116,6 +116,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-implicit-arrow-arg": "error"
       "style/prefer-jsx-shorthand": "error"
       "style/prefer-bare-jsx-values": "error"
+      "style/prefer-bare-self-closing-jsx": "error"
       "style/prefer-unless": "error"
       "style/prefer-at-shorthand": "error"
       "style/prefer-length-shorthand": "error"

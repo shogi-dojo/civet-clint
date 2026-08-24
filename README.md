@@ -20,7 +20,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Bidirectional Civet Style Rules**: 41 built-in rules covering idiomatic Civet style, Coffee/React conventions, and compiler-safe migration toward standard Civet.
+- 🎯 **Bidirectional Civet Style Rules**: 42 built-in rules covering idiomatic Civet style, Coffee/React conventions, and compiler-safe migration toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `civet-idiomatic`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -195,6 +195,7 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-implicit-arrow-arg`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
+- `style/prefer-bare-self-closing-jsx`: `"error"` (fixable, requires `react`)
 - `style/prefer-unless`: `"error"` (fixable)
 - `style/prefer-at-shorthand`: `"error"` (fixable)
 - `style/prefer-length-shorthand`: `"error"` (fixable, forbids `coffeeComment`)
@@ -288,7 +289,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 41 built-in style, correctness, and migration rules.
+`civet-clint` currently provides 42 built-in style, correctness, and migration rules.
 
 ### Fixable Rules
 
@@ -315,6 +316,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
+| [`style/prefer-bare-self-closing-jsx`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-self-closing-jsx.civet) | Drop the `/` from a self-closing tag: `<Foo a=1 />` → `<Foo a=1>`. Only where nothing following can be adopted as a child — see below. | `react` |
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 | [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
 | [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
@@ -426,6 +428,32 @@ already there — the leading run of `className`/`id` on the tag line:
 
 The last two matter beyond formatting: moving `className` ahead of a `{...spread}`
 changes which value wins. Skipped sites are still reported, so they surface for review.
+
+#### `style/prefer-bare-self-closing-jsx` — when the slash can go
+
+Civet decides whether a slashless tag closes itself from what *follows* it, so the
+rewrite is only safe when nothing can be adopted as a child. Four shapes are skipped,
+each because the emitted JSX changes or stops parsing:
+
+```civet
+<div>
+  <Foo a=1 />        ✅  → <Foo a=1>      nothing follows but the closing tag
+</div>
+
+<div><Foo /><Bar /></div>   ❌  <Foo> would swallow <Bar/> as its child
+<span>a <Icon /> b</span>   ❌  same, for the text after it
+
+<div .outer>
+  <div .spot />      ❌  `</div>` would pair with <div .spot>, not <div .outer>
+</div>
+
+timerSlot={cond ? null : (
+  <Timer id=1 />     ❌  a `)` or `}` closer next stops the parse
+)}
+```
+
+The third is the subtle one: it only bites when the tag name matches the enclosing
+element's, which is why it shows up on HTML-cased tags and never on components.
 
 ### Diagnostic Rules
 

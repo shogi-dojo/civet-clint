@@ -129,6 +129,7 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-length-shorthand"]).toBe("error")
       expect(preset.rules["style/prefer-typeof-shorthand"]).toBe("error")
       expect(preset.rules["style/prefer-property-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-bare-self-closing-jsx"]).toBe("error")
       // Deliberately absent: the rule still proposes gate-rejected fixes on real
       // code, which would make --check exit non-zero on conformant sources.
       expect(preset.rules["style/prefer-implicit-return"]).toBeUndefined()

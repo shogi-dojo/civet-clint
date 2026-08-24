@@ -1,0 +1,96 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
+
+RULE := "style/prefer-bare-self-closing-jsx"
+DIAL := { react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeWhitespaceStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeWhitespaceStyle(compileSource(source, DIAL)))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-bare-self-closing-jsx", ->
+  it "drops the slash from a nested self-closing tag", ->
+    expect(expectEquivalent("x := <div>\n  <Foo a=1 />\n</div>\n"))
+      .toBe("x := <div>\n  <Foo a=1>\n</div>\n")
+
+  it "drops the slash from a top-level self-closing tag", ->
+    expect(expectEquivalent("x := <Foo a=1 />\n")).toBe("x := <Foo a=1>\n")
+
+  it "drops the slash from an unspaced tag", ->
+    // `<Foo/>` -> `<Foo>` re-emits as `<Foo />`: a single space, which is what
+    // the declared whitespace-style delta covers.
+    expect(expectEquivalent("x := <Foo/>\n")).toBe("x := <Foo>\n")
+
+  it "handles sibling tags at the same indent", ->
+    expect(expectEquivalent("x := <div>\n  <Foo />\n  <Bar />\n</div>\n"))
+      .toBe("x := <div>\n  <Foo>\n  <Bar>\n</div>\n")
+
+  it "keeps the indentation of a slash on its own line", ->
+    expect(expectEquivalent("x := <div>\n  <Foo\n    a=1\n  />\n</div>\n"))
+      .toBe("x := <div>\n  <Foo\n    a=1\n  >\n</div>\n")
+
+  it "sees past a '>' inside an attribute string", ->
+    expect(expectEquivalent('x := <Foo a=">" />\n')).toBe('x := <Foo a=">">\n')
+
+  it "handles a spread attribute", ->
+    expect(expectEquivalent("x := <Foo {...p} />\n")).toBe("x := <Foo {...p}>\n")
+
+  it "is idempotent", ->
+    once := fix("x := <Foo a=1 />\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-bare-self-closing-jsx exclusions", ->
+  it "leaves an inline tag alone", ->
+    // `<div><Foo /><Bar /></div>` -> `<div><Foo><Bar></div>` makes <Bar> a CHILD
+    // of <Foo>. The slashless form is only self-closing when nothing follows it
+    // on the line.
+    unchanged("x := <div><Foo /><Bar /></div>\n")
+
+  it "leaves a tag inside a ternary alone", ->
+    // `{a ? <Foo> : <Bar />}` does not parse at all.
+    unchanged("x := <div>\n  {a ? <Foo /> : <Bar />}\n</div>\n")
+
+  it "leaves a tag followed by text on the same line", ->
+    unchanged("x := <span>a <Icon /> b</span>\n")
+
+  it "leaves a tag with a closing partner alone", ->
+    unchanged("x := <div>\n  <span>hi</span>\n</div>\n")
+
+  it "leaves a slash inside a comment alone", ->
+    unchanged("// <Foo a=1 />\nx := 1\n")
+
+  it "leaves a tag whose parent closer shares its name", ->
+    // `</div>` would pair with the slashless `<div>` instead of with its parent,
+    // so the parent loses its closing tag. `<Foo />` in the same position is
+    // fine, which is why this only bites on HTML-cased tags.
+    unchanged("x := <div .outer>\n  <div .spot />\n</div>\n")
+
+  it "leaves a tag followed by a group closer", ->
+    // `{cond and (` … `)}` -- the slashless form stops parsing once the group
+    // closes after it.
+    unchanged("x := <div>\n  {c and (\n    b ? null : (\n      <Foo p=1 />\n    )\n  )}\n</div>\n")
+
+  it "leaves a tag that ends a JSX attribute container", ->
+    // The inner <Timer/> keeps its slash -- `)}` follows it. The outer <Panel/>
+    // is still rewritten: nothing follows it at all.
+    expect(expectEquivalent("x := <Panel\n  slot={cond ? null : (\n    <Timer id=1 />\n  )}\n/>\n"))
+      .toBe("x := <Panel\n  slot={cond ? null : (\n    <Timer id=1 />\n  )}\n>\n")
+
+  it "still fires when a sibling tag follows a same-named parent closer", ->
+    // The guard is about the NEXT non-blank line only: here a sibling follows,
+    // so `<div .spot>` is terminated by it rather than by `</div>`.
+    expect(expectEquivalent("x := <div .outer>\n  <div .a />\n  <span .b />\n</div>\n"))
+      .toBe("x := <div .outer>\n  <div .a>\n  <span .b>\n</div>\n")
