@@ -29,6 +29,7 @@ import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./prefer-bare-jsx-values.civet"
 import { preferUnclosedJsxRule } from "./prefer-unclosed-jsx.civet"
+import { preferPropertyGroupShorthandRule } from "./prefer-property-group-shorthand.civet"
 import { preferHashCommentsRule } from "./prefer-hash-comments.civet"
 import { preferSlashCommentsRule } from "./prefer-slash-comments.civet"
 import { preferWalrusDeclarationsRule } from "./prefer-walrus-declarations.civet"
@@ -78,6 +79,7 @@ export {
   preferTerseImportsRule,
   preferBareJsxValuesRule,
   preferUnclosedJsxRule,
+  preferPropertyGroupShorthandRule,
   preferHashCommentsRule,
   preferSlashCommentsRule,
   preferWalrusDeclarationsRule,

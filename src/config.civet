@@ -122,6 +122,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-length-shorthand": "error"
       "style/prefer-typeof-shorthand": "error"
       "style/prefer-property-shorthand": "error"
+      "style/prefer-property-group-shorthand": "error"
       // style/prefer-implicit-return is deliberately NOT in this preset. Civet's
       // implicit-return semantics are subtle enough that the rule still proposes
       // fixes the equivalence gate rejects -- 22 sites on a 441-file production

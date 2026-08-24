@@ -20,7 +20,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Bidirectional Civet Style Rules**: 42 built-in rules covering idiomatic Civet style, Coffee/React conventions, and compiler-safe migration toward standard Civet.
+- 🎯 **Bidirectional Civet Style Rules**: 43 built-in rules covering idiomatic Civet style, Coffee/React conventions, and compiler-safe migration toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `civet-idiomatic`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
@@ -201,6 +201,7 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-length-shorthand`: `"error"` (fixable, forbids `coffeeComment`)
 - `style/prefer-typeof-shorthand`: `"error"` (fixable)
 - `style/prefer-property-shorthand`: `"error"` (fixable)
+- `style/prefer-property-group-shorthand`: `"error"` (fixable)
 - `style/prefer-bare-for`: `"error"` (fixable)
 - `style/prefer-bare-conditions`: `"error"` (fixable)
 - `style/prefer-existential-check`: `"warn"` (fixable)
@@ -289,7 +290,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 42 built-in style, correctness, and migration rules.
+`civet-clint` currently provides 43 built-in style, correctness, and migration rules.
 
 ### Fixable Rules
 
@@ -307,6 +308,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-length-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-length-shorthand.civet) | Convert `arr.length` and `arr?.length` to `arr#` and `arr?#`. Skipped under `coffeeComment`, where `#` opens a line comment and `arr#` would truncate the line. | not `coffeeComment` |
 | [`style/prefer-typeof-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-typeof-shorthand.civet) | Convert `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`. | — |
 | [`style/prefer-property-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-shorthand.civet) | Convert `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`. | — |
+| [`style/prefer-property-group-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-group-shorthand.civet) | Group a run of shorthand properties sharing a receiver: `{ a.b, a.c }` → `{ a.{b,c} }`. Plain-identifier receivers only — see below. | — |
 | [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, loops, valueless `return`, and any `return` that is not textually last. **Not in any preset** — see below. | — |
 | [`style/prefer-bare-for`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-for.civet) | Convert `for const x of xs` and `for (const x of xs)` to `for x of xs`. | — |
 | [`style/prefer-bare-conditions`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-conditions.civet) | Omit outer parentheses around `if`, `unless`, `while`, and `switch` condition expressions. Verified via `whitespace-style` output delta. | — |
@@ -490,6 +492,25 @@ the enclosing element's, so it shows up on HTML-cased tags and never on componen
 `<pre>` and `<textarea>` are skipped on the guide's authority, not the compiler's —
 the equivalence gate accepts dropping their closers, but re-emitting a closer on its
 own line inside a whitespace-preserving element is not a change worth assuming away.
+
+#### `style/prefer-property-group-shorthand` — why the receiver must be an identifier
+
+Style-guide item 10 has two halves. `style/prefer-property-shorthand` does the first
+(`b: a.b` → `a.b`); this rule groups the result. It matches only the already-shortened
+form on purpose — grouping the long form directly would put two rules' edits over the
+same characters in one pass. Both are in `civet-idiomatic`, so long-form source
+converges in two passes.
+
+The receiver has to be a plain identifier, because Civet caches a compound one to keep
+it single-evaluation:
+
+```civet
+{ a.b, a.c }      ✅  → { a.{b,c} }        emits  {b: a.b, c: a.c}
+{ a?.b, a?.c }    ✅  → { a?.{b,c} }
+{ a.q.b, a.q.c }  ❌  → { a.q.{b,c} }      emits  let ref;{b:(ref = a.q).b,c:ref.c}
+```
+
+That last one is a behaviour change, not a layout one, so the rule leaves it alone.
 
 ### Diagnostic Rules
 

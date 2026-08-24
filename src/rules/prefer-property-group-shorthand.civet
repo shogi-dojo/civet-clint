@@ -1,0 +1,96 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// Erik Demaine's Civet style guide, item 10, second half: "`b: a.b, c: a.c` can be
+// further abbreviated `a.{b,c}`."
+//
+//   { a.b, a.c }   ->   { a.{b,c} }
+//
+// This rule takes over where style/prefer-property-shorthand leaves off: that one
+// turns `b: a.b` into `a.b`, this one groups a run of them. Matching only the
+// already-shortened form is deliberate -- grouping the long form directly would
+// mean two rules proposing overlapping edits over the same characters in one pass.
+// Both are in the `civet-idiomatic` preset, so long-form source converges in two.
+//
+// Emitted JS differs only in spacing (`{b: a.b, c: a.c}` vs `{b:a.b,c:a.c}`), hence
+// the `whitespace-style` delta.
+//
+// The receiver has to be a plain identifier. Civet caches a compound receiver to
+// keep it single-evaluation, which is a real change, not a layout one:
+//
+//   { a.q.b, a.q.c }  ->  { a.q.{b,c} }  emits  let ref;{b:(ref = a.q).b,c:ref.c}
+const SIMPLE_MEMBER = /^([A-Za-z_$][\w$]*)(\??\.)([A-Za-z_$][\w$]*)$/
+
+export const preferPropertyGroupShorthandRule: Rule = {
+  id: "style/prefer-property-group-shorthand"
+  meta: {
+    description: "Prefer grouped property shorthand '{ a.{b,c} }' over '{ a.b, a.c }'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("whitespace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    // A property that is already `a.b` shorthand, broken into its parts.
+    describe := (prop: any): { receiver: string, accessor: string, name: string, start: number, end: number } | undefined ->
+      return undefined unless prop?.type is "Property" and prop.implicitName
+      value := prop.value
+      return undefined unless value?.type is "MemberExpression"
+      span := tree.range(value)
+      return undefined unless span?
+      match := SIMPLE_MEMBER.exec(source.slice(span.start, span.end).trim())
+      return undefined unless match
+      { receiver: match[1], accessor: match[2], name: match[3], start: span.start, end: span.end }
+
+    tree.visit ["ObjectExpression", "ObjectLiteral"], (obj) ->
+      span := tree.range(obj)
+      return unless span?
+      // Only a braced literal. In a brace-free, indentation-delimited object the
+      // grouped form is a bare expression statement, not a property.
+      return unless source.slice(span.start, span.end).trimStart().startsWith("{")
+      props := obj.properties
+      return unless Array.isArray(props)
+
+      var run: any[] = []
+      flush := ->
+        current := run
+        run = []
+        return unless current.length > 1
+        first := current[0]
+        last := current[current.length - 1]
+        return if seen.has(first.start)
+        return if intersectsRange(ignoredRanges, first.start, last.end)
+        seen.add(first.start)
+
+        replacement := `${first.receiver}${first.accessor}{${current.map((p) -> p.name).join(",")}}`
+        edit := { start: first.start, end: last.end, replacement }
+        edits.push(edit)
+        ctx.report({
+          ruleId: "style/prefer-property-group-shorthand"
+          message: `Group '${source.slice(first.start, last.end)}' as '${replacement}'`
+          pos: first.start
+          fix: edit
+        })
+
+      for prop of props
+        info := describe(prop)
+        if info? and (run.length is 0 or (run[0].receiver is info.receiver and run[0].accessor is info.accessor))
+          run.push(info)
+        else
+          flush()
+          run = info? ? [info] : []
+      flush()
+}

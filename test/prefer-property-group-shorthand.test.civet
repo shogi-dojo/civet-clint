@@ -1,0 +1,75 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
+
+RULE := "style/prefer-property-group-shorthand"
+DIAL := {}
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeWhitespaceStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeWhitespaceStyle(compileSource(source, DIAL)))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-property-group-shorthand", ->
+  it "groups a pair of shorthand properties", ->
+    expect(expectEquivalent("y := {a.b, a.c}\n")).toBe("y := {a.{b,c}}\n")
+
+  it "groups three", ->
+    expect(expectEquivalent("y := {a.b, a.c, a.d}\n")).toBe("y := {a.{b,c,d}}\n")
+
+  it "groups a run surrounded by other properties", ->
+    expect(expectEquivalent("y := {x: 1, a.b, a.c, z: 2}\n")).toBe("y := {x: 1, a.{b,c}, z: 2}\n")
+
+  it "groups an optional-chained run", ->
+    expect(expectEquivalent("y := {a?.b, a?.c}\n")).toBe("y := {a?.{b,c}}\n")
+
+  it "groups across lines", ->
+    expect(expectEquivalent("y := {\n  a.b\n  a.c\n}\n")).toBe("y := {\n  a.{b,c}\n}\n")
+
+  it "is idempotent", ->
+    once := fix("y := {a.b, a.c}\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "converges from the long form once prefer-property-shorthand has run", ->
+    // The two rules split item 10 between them: shorthand first, then grouping.
+    // Matching only the shortened form is what keeps their edits from overlapping.
+    rules := {
+      "style/prefer-property-shorthand": "error"
+      [RULE]: "error"
+    }
+    once := lintSource("y := {b: a.b, c: a.c}\n", { rules, fix: true, civetOptions: DIAL })
+    twice := lintSource(once.fixedSource!, { rules, fix: true, civetOptions: DIAL })
+    expect(twice.fixedSource).toBe("y := {a.{b,c}}\n")
+
+describe "style/prefer-property-group-shorthand exclusions", ->
+  it "leaves a run with different receivers", ->
+    unchanged("y := {a.b, d.c}\n")
+
+  it "leaves a compound receiver", ->
+    // `{a.q.b, a.q.c}` -> `{a.q.{b,c}}` emits `let ref;{b:(ref = a.q).b,c:ref.c}`.
+    // Civet caches the receiver to keep it single-evaluation: a real change, not a
+    // layout one.
+    unchanged("y := {a.q.b, a.q.c}\n")
+
+  it "leaves a run whose accessors differ", ->
+    unchanged("y := {a.b, a?.c}\n")
+
+  it "leaves a lone shorthand property", ->
+    unchanged("y := {a.b, x: 1}\n")
+
+  it "leaves the long form to prefer-property-shorthand", ->
+    unchanged("y := {b: a.b, c: a.c}\n")
+
+  it "leaves a brace-free object", ->
+    unchanged("y :=\n  b: a.b\n  c: a.c\n")
