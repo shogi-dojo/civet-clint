@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Widened `style/prefer-indented-blocks` to paren-free heads.** It only
+  recognised a head that still had its parens (`if (a) {`), so `if a {` was skipped
+  and its braces were stranded -- nothing else in the rule set removes a brace whose
+  head is paren-free. That gap is why `style/prefer-unless` and
+  `style/prefer-bare-for` each had to refuse a braced head. With it closed,
+  `if (not a) { … }` now converges all the way to `unless a` plus an indented body
+  in two passes, and the previously stuck `if not a { … }` converges too.
+
 - **Widened `style/prefer-existential-check`**: it now scans tokens rather than a
   single regex, so it also sees reversed operands (`null != x`) and non-identifier
   left-hand sides, and it autofixes the two shapes that are provably equivalent --

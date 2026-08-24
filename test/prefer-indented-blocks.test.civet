@@ -29,6 +29,27 @@ describe "style/prefer-indented-blocks", ->
     expect(fix("f = =>\n  while (a) {\n    g()\n    k()\n  }\n").fixedSource)
       .toBe("f = =>\n  while a\n    g()\n    k()\n")
 
+  it "de-braces a head that has already lost its parens", ->
+    // Before this, `if a {` was skipped and the braces were stranded: no other
+    // rule removes a brace whose head is paren-free.
+    expect(fix("f = =>\n  if a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free unless head", ->
+    // A trailing `h()` keeps the block out of expression position, where a braced
+    // body already mis-parses as an object literal before any fix is applied.
+    expect(fix("f = =>\n  unless a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  unless a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free for head", ->
+    expect(fix("f = =>\n  for x of xs {\n    g(x)\n    k(x)\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  for x of xs\n    g(x)\n    k(x)\n  h()\n")
+
+  it "keeps parens that do not wrap the whole condition", ->
+    // `if (a) and b` -- the parens are load-bearing, so only the braces go.
+    expect(fix("f = =>\n  if (a) and b {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if (a) and b\n    g()\n    k()\n  h()\n")
+
   it "reports every braced block it finds", ->
     result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
     expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)

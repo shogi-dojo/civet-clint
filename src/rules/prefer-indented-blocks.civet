@@ -39,9 +39,14 @@ function unwrapCondition(cond: string): string
 function civetHead(keyword: string, tail: string): string | undefined
   trimmed := tail.trim()
   return keyword if trimmed.length is 0
-  return undefined unless trimmed.startsWith("(") and trimmed.endsWith(")")
-  var cond = unwrapCondition(trimmed)
-  return undefined if cond is trimmed and not trimmed.startsWith("(")
+  // A head that has already lost its parens (`if a {`) still has braces to drop.
+  // Skipping it used to strand them -- nothing else removes a brace whose head is
+  // paren-free -- which is why style/prefer-unless and style/prefer-bare-for both
+  // grew a guard that refuses to un-paren a braced head. Those guards can stay:
+  // one rule per concern, and this one now handles either shape.
+  var cond = (trimmed.startsWith("(") and trimmed.endsWith(")"))
+    ? unwrapCondition(trimmed)
+    : trimmed
   if keyword is "for"
     // `for (const x of xs)` -> `for x of xs`; a C-style head keeps its `let`.
     cond = cond.replace(/^(?:const|var)\s+/, "")
