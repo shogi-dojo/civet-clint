@@ -28,8 +28,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Widened `style/prefer-existential-check`**: enabled autofixing for `x != null`, `null != x`, `x !== undefined` → `x?` and `x == null`, `x === undefined` → `not x?` via AST and token scanning across non-identifier expressions.
+- **Widened `style/prefer-existential-check`**: it now scans tokens rather than a
+  single regex, so it also sees reversed operands (`null != x`) and non-identifier
+  left-hand sides, and it autofixes the two shapes that are provably equivalent --
+  `x != null` → `x?` and `x == null` → `not x?`. Strict (`!==` / `===`) and
+  `undefined` comparisons are reported without a fix; see **Fixed** below.
+
+- `style/prefer-implicit-return` is **not** part of the `civet-idiomatic` preset.
+  It still proposes fixes the equivalence gate rejects (22 sites on a 441-file
+  production codebase), and a rejected fix surfaces as an error, so at `error` in
+  a preset it would make `clint --check` fail on conformant code. The rule is
+  registered and supported; enable it explicitly.
 - **Widened `style/prefer-walrus-declarations`**: added `let x = …` → `x .= …` support and removed the `autoLet` dialect requirement since both `.=` and `:=` compile byte-identically under standard Civet.
+
+### Fixed
+
+- **`style/prefer-existential-check` no longer advertises fixes the gate rejects.**
+  `x?` lowers to the *loose* `x != null`, so only `x != null` -> `x?` and
+  `x == null` -> `not x?` are behaviour-preserving. The rule attached a fix to
+  every shape, including strict `!==` / `===` and comparisons against
+  `undefined`, which are genuine behaviour changes (`x !== null` is true for
+  `undefined`; `x?` is false). The equivalence gate correctly rejected all of
+  them, so `clint` reported "N fixable with --write" on diagnostics that
+  `--write` could never apply, on every run. Those shapes are now reported
+  without a fix and the message states the reason.
+
+- **`style/prefer-length-shorthand` is now skipped under `coffeeComment`.** With
+  that option on, `#` opens a line comment, so `arr#` does not mean `arr.length`
+  -- it truncates the line (`const n = arr//`), and in JSX or an arrow body it
+  fails to parse outright. The rule reported 391 findings on a 441-file
+  `coffeeComment` codebase, every one of them rejected by the equivalence gate.
+  It now declares `forbids: ["coffeeComment"]` and is skipped there; the
+  shorthand is correct under every other dial.
+
+- **`style/prefer-implicit-return` no longer fires on a `return` that is not the
+  function's tail.** Scanning the final entry tuple for a `ReturnStatement` could
+  match one belonging to a nested block, and a valueless `return` still presents
+  an AST `expression`, so both reached the fix. Because fixes are accepted or
+  rejected per rule per file, one bad site also took the valid fixes in that file
+  down with it.
+
+- **`style/prefer-property-shorthand` only fires inside braced object literals.**
+  The style guide scopes the shorthand to braced objects; in a brace-free,
+  indentation-delimited object, `a.name` on its own line is a bare expression
+  statement rather than a property.
+
+- **`style/prefer-bare-for` keeps the parens on a single-line `for (...) body`.**
+  There the parens separate head from body; dropping them runs the two together.
+
+- **`style/prefer-unless` and `style/prefer-bare-for` defer a braced head to
+  `style/prefer-indented-blocks`.** That rule only recognises a head that still
+  has its parens, so rewriting `if (not a) {` into `unless a {` -- or stripping
+  the parens from `for (const x of xs) {` -- stranded the braces with no rule
+  able to remove them. `style/prefer-bare-conditions` already had this guard.
 
 ## [0.6.0] - 2026-08-23
 

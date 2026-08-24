@@ -15,6 +15,20 @@ export const preferPropertyShorthandRule: Rule = {
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
 
+    // The shorthand is only valid inside a BRACED object literal -- the style guide
+    // says so explicitly ("In braced object literals, `b: a.b` can be abbreviated
+    // `a.b`"). In a brace-free, indentation-delimited object, `topLevel.name` on its
+    // own line is a bare expression statement rather than a property, so the fix
+    // silently changes the object's shape and the gate rejects it.
+    bracedObjectSpans: { start: number, end: number }[] := []
+    tree.visit ["ObjectExpression", "ObjectLiteral"], (obj) ->
+      span := tree.range(obj)
+      return unless span?
+      bracedObjectSpans.push(span) if source.slice(span.start, span.end).trimStart().startsWith("{")
+
+    insideBracedObject := (pos: number): boolean ->
+      bracedObjectSpans.some (span) -> span.start <= pos and pos < span.end
+
     tree.visit "Property", (node) ->
       return unless node.name? and node.name.type is "Identifier"
       keyName := node.name.name
@@ -33,6 +47,7 @@ export const preferPropertyShorthandRule: Rule = {
 
       pos := nameSpan.start
       end := valSpan.end
+      return unless insideBracedObject(pos)
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, end)
       seen.add(pos)

@@ -46,3 +46,13 @@ describe "style/prefer-property-shorthand guards", ->
 
   it "leaves strings alone", ->
     unchanged("s := \"{ b: a.b } in string\"\n")
+
+  it "leaves a brace-free indented object alone", ->
+    // The style guide scopes the shorthand to BRACED object literals. Without the
+    // braces, `topLevel.name` on its own line is a bare expression statement, not a
+    // property -- the fix would silently change the object's shape.
+    unchanged("o =\n  name: a.name\n  size: a.size\n")
+
+  it "still fixes a braced object on the same binding", ->
+    expect(fix("o := { name: a.name }\n").fixedSource).toBe("o := { a.name }\n")
+

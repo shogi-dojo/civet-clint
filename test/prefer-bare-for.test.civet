@@ -57,3 +57,9 @@ describe "style/prefer-bare-for guards", ->
     // Stripping the parens here would strand the braces: prefer-indented-blocks
     // only matches a head that still has them.
     unchanged("for (const x of xs) {\n  g(x)\n}\n")
+
+  it "leaves a single-line 'for (...) body' alone", ->
+    // The parens separate head from body on one line; dropping them would run
+    // `for n of xs g(n)` together as a single expression.
+    unchanged("for (const n of xs) g(n)\n")
+

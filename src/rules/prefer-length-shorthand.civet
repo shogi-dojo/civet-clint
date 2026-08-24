@@ -8,6 +8,20 @@ export const preferLengthShorthandRule: Rule = {
     fixable: true
     defaultSeverity: "error"
     phase: "idiom"
+    capabilities: {
+      // Under coffeeComment, `#` opens a line comment, so `arr#` does not mean
+      // `arr.length` at all -- it truncates the line:
+      //
+      //   arr#                 ->  arr//
+      //   x := c# is 0         ->  const x = c// is 0
+      //   <A n={m#} />         ->  parse error
+      //
+      // The equivalence gate rejects every one of these, so the rule was reporting
+      // hundreds of findings that --write could never apply (391 on a 441-file
+      // codebase) and emitting a compiler-equivalence-mismatch error on every run.
+      // The shorthand is correct under every dial that does not enable it.
+      forbids: ["coffeeComment"]
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

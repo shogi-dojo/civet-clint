@@ -53,3 +53,15 @@ describe "style/prefer-implicit-return guards", ->
 
   it "bails on return inside a loop body", ->
     unchanged("function f(xs) {\n  for (const x of xs) {\n    return x\n  }\n}\n")
+
+  it "leaves a valueless 'return' alone", ->
+    // Deleting a bare `return` does not preserve the return value -- the function
+    // would start returning whatever the preceding statement evaluated to. A
+    // valueless return still presents an AST `expression`, so this needs a source
+    // check, not just a structural one.
+    unchanged("f := =>\n  g()\n  return\n")
+
+  it "leaves a 'return' that is not the last statement", ->
+    // Matched via the function's final entry tuple, but control flow depends on it.
+    unchanged("f := (t) =>\n  if t.a\n    return t.a()\n  if t.b\n    t.b()\n")
+

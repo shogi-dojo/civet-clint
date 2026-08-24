@@ -31,6 +31,23 @@ export const preferImplicitReturnRule: Rule = {
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
 
+    // Every function span in the file, so a candidate `return` can be attributed to
+    // the INNERMOST function that contains it. Without this, an outer function
+    // matches a `return` that belongs to a nested arrow -- dropping it there
+    // changes what the inner callback yields, which `act` and other
+    // thenable-sensitive callees are sensitive to.
+    fnSpans: { start: number, end: number }[] := []
+    tree.visit FN_NODE_TYPES, (fn) ->
+      span := tree.range(fn)
+      fnSpans.push(span) if span?
+
+    innermostFnSpan := (pos: number): { start: number, end: number } | undefined ->
+      var best: { start: number, end: number } | undefined = undefined
+      for span of fnSpans
+        continue unless span.start <= pos and pos < span.end
+        best = span if not best? or span.start > best.start or span.end < best.end
+      best
+
     tree.visit FN_NODE_TYPES, (fnNode) ->
       if fnNode.generator
         isGen := Array.isArray(fnNode.generator) ? fnNode.generator.length > 0 : Boolean(fnNode.generator)
@@ -54,6 +71,28 @@ export const preferImplicitReturnRule: Rule = {
 
       return if tree.hasAncestorType(lastStmt, LOOP_TYPES)
 
+      // The structural check above is not sufficient on its own: when a function's
+      // final entry is a tuple, scanning it for a ReturnStatement can pick up a
+      // `return` that belongs to a nested block rather than the function tail --
+      //
+      //   if tab.onClick
+      //     return tab.onClick()     <- matched here, but NOT the last statement
+      //   if isStaticMode
+      //     ...
+      //
+      // Dropping that `return` changes control flow, so the equivalence gate
+      // rejected it on every run (37 sites on a 441-file codebase). Require the
+      // statement to also be textually last: nothing but whitespace and block
+      // closers may follow it inside the function.
+      stmtSpan := tree.range(lastStmt)
+      fnSpan := tree.range(fnNode)
+      return unless stmtSpan? and fnSpan?
+      return unless /^[\s});]*$/.test(source.slice(stmtSpan.end, fnSpan.end))
+
+      // The return must belong to THIS function, not to a nested one.
+      inner := innermostFnSpan(stmtSpan.start)
+      return unless inner? and inner.start is fnSpan.start and inner.end is fnSpan.end
+
       returnTok := tree.tokens(lastStmt).find (t) ->
         (t.raw.trim() is "return" or t.value.trim() is "return") and not t.synthetic
       return unless returnTok?
@@ -62,6 +101,18 @@ export const preferImplicitReturnRule: Rule = {
       var after = returnTok.range.end
       while source[after] is " " or source[after] is "\t"
         after++
+
+      // A bare `return` carries no value, and deleting it does not make the
+      // function return the same thing -- it makes the function return whatever
+      // the preceding statement evaluated to. The AST check above is not enough:
+      // a valueless return still presents an `expression`, so this shape reached
+      // the fix and was rejected by the gate on every run, taking the other
+      // (valid) fixes in the same file down with it, since fixes are accepted or
+      // rejected per rule per file.
+      rest := source.slice(after)
+      return if rest.length is 0
+      return if /^[\r\n]/.test(rest)
+      return if /^(?:\/\/|#)/.test(rest)
 
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, after)

@@ -197,10 +197,9 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
 - `style/prefer-unless`: `"error"` (fixable)
 - `style/prefer-at-shorthand`: `"error"` (fixable)
-- `style/prefer-length-shorthand`: `"error"` (fixable)
+- `style/prefer-length-shorthand`: `"error"` (fixable, forbids `coffeeComment`)
 - `style/prefer-typeof-shorthand`: `"error"` (fixable)
 - `style/prefer-property-shorthand`: `"error"` (fixable)
-- `style/prefer-implicit-return`: `"error"` (fixable)
 - `style/prefer-bare-for`: `"error"` (fixable)
 - `style/prefer-bare-conditions`: `"error"` (fixable)
 - `style/prefer-existential-check`: `"warn"` (fixable)
@@ -304,10 +303,10 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-existential-check`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-existential-check.civet) | Convert `x != null`, `null != x`, `x !== undefined` to `x?`, and `x == null`, `x === undefined` to `not x?`. | — |
 | [`style/prefer-unless`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unless.civet) | Convert `if not a` and `if (!a)` to `unless a`. Bails on binary expressions and existential negations to guard operator precedence. | — |
 | [`style/prefer-at-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-at-shorthand.civet) | Convert `this.x`, `this?.x`, `this[k]`, `this.#p`, and `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`. | — |
-| [`style/prefer-length-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-length-shorthand.civet) | Convert `arr.length` and `arr?.length` to `arr#` and `arr?#`. | — |
+| [`style/prefer-length-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-length-shorthand.civet) | Convert `arr.length` and `arr?.length` to `arr#` and `arr?#`. Skipped under `coffeeComment`, where `#` opens a line comment and `arr#` would truncate the line. | not `coffeeComment` |
 | [`style/prefer-typeof-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-typeof-shorthand.civet) | Convert `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`. | — |
 | [`style/prefer-property-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-shorthand.civet) | Convert `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`. | — |
-| [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, and loops. | — |
+| [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, loops, valueless `return`, and any `return` that is not textually last. **Not in any preset** — see below. | — |
 | [`style/prefer-bare-for`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-for.civet) | Convert `for const x of xs` and `for (const x of xs)` to `for x of xs`. | — |
 | [`style/prefer-bare-conditions`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-conditions.civet) | Omit outer parentheses around `if`, `unless`, `while`, and `switch` condition expressions. Verified via `whitespace-style` output delta. | — |
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
@@ -325,6 +324,22 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces and head parens from a JS-style statement block (`if` / `for` / `while` / `switch` / `try` / `catch` / `finally`), letting indentation delimit the body. Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
 | [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--rewrite`; not by `--write`. | — |
 | [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--rewrite`; not by `--write`. | — |
+
+#### `style/prefer-implicit-return` — why it is opt-in
+
+The rule is correct for the shapes it handles, but Civet's implicit-return
+semantics are subtle enough that it still proposes fixes the equivalence gate
+rejects: 22 sites across a 441-file production codebase. A rejected fix surfaces
+as a `compiler-equivalence-mismatch` error, so at `error` in a preset it would
+make `clint --check` exit non-zero on style-guide-conformant code, on every run.
+
+It is registered and fully supported — enable it explicitly:
+
+```json
+{ "rules": { "style/prefer-implicit-return": "error" } }
+```
+
+It will move into `civet-idiomatic` once that number is zero.
 
 #### `style/prefer-indented-blocks` — the two shapes reported without a fix
 

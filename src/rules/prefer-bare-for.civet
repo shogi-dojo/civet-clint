@@ -50,8 +50,15 @@ export const preferBareForRule: Rule = {
       // recognizes a head that still has its parens, so stripping them here would
       // strand the braces with no rule able to remove them.
       headLineEnd := source.indexOf("\n", forTok.range.start)
-      headLine := source.slice(forTok.range.start, headLineEnd < 0 ? source.length : headLineEnd)
+      endOfHeadLine := headLineEnd < 0 ? source.length : headLineEnd
+      headLine := source.slice(forTok.range.start, endOfHeadLine)
       return if headLine.trim().endsWith("{")
+
+      // A single-line `for (...) body` keeps its parens: they are what separates the
+      // head from the body. Dropping them runs the two together --
+      // `for n of [...] tapTile(n)` is not the same statement.
+      if closeParen?
+        return unless /^[ \t]*$/.test(source.slice(closeParen.range.end, endOfHeadLine))
 
       pos := openParen ? openParen.range.start : constTok.range.start
       return if seen.has(pos)

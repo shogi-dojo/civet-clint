@@ -121,7 +121,13 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-length-shorthand": "error"
       "style/prefer-typeof-shorthand": "error"
       "style/prefer-property-shorthand": "error"
-      "style/prefer-implicit-return": "error"
+      // style/prefer-implicit-return is deliberately NOT in this preset. Civet's
+      // implicit-return semantics are subtle enough that the rule still proposes
+      // fixes the equivalence gate rejects -- 22 sites on a 441-file production
+      // codebase, each one making `clint --write` non-convergent and `--check`
+      // exit non-zero on conformant code. The rule is correct for the shapes it
+      // does handle and stays available opt-in; it should not gate CI by default
+      // until that number is zero.
       "style/prefer-bare-for": "error"
       "style/prefer-bare-conditions": "error"
       "style/prefer-existential-check": "warn"
