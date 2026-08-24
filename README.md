@@ -323,7 +323,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert `:=` and exported auto-bindings to explicit `const`/`let` declarations. Bare `autoLet` requires scope/hoisting analysis and remains untouched. | `autoLet` |
 | [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove a comma before a closing bracket, brace or paren — object literals, arrays, argument lists, destructuring patterns and import clauses. Never edits regex literals, array elisions, or a comma after a rest element. Verified via `trailing-comma-style` output delta. | — |
 | [`style/prefer-indented-object`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-object.civet) | Drop the braces from a multi-line object literal bound to a declaration, letting indentation delimit it. | — |
-| [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces and head parens from a JS-style statement block (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` / `finally`), letting indentation delimit the body. Handles a head that has already lost its parens (`if a {`) as well as `if (a) {`. Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
+| [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces from a JS-style block, letting indentation delimit the body: statement blocks (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` / `finally`, with or without head parens) and declaration bodies (`function` / `class` / method). Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
 | [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--rewrite`; not by `--write`. | — |
 | [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--rewrite`; not by `--write`. | — |
 
@@ -342,6 +342,27 @@ It is registered and fully supported — enable it explicitly:
 ```
 
 It will move into `civet-idiomatic` once that number is zero.
+
+#### `style/prefer-indented-blocks` — what counts as a block
+
+Statement heads and declaration bodies both qualify; every shape below was probed
+byte-identical against `@danielx/civet@0.11.15`:
+
+```civet
+if (a) {  ✅   if a {  ✅   function f(x) {  ✅   class A {  ✅   m(x) {  ✅
+```
+
+Three do not, each for a different reason:
+
+```civet
+f := (x) => { … }    // style/no-braced-arrow-body's — de-bracing is a repair,
+                     // not a layout change, and blocks nested inside one are
+                     // skipped too until that rule has run
+f(x) { a: 1 }        // a CALL, not a method: compiles to `f(x)({a: 1})`. The same
+                     // line only means "method" inside a class or object literal
+clone() { … },       // the closer carries a `,` that separates object properties;
+                     // de-bracing would strand it
+```
 
 #### `style/prefer-indented-blocks` — the two shapes reported without a fix
 

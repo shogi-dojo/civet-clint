@@ -53,6 +53,32 @@ function civetHead(keyword: string, tail: string): string | undefined
     cond = `let ${cond}` if /;/.test(cond) and not cond.startsWith("let ")
   `${keyword} ${cond}`
 
+// Declaration heads whose body indentation delimits just as well as braces do.
+// Every shape below was probed byte-identical: `function f(x) {`, its `export` /
+// `export default` / `async` / generator forms, `f := function (x) {`, `class A {`,
+// `class A extends B {`, and method definitions (`m() {`, `constructor(x) {`,
+// `get v() {`, `static`/`async`/`#private` variants, with or without a TS return
+// type).
+//
+// `=> {` is deliberately absent. An arrow body is style/no-braced-arrow-body's:
+// de-bracing one is a semantic repair, not a layout change.
+FUNCTION_HEAD := /^(?:[A-Za-z_$][\w$.]*\s*(?::=|=)\s*)?(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b[^{]*\)\s*(?::[^{]*?)?\s*\{$/
+CLASS_HEAD := /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b[^{]*\{$/
+METHOD_HEAD := /^(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?\*?\s*[#A-Za-z_$][\w$]*\s*\([^{]*\)\s*(?::[^{]*?)?\s*\{$/
+ARROW_HEAD := /=>\s*\{$/
+
+// What kind of brace opens on this line. `undefined` means "not a head we know",
+// which for the enclosing-context check below reads as an object literal.
+type HeadKind = "statement" | "function" | "class" | "method" | "arrow" | "object"
+
+function classifyHead(trimmed: string): HeadKind
+  return "arrow" if ARROW_HEAD.test(trimmed)
+  return "statement" if HEAD.test(trimmed)
+  return "class" if CLASS_HEAD.test(trimmed)
+  return "function" if FUNCTION_HEAD.test(trimmed)
+  return "method" if METHOD_HEAD.test(trimmed)
+  "object"
+
 export const preferIndentedBlocksRule: Rule = {
   id: "style/prefer-indented-blocks"
   meta: {
@@ -89,30 +115,36 @@ export const preferIndentedBlocksRule: Rule = {
       trimmed := line.trim()
       continue unless trimmed.endsWith("{")
 
-      match := HEAD.exec(trimmed)
-      continue unless match
-      keyword := match[1].replace(/\s+/g, " ")
-      tail := match[2].replace(/\s*\{$/, "")
+      kind := classifyHead(trimmed)
+      continue if kind is "arrow" or kind is "object"
 
       openIdx := lineStarts[i] + line.length - 1
       continue if intersectsRange(ignoredRanges, openIdx, openIdx + 1)
 
       openIndent := indentOf(line)
 
-      // Skip a block nested inside a JS-style braced ARROW body: de-bracing the
-      // inner statement while the enclosing `=> {` … `}` stays put leaves the
+      // The enclosing brace decides two things at once.
+      //
+      // A block nested inside a JS-style braced ARROW body is skipped: de-bracing
+      // the inner statement while the enclosing `=> {` … `}` stays put leaves the
       // indentation inconsistent and the file stops compiling. Those files belong
       // to style/no-braced-arrow-body first; once the arrow is de-braced this rule
       // sees the block on a later pass.
-      var insideBracedArrow = false
+      //
+      // A method head only means "method" inside a class body or an object
+      // literal. At statement level the same line is a CALL with a braced object
+      // argument -- `f(x) { a: 1 }` compiles to `f(x)({a: 1})` -- so de-bracing it
+      // there changes the program.
+      var enclosing: HeadKind | undefined = undefined
       for let j = i - 1; j >= 0; j--
         prev := lines[j]
         continue if prev.trim().length is 0
         prevIndent := indentOf(prev)
         continue if prevIndent >= openIndent
-        insideBracedArrow = /=>\s*\{\s*$/.test(prev.trim()) or /\bfunction\b[^{]*\{\s*$/.test(prev.trim())
+        enclosing = prev.trim().endsWith("{") ? classifyHead(prev.trim()) : undefined
         break
-      continue if insideBracedArrow
+      continue if enclosing is "arrow"
+      continue if kind is "method" and enclosing isnt "class" and enclosing isnt "object"
 
       // Matching closer: the first later line at the opening indent starting `}`.
       var closeLine = -1
@@ -140,7 +172,12 @@ export const preferIndentedBlocksRule: Rule = {
         lastBody = inner.trim()
       continue unless bodyOk and bodyLines > 0
 
-      newHead := civetHead(keyword, tail)
+      newHead := if kind is "statement"
+        match := HEAD.exec(trimmed)!
+        civetHead(match[1].replace(/\s+/g, " "), match[2].replace(/\s*\{$/, ""))
+      else
+        // A declaration head keeps its text; only the brace goes.
+        trimmed.replace(/\s*\{$/, "")
       continue unless newHead?
 
       // A one-statement body ending in `;` is ALREADY an object mis-parse
@@ -162,6 +199,17 @@ export const preferIndentedBlocksRule: Rule = {
 
       closeTrimmed := lines[closeLine].trim()
       closeRest := closeTrimmed.replace(/^\}\s*/, "")
+      // Only a chained head may follow the closer. Anything else is punctuation
+      // that belongs to an enclosing construct and would be stranded -- an object
+      // literal's `},` between properties is the one that showed up on real code:
+      //
+      //   make401 = (e) => ({        make401 = (e) => ({
+      //     clone() {            ->    clone()
+      //       return x                   return x
+      //     },                         ,            <- does not parse
+      //     json: f
+      //   })
+      continue if closeRest.length > 0 and not /^(?:else|catch|finally)\b/.test(closeRest)
       closeEdit := if closeRest.length > 0
         // `} else {` / `} catch (e) {` — keep the tail, it becomes its own head.
         { start: lineStarts[closeLine] + indentOf(lines[closeLine]), end: lineStarts[closeLine] + lines[closeLine].length, replacement: closeRest }

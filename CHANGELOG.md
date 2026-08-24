@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Widened `style/prefer-indented-blocks` to declaration bodies.** `function f(x) {`,
+  `class A {`, and method definitions (`m() {`, `constructor(x) {`, `get v() {`, and
+  their `static` / `async` / generator / `#private` / TS-return-type forms) now lose
+  their braces the same way statement blocks do; all are byte-identical in emit. A
+  block nested inside a function is de-braced in the same pass rather than skipped.
+  Arrow bodies are still `style/no-braced-arrow-body`'s, and two shapes are refused
+  on purpose: `f(x) { a: 1 }` at statement level is a CALL (`f(x)({a: 1})`), not a
+  method, so a method head only counts inside a class body or object literal; and a
+  closer carrying anything but a chained `else` / `catch` / `finally` is left alone,
+  because an object literal's `},` between properties would be stranded.
+
 - **Widened `style/prefer-indented-blocks` to paren-free heads.** It only
   recognised a head that still had its parens (`if (a) {`), so `if a {` was skipped
   and its braces were stranded -- nothing else in the rule set removes a brace whose
