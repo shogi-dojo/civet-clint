@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-24
+
+### Added
+
+- **8 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
+  - `style/prefer-unless`: rewrites `if not X` and `if (!X)` to `unless X` with AST precedence guards on binary operators and existential checks.
+  - `style/prefer-at-shorthand`: rewrites `this.x`, `this?.x`, `this[k]`, `this.#p`, and bare `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`.
+  - `style/prefer-length-shorthand`: rewrites `arr.length` and `arr?.length` to `arr#` and `arr?#`.
+  - `style/prefer-typeof-shorthand`: rewrites `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`.
+  - `style/prefer-property-shorthand`: rewrites `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`.
+  - `style/prefer-implicit-return`: drops explicit trailing `return` keywords from function bodies, method declarations, and arrows, with guards for generators, object literal returns, and loop bodies.
+  - `style/prefer-bare-for`: rewrites `for const x of xs` and `for (const x of xs)` to `for x of xs`.
+  - `style/prefer-bare-conditions`: strips outer parentheses from `if`, `unless`, `while`, and `switch` condition expressions under the `whitespace-style` output delta.
+- **2 new report-only diagnostic rules**:
+  - `style/prefer-optional-type`: flags `T | undefined` and `undefined | T` in favor of `T?` shorthand (diagnostic with explanation of TypeScript union emit wrapping).
+  - `style/prefer-postfix-conditional`: flags one-liner `if (a) return` in favor of postfix `return if a` (diagnostic with explanation of block-brace emit differences).
+- **`civet-idiomatic` preset**: bundles neutral-dial idiom rules covering standard modern Civet style without legacy CoffeeScript options.
+- Exported `noDiscardedArrowReturnRule` and `preferIndentedBlocksRule` alongside all new rules in `src/rules/index.civet`.
+
+### Changed
+
+- **Widened `style/prefer-existential-check`**: enabled autofixing for `x != null`, `null != x`, `x !== undefined` → `x?` and `x == null`, `x === undefined` → `not x?` via AST and token scanning across non-identifier expressions.
+- **Widened `style/prefer-walrus-declarations`**: added `let x = …` → `x .= …` support and removed the `autoLet` dialect requirement since both `.=` and `:=` compile byte-identically under standard Civet.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added

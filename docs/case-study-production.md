@@ -16,7 +16,7 @@ The target codebase consists of:
 
 ## Migration & Rule Validation Results
 
-All 17 built-in `civet-clint` rules were configured in `clint.config.json` at `error` level and enforced with **zero remaining findings**:
+All 17 initial built-in `civet-clint` rules were configured in `clint.config.json` at `error` level and enforced with **zero remaining findings**:
 
 ```json
 {
