@@ -16,15 +16,27 @@ export const preferTypeofShorthandRule: Rule = {
     seen := new Set<number>()
 
     tree.visit (node) ->
-      return unless Array.isArray(node) and node.length >= 5
-      left := node[0]
-      op := node[2]
-      right := node[4]
-      return unless left? and op? and right?
-      return unless left.type is "UnaryExpression"
+      return unless Array.isArray(node) and node.length >= 3
 
-      opToken := op.token
-      return unless opToken is "===" or opToken is "is"
+      opIdx := node.findIndex (c: any) ->
+        c? and typeof c is "object" and (c.token is "===" or c.token is "is")
+      return if opIdx < 0
+
+      var left: any = null
+      for let i = opIdx - 1; i >= 0; i--
+        item := node[i]
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+          left = item
+          break
+
+      var right: any = null
+      for let i = opIdx + 1; i < node.length; i++
+        item := node[i]
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+          right = item
+          break
+
+      return unless left? and right? and left.type is "UnaryExpression"
 
       pre := left.pre
       return unless Array.isArray(pre) and pre.length > 0
