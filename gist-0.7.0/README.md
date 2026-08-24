@@ -58,6 +58,23 @@ arr#    ->  arr.length       # this is the shorthand
 Postfix works everywhere we tried: `a.b.c#`, `xs[0]#`, `fn()#`, `` `str`# ``,
 `obj# = 0`.
 
+There's a second half to this one, and it's the sharper edge: **under
+`coffeeComment`, `#` opens a line comment**, so the postfix form isn't a
+shorthand there at all — it silently eats the rest of the line.
+
+```
+# with coffeeComment enabled
+n := arr#          ->  const n = arr//
+x := c# is 0       ->  const x = c// is 0
+<A n={m#} />       ->  parse error
+```
+
+We only found this by running the rule across a 441-file `coffeeComment`
+codebase: it produced 391 findings, every one rejected by the equivalence gate.
+`civet-clint` now skips the rule entirely when `coffeeComment` is on. If the
+cheat-sheet is used on a CoffeeScript-compatible dial, `#` for `.length` is not
+available — worth a note in the sheet.
+
 ### `unless` needs the negation to cover the *whole* condition
 
 Your parenthetical — *"(if entire condition is negated)"* — is load-bearing, and
@@ -92,14 +109,14 @@ condition. `if not a and b` is left alone.
 | 3 | `is` over `===`, `isnt` over `!==` | ✅ dial-dependent | `prefer-word-operators`, `prefer-is-not` / `no-is-not` |
 | 4 | `foo?` / `not foo?` | ⚠️ partial | `prefer-existential-check` — autofixes only the **loose** `!= null` / `== null`; see below |
 | 5 | `T?` for `T \| undefined` | 📋 report-only | `prefer-optional-type` — TS emit wraps it as `(T \| undefined)` |
-| 6 | `#` for `.length` | ✅ | `prefer-length-shorthand` (postfix — correction above) |
+| 6 | `#` for `.length` | ✅ | `prefer-length-shorthand` (postfix, and **not** under `coffeeComment` — correction above) |
 | 7 | `x <? "foo"` | ✅ | `prefer-typeof-shorthand` |
 | 8 | No `;` | ✅ | `no-trailing-semicolons` |
 | 9 | Braces not needed / implicit blocks | ⚠️ partial | `prefer-indented-blocks`, `prefer-indented-object` — see gap below |
 | 10 | `b: a.b` → `a.b`; `a.{b,c}` | ⚠️ partial | `prefer-property-shorthand` does the first; `a.{b,c}` isn't implemented |
 | 11 | No trailing commas | ✅ | `no-trailing-commas` |
 | 12 | `()` not needed in `() =>` | ✅ | `prefer-concise-arrow` |
-| 13 | Implicit `return` | ✅ | `prefer-implicit-return` |
+| 13 | Implicit `return` | ✅ opt-in | `prefer-implicit-return` — enabled explicitly in this gist's config; see below |
 | 14 | Calls without parens | ⚠️ partial | three rules with hardcoded callee lists (test blocks, matchers, zero-arg arrows) |
 | 15 | `.pinned` for `(f) => f.pinned` | ⚠️ partial | `prefer-ampersand-shorthand` suggests `&.pinned`, report-only — **Q1** |
 | 16 | `if`/`switch` without parens | ✅ | `prefer-bare-conditions` |
@@ -190,8 +207,21 @@ npx clint --rewrite before-utils.ts before-Card.tsx --config clint.config.json
 npx clint --write  after-utils.civet after-Card.civet --config clint.config.json
 ```
 
-`clint.config.json` is one line: `{"preset": "civet-idiomatic"}` — a preset added
-in 0.7.0 that turns on the dial-free idiom rules plus the JSX ones.
+`clint.config.json` is the `civet-idiomatic` preset added in 0.7.0 — the
+dial-free idiom rules plus the JSX ones — with `prefer-implicit-return` turned on
+explicitly:
+
+```json
+{
+  "preset": "civet-idiomatic",
+  "rules": { "style/prefer-implicit-return": "error" }
+}
+```
+
+That rule is opt-in rather than part of the preset: on a 441-file production
+codebase it still proposes 22 fixes the equivalence gate rejects, and a rejected
+fix surfaces as an error, so at `error` in a preset it would fail CI on
+conformant code. It is clean on this sample.
 
 Every autofix is verified by compiling the candidate and comparing emitted output
 against the original; anything that isn't provably equivalent (or bounded by a

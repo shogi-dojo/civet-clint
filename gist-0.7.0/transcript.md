@@ -36,8 +36,9 @@ u.civet
 ✔ Rewrote 2 files
 ```
 
-Eight fixes are reported but not applied in this pass: they only become valid
-once the first round of rewrites has landed, so a second pass picks them up.
+The fixes listed there are reported but not applied in this pass: several only
+become valid once the first round of rewrites has landed, so a second pass
+picks them up.
 
 ## 3. `--write`: run to convergence
 
@@ -59,8 +60,8 @@ u.civet
 
 ## 4. Final state
 
-No errors. Nothing left that claims to be fixable, because the remaining
-diagnostics are the ones that genuinely cannot be autofixed.
+No errors, and nothing left claiming to be fixable — the remaining diagnostics
+are the ones that genuinely cannot be autofixed, and each says why.
 
 ```
 $ npx clint u.civet c.civet --config clint.config.json
