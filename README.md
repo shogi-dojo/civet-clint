@@ -195,7 +195,7 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-implicit-arrow-arg`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
 - `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
-- `style/prefer-bare-self-closing-jsx`: `"error"` (fixable, requires `react`)
+- `style/prefer-unclosed-jsx`: `"error"` (fixable, requires `react`)
 - `style/prefer-unless`: `"error"` (fixable)
 - `style/prefer-at-shorthand`: `"error"` (fixable)
 - `style/prefer-length-shorthand`: `"error"` (fixable, forbids `coffeeComment`)
@@ -316,7 +316,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
-| [`style/prefer-bare-self-closing-jsx`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-self-closing-jsx.civet) | Drop the `/` from a self-closing tag: `<Foo a=1 />` → `<Foo a=1>`. Only where nothing following can be adopted as a child — see below. | `react` |
+| [`style/prefer-unclosed-jsx`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unclosed-jsx.civet) | Drop a redundant closing tag (`<span>hi</span>` → `<span>hi`) and the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`), where indentation already delimits the element. `<pre>`/`<textarea>` keep their closers — see below. | `react` |
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 | [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
 | [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
@@ -429,31 +429,46 @@ already there — the leading run of `className`/`id` on the tag line:
 The last two matter beyond formatting: moving `className` ahead of a `{...spread}`
 changes which value wins. Skipped sites are still reported, so they surface for review.
 
-#### `style/prefer-bare-self-closing-jsx` — when the slash can go
+#### `style/prefer-unclosed-jsx` — when a tag can stay open
 
-Civet decides whether a slashless tag closes itself from what *follows* it, so the
-rewrite is only safe when nothing can be adopted as a child. Four shapes are skipped,
-each because the emitted JSX changes or stops parsing:
+Style-guide item 22 has two halves and this rule does both: drop a closing tag, and
+drop the `/` from a self-closing one. They live in one rule because the engine's
+combined-fix pass verifies a batch by re-deriving each rule's edits on the text the
+*other* rules already changed — split in two, dropping a `</div>` moves what the
+slash half sees on the next line, the replay stops matching, and the whole batch is
+rejected. Use `closingTags` / `selfClosingSlash` to take only one half:
+
+```json
+{ "rules": { "style/prefer-unclosed-jsx": ["error", { "selfClosingSlash": false }] } }
+```
+
+Civet decides where an unclosed element ends from what *follows* it, so both halves
+are guarded by the next non-blank line:
 
 ```civet
 <div>
-  <Foo a=1 />        ✅  → <Foo a=1>      nothing follows but the closing tag
+  <span>hi</span>      ✅  → <span>hi
+  <Icon size=16 />     ✅  → <Icon size=16>
 </div>
 
-<div><Foo /><Bar /></div>   ❌  <Foo> would swallow <Bar/> as its child
-<span>a <Icon /> b</span>   ❌  same, for the text after it
+<span>a</span> tail          ❌  "tail" would become a child of the span
+<div><Foo /><Bar /></div>    ❌  <Foo> would swallow <Bar/>
+<pre>code</pre>              ❌  the guide's stated exception
 
 <div .outer>
-  <div .spot />      ❌  `</div>` would pair with <div .spot>, not <div .outer>
+  <div .spot />              ❌  `</div>` would pair with <div .spot>, not <div .outer>
 </div>
 
-timerSlot={cond ? null : (
-  <Timer id=1 />     ❌  a `)` or `}` closer next stops the parse
+slot={cond ? null : (
+  <Timer id=1 />             ❌  a `)` or `}` closer next stops the parse
 )}
 ```
 
-The third is the subtle one: it only bites when the tag name matches the enclosing
-element's, which is why it shows up on HTML-cased tags and never on components.
+The `<div .spot />` case is the subtle one: it only bites when the tag name matches
+the enclosing element's, so it shows up on HTML-cased tags and never on components.
+`<pre>` and `<textarea>` are skipped on the guide's authority, not the compiler's —
+the equivalence gate accepts dropping their closers, but re-emitting a closer on its
+own line inside a whitespace-preserving element is not a change worth assuming away.
 
 ### Diagnostic Rules
 

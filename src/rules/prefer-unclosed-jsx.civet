@@ -1,0 +1,246 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// Erik Demaine's Civet style guide, item 22: "JSX tags don't need to be closed,
+// assuming you follow indentation. Self-closing tags don't need `/`. One exception
+// is `<pre>` which needs closing `</pre>` to avoid an extra newline."
+//
+//   <div>                  <div>
+//     <span>hi</span>        <span>hi
+//     <Icon size=16 />  ->   <Icon size=16>
+//   </div>
+//
+// Both halves live in one rule on purpose. They edit the same lines, and the
+// engine's combined-fix pass verifies a batch by re-deriving each rule's edits on
+// the text the other rules already changed. Split across two rules, dropping a
+// `</div>` moves what the slash-dropping half sees on the next line, the replay
+// stops matching, and the whole batch is rejected -- 516 files' worth on the
+// 441-file corpus, even though every candidate was individually equivalent. One
+// rule computes all its edits from one snapshot, so the replay always matches.
+// Use the `closingTags` / `selfClosingSlash` options to take only one half.
+//
+// Emitted JS differs only in layout: Civet re-emits a dropped closer on a line of
+// its own (`<span>hi</span>` comes back as `<span>hi\n  </span>`), and JSX strips
+// trailing whitespace that contains a newline, so the children are unchanged.
+// Hence the `whitespace-style` delta.
+//
+// `<pre>` and `<textarea>` keep their closers. The equivalence gate would accept
+// dropping them -- the normalized emit matches -- but the style guide names `<pre>`
+// as its one exception, and for a whitespace-preserving element the re-emitted
+// closer is exactly the kind of layout change that is not safe to assume away.
+const WHITESPACE_SENSITIVE = new Set(["pre", "textarea"])
+
+// Locate the `>` or `/>` that terminates the opening tag starting at `openIdx`
+// (where `source[openIdx]` is `<`). Quotes and `{…}` are skipped so an attribute
+// value containing `>` does not end the scan early.
+function findTagTerminator(source: string, openIdx: number): { start: number, selfClosing: boolean } | undefined
+  var depth = 0
+  var i = openIdx + 1
+  while i < source.length
+    ch := source[i]
+    if ch is '"' or ch is "'" or ch is "`"
+      quote := ch
+      i++
+      while i < source.length and source[i] isnt quote
+        i += source[i] is "\\" ? 2 : 1
+      i++
+      continue
+    if ch is "{"
+      depth++
+      i++
+      continue
+    if ch is "}"
+      depth--
+      i++
+      continue
+    if depth is 0
+      if ch is "/" and source[i + 1] is ">"
+        return { start: i, selfClosing: true }
+      return { start: i, selfClosing: false } if ch is ">"
+      // A nested `<` means the scan walked past this tag's own terminator.
+      return undefined if ch is "<"
+    i++
+  undefined
+
+export const preferUnclosedJsxRule: Rule = {
+  id: "style/prefer-unclosed-jsx"
+  meta: {
+    description: "Prefer unclosed JSX tags and slashless self-closing tags where indentation already delimits the element"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+    capabilities: {
+      requires: ["react"]
+    }
+    defaultOptions: {
+      // `<span>hi</span>` -> `<span>hi`
+      closingTags: true
+      // `<Icon size=16 />` -> `<Icon size=16>`
+      selfClosingSlash: true
+    }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+    dropClosingTags := ctx.options.closingTags isnt false
+    dropSelfClosingSlash := ctx.options.selfClosingSlash isnt false
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("whitespace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    // The first non-blank line after `from`, or undefined at end of file.
+    nextLineAfter := (from: number): string | undefined ->
+      var probe = from
+      while probe < source.length
+        nextEnd := source.indexOf("\n", probe + 1)
+        stop := nextEnd < 0 ? source.length : nextEnd
+        line := source.slice(probe + 1, stop)
+        return line if line.trim().length > 0
+        break if nextEnd < 0
+        probe = stop
+      undefined
+
+    indentOf := (line: string): number -> line.length - line.trimStart().length
+
+    tree.visit "JSXElement", (node) ->
+      tag := node.tag
+      return unless typeof tag is "string" and tag.length > 0
+      span := tree.range(node)
+      return unless span?
+
+      // A JSXElement's span covers its located descendants, so whatever follows it
+      // is the element's terminator: `</tag` for a closed element, `/>` for a
+      // self-closing one. Nothing else here is ours to touch.
+      var probeEnd = span.end
+      while source[probeEnd] is " " or source[probeEnd] is "\t" or source[probeEnd] is "\n" or source[probeEnd] is "\r"
+        probeEnd++
+
+      if source.startsWith(`</${tag}`, probeEnd)
+        return unless dropClosingTags
+        return if WHITESPACE_SENSITIVE.has(tag)
+
+        closeIdx := probeEnd
+        var gtIdx = closeIdx + tag.length + 2
+        while source[gtIdx] is " " or source[gtIdx] is "\t"
+          gtIdx++
+        return unless source[gtIdx] is ">"
+        return if seen.has(closeIdx)
+
+        // The closer must end its line. Anything after it belongs to the enclosing
+        // element, and dropping the closer would pull it inside:
+        //
+        //   <span>a</span> tail   ->   <span>a tail   <- "tail" becomes a child
+        lineEnd := source.indexOf("\n", gtIdx)
+        tailEnd := lineEnd < 0 ? source.length : lineEnd
+        return unless /^\s*$/.test(source.slice(gtIdx + 1, tailEnd))
+
+        // Indentation delimits the element once the closer is gone, so a DEEPER
+        // following line would be adopted as a child.
+        lineStart := source.lastIndexOf("\n", closeIdx) + 1
+        beforeOnLine := source.slice(lineStart, closeIdx)
+        refLine := source.slice(lineStart, tailEnd)
+        nextLine := nextLineAfter(tailEnd)
+        return if nextLine? and indentOf(nextLine) > indentOf(refLine)
+
+        // A closer alone on its line takes the whole line with it; otherwise only
+        // the tag goes.
+        var dropStart = closeIdx
+        var dropEnd = gtIdx + 1
+        if /^[ \t]*$/.test(beforeOnLine)
+          dropStart = lineStart
+          dropEnd++ if source[dropEnd] is "\r"
+          dropEnd++ if source[dropEnd] is "\n"
+
+        return if intersectsRange(ignoredRanges, dropStart, dropEnd)
+        seen.add(closeIdx)
+
+        closeEdit := { start: dropStart, end: dropEnd, replacement: "" }
+        edits.push(closeEdit)
+        ctx.report({
+          ruleId: "style/prefer-unclosed-jsx"
+          message: `Indentation already closes '<${tag}>' -- drop '</${tag}>'`
+          pos: closeIdx
+          fix: closeEdit
+        })
+        return
+
+      return unless dropSelfClosingSlash
+
+      // The AST carries no source position for `<Foo` or `/>` -- both come through
+      // as bare strings -- so the opening tag is recovered from the element's
+      // located-descendant span, then confirmed by the scanner.
+      needle := `<${tag}`
+      var openIdx = source.lastIndexOf(needle, span.start)
+      openIdx = source.indexOf(needle, span.start) if openIdx < 0
+      return if openIdx < 0
+      after := source[openIdx + needle.length]
+      return unless after is undefined or /[\s/>]/.test(after)
+
+      term := findTagTerminator(source, openIdx)
+      return unless term? and term.selfClosing
+      // The terminator has to belong to THIS element, not to one nested inside it.
+      return unless term.start >= span.end - 1
+      return if seen.has(term.start)
+
+      // `/>` must end its line. Inline, the slashless form adopts whatever comes
+      // next as a child: `<div><Foo /><Bar /></div>` -> `<Foo>` swallows `<Bar/>`,
+      // and `{a ? <Foo> : <Bar />}` stops parsing altogether.
+      slashLineEnd := source.indexOf("\n", term.start)
+      slashTailEnd := slashLineEnd < 0 ? source.length : slashLineEnd
+      return unless /^[ \t]*$/.test(source.slice(term.start + 2, slashTailEnd))
+
+      // Three hazards live in whatever follows, all settled by the next non-blank
+      // line:
+      //
+      //   * a DEEPER line becomes a child of the slashless tag;
+      //   * a closing tag with the SAME name pairs with the slashless tag instead
+      //     of with the enclosing element, which then loses its closer:
+      //
+      //       <div .outer>          <div .outer>
+      //         <div .spot />   ->    <div .spot>   ->  <div .spot></div></div>
+      //       </div>                </div>                          ^ consumed
+      //
+      //     `<Foo />` in the same position is fine, because `</div>` cannot pair
+      //     with `Foo` -- which is why this only shows up on HTML-cased tags;
+      //   * a `)` or `}` closer stops the parse outright:
+      //
+      //       timerSlot={cond ? null : (
+      //         <LiveGameTimer id=id>   <- parse error on the next line
+      //       )}
+      openIndent := indentOf(source.slice(source.lastIndexOf("\n", Math.max(openIdx - 1, 0)) + 1, openIdx + 1))
+      following := nextLineAfter(slashTailEnd)
+      if following?
+        trimmed := following.trim()
+        return if indentOf(following) > openIndent
+        return if trimmed.startsWith(`</${tag}>`) or trimmed.startsWith(`</${tag} `)
+        return if trimmed.startsWith(")") or trimmed.startsWith("}")
+
+      // Drop the slash together with the horizontal whitespace in front of it:
+      // leaving `<Foo a=1 >` re-emits with a doubled space. Keep the indentation
+      // when the slash sits on its own line, so `>` does not slide to column 0.
+      slashLineStart := source.lastIndexOf("\n", term.start) + 1
+      var start = term.start
+      while start > Math.max(openIdx, slashLineStart) and (source[start - 1] is " " or source[start - 1] is "\t")
+        start--
+      start = term.start if start is slashLineStart
+      end := term.start + 1
+      return if intersectsRange(ignoredRanges, start, end)
+      seen.add(term.start)
+
+      slashEdit := { start, end, replacement: "" }
+      edits.push(slashEdit)
+      ctx.report({
+        ruleId: "style/prefer-unclosed-jsx"
+        message: `Self-closing '<${tag}>' does not need '/'`
+        pos: start
+        fix: slashEdit
+      })
+}
