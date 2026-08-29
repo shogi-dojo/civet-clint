@@ -138,7 +138,7 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-bare-conditions"]).toBe("error")
       expect(preset.rules["style/prefer-walrus-declarations"]).toBe("error")
       expect(preset.rules["style/prefer-existential-check"]).toBe("warn")
-      expect(preset.rules["style/prefer-optional-type"]).toBe("warn")
+      expect(preset.rules["style/prefer-optional-type"]).toBe("error")
       // Autofixable since 0.7.0 via the block-brace-style delta, so it moves to
       // `error` under the preset's "error only for autofixable rewrites" policy.
       expect(preset.rules["style/prefer-postfix-conditional"]).toBe("error")

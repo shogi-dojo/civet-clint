@@ -1,39 +1,89 @@
 import { describe, it, expect } from "vitest"
-import { lintSource } from "../src/engine.civet"
+import { lintSource, compileSource, normalizeTypeParenStyle } from "../src/engine.civet"
 
 RULE := "style/prefer-optional-type"
 DIAL := { react: true }
 
-function lint(source: string)
-  lintSource(source, { rules: { [RULE]: "warn" }, fix: false, civetOptions: DIAL })
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeTypeParenStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeTypeParenStyle(compileSource(source, DIAL)))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
 
 findings := (source: string) ->
-  lint(source).diagnostics.filter (d) -> d.ruleId is RULE
+  lintSource(source, { rules: { [RULE]: "error" }, fix: false, civetOptions: DIAL })
+    .diagnostics.filter (d) -> d.ruleId is RULE
+
+describe "normalizeTypeParenStyle", ->
+  it "strips parens around a single union type", ->
+    expect(normalizeTypeParenStyle("let x: (string | undefined) = 1")).toBe("let x: string | undefined = 1")
+    expect(normalizeTypeParenStyle("type Foo = (string | undefined)")).toBe("type Foo = string | undefined")
+    expect(normalizeTypeParenStyle("(x: (string | undefined)) => x")).toBe("(x: string | undefined) => x")
+
+  it "leaves intersection alone (must not flatten (a | b) & c)", ->
+    expect(normalizeTypeParenStyle("type X = (a | b) & c")).toBe("type X = (a | b) & c")
+    expect(normalizeTypeParenStyle("type X = c & (a | b)")).toBe("type X = c & (a | b)")
+
+  it "leaves array type alone", ->
+    expect(normalizeTypeParenStyle("type X = (a | b)[]")).toBe("type X = (a | b)[]")
+
+  it "leaves nested parens alone", ->
+    expect(normalizeTypeParenStyle("type X = ((a | b) & c)")).toBe("type X = ((a | b) & c)")
+
+  it "does not reach inside strings or comments", ->
+    expect(normalizeTypeParenStyle('const s = "(a | b)"')).toBe('const s = "(a | b)"')
+    expect(normalizeTypeParenStyle("// (a | b)")).toBe("// (a | b)")
 
 describe "style/prefer-optional-type", ->
-  it "reports 'T | undefined' with suggestion 'T?'", ->
-    diags := findings("type Foo = string | undefined\n")
-    expect(diags).toHaveLength(1)
-    expect(diags[0].message).toContain("string?")
-    expect(diags[0].message).toContain("autofix disabled")
+  it "rewrites type alias 'T | undefined' to 'T?'", ->
+    expect(expectEquivalent("type Foo = string | undefined\n")).toBe("type Foo = string?\n")
 
-  it "reports 'undefined | T' with suggestion 'T?'", ->
-    diags := findings("type Bar = undefined | number\n")
-    expect(diags).toHaveLength(1)
-    expect(diags[0].message).toContain("number?")
-    expect(diags[0].message).toContain("autofix disabled")
+  it "rewrites function parameter 'x: number | undefined' to 'x: number?'", ->
+    expect(expectEquivalent("function f(x: number | undefined): void {}\n"))
+      .toBe("function f(x: number?): void {}\n")
 
-  it "reports in function parameter types", ->
-    diags := findings("function f(x: number | undefined): void {}\n")
-    expect(diags).toHaveLength(1)
-    expect(diags[0].message).toContain("number?")
+  it "rewrites variable annotation 'let x: string | undefined = 1' to 'let x: string? = 1'", ->
+    expect(expectEquivalent("let x: string | undefined = 1\n")).toBe("let x: string? = 1\n")
+
+  it "rewrites generic type 'Array<string> | undefined' to 'Array<string>?'", ->
+    expect(expectEquivalent("type Foo = Array<string> | undefined\n")).toBe("type Foo = Array<string>?\n")
+
+  it "is idempotent", ->
+    once := fix("type Foo = string | undefined\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
 
 describe "style/prefer-optional-type guards", ->
   it "leaves comments alone", ->
     expect(findings("// type Foo = string | undefined\n")).toHaveLength(0)
+    unchanged("// type Foo = string | undefined\n")
 
   it "leaves strings alone", ->
     expect(findings("s := \"string | undefined\"\n")).toHaveLength(0)
+    unchanged("s := \"string | undefined\"\n")
 
-  it "leaves other unions alone", ->
+  it "leaves other unions alone (no undefined)", ->
     expect(findings("type Baz = string | number\n")).toHaveLength(0)
+    unchanged("type Baz = string | number\n")
+
+  it "leaves null unions alone", ->
+    expect(findings("type Baz = string | null\n")).toHaveLength(0)
+    unchanged("type Baz = string | null\n")
+
+  it "leaves 3-member unions alone", ->
+    expect(findings("type Tri = string | number | undefined\n")).toHaveLength(0)
+    unchanged("type Tri = string | number | undefined\n")
+
+  it "leaves already optional types alone", ->
+    expect(findings("type Q = string? | undefined\n")).toHaveLength(0)
+    unchanged("type Q = string? | undefined\n")
