@@ -205,7 +205,7 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-bare-for`: `"error"` (fixable)
 - `style/prefer-bare-conditions`: `"error"` (fixable)
 - `style/prefer-existential-check`: `"warn"` (fixable)
-- `style/prefer-optional-type`: `"warn"` (diagnostic)
+- `style/prefer-optional-type`: `"error"` (fixable)
 - `style/prefer-postfix-conditional`: `"error"` (fixable)
 - `style/prefer-ampersand-shorthand`: `"warn"` (diagnostic)
 - `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
@@ -310,11 +310,12 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-property-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-shorthand.civet) | Convert `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`. | — |
 | [`style/prefer-property-group-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-group-shorthand.civet) | Group a run of shorthand properties sharing a receiver: `{ a.b, a.c }` → `{ a.{b,c} }`. Plain-identifier receivers only — see below. | — |
 | [`style/prefer-postfix-conditional`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-postfix-conditional.civet) | Prefer postfix conditional `return if a` over one-liner `if (a) return`. Verified via the `block-brace-style` output delta. | — |
+| [`style/prefer-optional-type`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-optional-type.civet) | Prefer optional type shorthand `T?` over `T \| undefined`. Verified via the `type-paren-style` output delta. | — |
 | [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, loops, valueless `return`, and any `return` that is not textually last. **Not in any preset** — see below. | — |
 | [`style/prefer-bare-for`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-for.civet) | Convert `for const x of xs` and `for (const x of xs)` to `for x of xs`. | — |
 | [`style/prefer-bare-conditions`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-conditions.civet) | Omit outer parentheses around `if`, `unless`, `while`, and `switch` condition expressions. Verified via `whitespace-style` output delta. | — |
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
-| [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on a trailing matcher (`expect(a).toBe 'x'`) or a `render(<JSX/>)` call, letting the argument list close the line. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
+| [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on trailing calls when the argument list is unambiguous. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
 | [`style/prefer-implicit-arrow-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-arrow-arg.civet) | Drop call parens when the sole argument is a zero-parameter arrow (`vi.fn => x`, `lazy => import(…)`). Never fires on an object property followed by more properties — the arrow would absorb them. | — |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
@@ -517,7 +518,6 @@ That last one is a behaviour change, not a layout one, so the rule leaves it alo
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/prefer-optional-type`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-optional-type.civet) | Prefer optional type shorthand `T?` over `T \| undefined` (autofix disabled: TypeScript emit wraps union types). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
 | [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
 | [`style/no-single-param-arrow-without-parens`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |

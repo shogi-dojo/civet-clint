@@ -7,8 +7,8 @@ export default function PlayerCard(props: { player: Player; onSelect: () => void
 
   (
     <div .player-card.featured #main-card onClick=props.onSelect>
-      <Badge label=player.name count=player.tags# active=props.active />
-      <span .score>{formatScore(player.score)}</span>
-    </div>
+      <Badge label=player.name count=player.tags# active=props.active>
+      <span .score>{formatScore(player.score)}
+      <pre .raw>{JSON.stringify(player)}</pre>
   )
 }

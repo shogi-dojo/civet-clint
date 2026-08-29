@@ -3,44 +3,39 @@ type { Player } from ./types
 
 export interface Standing {
   id: string
-  rank: number | undefined
+  rank: number?
   tags: string[]
 }
 
-export class Leaderboard {
+export class Leaderboard
   entries: Standing[] = []
 
-  add(entry: Standing): number {
-    @entries.push(entry)
+  add(entry: Standing): number
+    @entries.push entry
     @entries#
-  }
 
   pinnedTags(): string[] {
     @entries.flatMap((entry) => entry.tags)
   }
-}
 
-export function summarize(players: Player[], cutoff: number): string[] {
+export function summarize(players: Player[], cutoff: number): string[]
   board := new Leaderboard()
   kept .= 0
 
-  if (not cutoff) {
+  unless cutoff
     return []
-  }
 
-  for (const player of players) {
+  for player of players
     if player.score === null or player.score is undefined
       continue
     if player.score > cutoff and player.name# > 0
-      board.add({ player.id, player.tags })
+      board.add { player.{id,tags} }
       kept += 1
-  }
 
   labels := board.pinnedTags().map((tag) => tag.trim())
   isText := labels[0] <? "string"
 
   labels
-}
 
 export makeCounter := => {
   n .= 0

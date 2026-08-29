@@ -11,27 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **11 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
+- **12 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
   - `style/prefer-unless`: rewrites `if not X` and `if (!X)` to `unless X` with AST precedence guards on binary operators and existential checks.
   - `style/prefer-at-shorthand`: rewrites `this.x`, `this?.x`, `this[k]`, `this.#p`, and bare `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`.
   - `style/prefer-length-shorthand`: rewrites `arr.length` and `arr?.length` to `arr#` and `arr?#`.
   - `style/prefer-typeof-shorthand`: rewrites `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`.
   - `style/prefer-property-shorthand`: rewrites `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`.
+  - `style/prefer-optional-type`: now **autofixes** `T | undefined` → `T?` (style-guide item 5) via a new `type-paren-style` output delta -- the emit differs only by parentheses Civet wraps around lowered union types `(T | undefined)`. Guarded to exactly two union members, skip when already ending in `?`, and skips intersection types `(a | b) & c`.
   - `style/prefer-implicit-return`: drops explicit trailing `return` keywords from function bodies, method declarations, and arrows, with guards for generators, object literal returns, and loop bodies.
   - `style/prefer-bare-for`: rewrites `for const x of xs` and `for (const x of xs)` to `for x of xs`.
   - `style/prefer-bare-conditions`: strips outer parentheses from `if`, `unless`, `while`, and `switch` condition expressions under the `whitespace-style` output delta.
   - `style/prefer-postfix-conditional`: now **autofixes** `if (a) return x` → `return x if a` (style-guide item 17), via a new `block-brace-style` output delta -- the emit differs by exactly `if (a) return x` vs `if (a) { return x }`. Four shapes are reported without a fix because the postfix form would change or break them: an `else` branch (nowhere to go), an already-`then` one-liner (byte-identical as written), a JSX return value (`return <Navigate to=r replace if cond` parses `if` as a prop), and a braced return value or condition (outside what the normalizer can prove). The message names `if a then return x` as the byte-identical alternative for projects that would rather not rely on the delta.
   - `style/prefer-property-group-shorthand`: groups a run of shorthand properties that share a receiver -- `{ a.b, a.c }` → `{ a.{b,c} }` (style-guide item 10, second half). It matches only the already-shortened form, leaving `b: a.b` to `style/prefer-property-shorthand`, so the two never propose overlapping edits over the same characters; both are in the `civet-idiomatic` preset, so long-form source converges in two passes. The receiver must be a plain identifier: Civet caches a compound one to keep it single-evaluation (`{ a.q.b, a.q.c }` would emit `let ref;{b:(ref = a.q).b,c:ref.c}`), which is a behaviour change rather than a layout one. 146 sites grouped on the 441-file corpus.
   - `style/prefer-unclosed-jsx`: implements style-guide item 22 -- drops a redundant closing tag (`<span>hi</span>` → `<span>hi`) and the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`), where indentation already delimits the element. Civet reads an unclosed element's extent from what *follows* it, so the rule fires only when the tag ends its line and the next non-blank line is neither deeper, a closing tag of the same name, nor a `)` / `}` closer -- each of those either reparents the following node or stops the parse. `<pre>` and `<textarea>` keep their closers, per the guide's stated exception. Both halves are one rule because the engine's combined-fix pass re-derives each rule's edits on the text other rules changed; split in two they invalidate each other's next-line guards and the batch is rejected. `closingTags` / `selfClosingSlash` options select one half. Verified on a 441-file React/Civet codebase: 3057 sites rewritten across two passes, zero rejected by the equivalence gate.
-- **2 new report-only diagnostic rules**:
-  - `style/prefer-optional-type`: flags `T | undefined` and `undefined | T` in favor of `T?` shorthand (diagnostic with explanation of TypeScript union emit wrapping).
 - **`civet-idiomatic` preset**: bundles neutral-dial idiom rules covering standard modern Civet style without legacy CoffeeScript options.
 - Exported `noDiscardedArrowReturnRule` and `preferIndentedBlocksRule` alongside all new rules in `src/rules/index.civet`.
 
 ### Changed
 
-- **New `block-brace-style` output delta.** The equivalence gate gains a sixth
-  normalizer, which strips a brace pair that follows a `)` and wraps a single
+- **New `type-paren-style` output delta.** Strips parentheses around single union types `(T | undefined)` emitted by Civet's lowering of `T?`, while preserving intersection types `(a | b) & c` and array types `(a | b)[]`. Consulted only for rules declaring `type-paren-style`.
+
+- **Widened `style/prefer-implicit-call-args`.** Replaced hardcoded callee lists with structural statement-level guards: fires on any trailing call that forms the entire statement, provided the argument list is non-empty and contains no top-level binary operator, `?`, or `:`.
+
+- **New `block-brace-style` output delta.** The equivalence gate gains a normalizer
+  which strips a brace pair that follows a `)` and wraps a single
   statement with no `;`, `{`, `}`, or newline inside. It is anchored on `) {` so
   object literals keep their braces, and it is consulted only for rules that declare
   it, so its blast radius is that rule's own edits. `style/prefer-postfix-conditional`

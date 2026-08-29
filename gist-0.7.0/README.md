@@ -8,17 +8,17 @@ Two pairs:
 
 | before | after | what it exercises |
 |---|---|---|
-| `before-utils.ts` | `after-utils.civet` | declarations, operators, loops, `@`, `#`, `<?`, implicit return |
-| `before-Card.tsx` | `after-Card.civet` | JSX attributes and class/id shorthands |
+| `before-utils.ts` | `after-utils.civet` | declarations, operators, loops, `@`, `#`, `<?`, optional types `T?`, de-braced classes/functions, property grouping `a.{b,c}`, implicit return |
+| `before-Card.tsx` | `after-Card.civet` | JSX attributes, unclosed tags, slashless self-closing, `<pre>` exception, and class/id shorthands |
 
 Every `after-*.civet` file is **the literal output of the tool**, not hand-written
 — see `transcript.md` for the commands and their real output. Both pairs compile
 to the same JavaScript under `@danielx/civet@0.11.15` (identical once trailing
-semicolons are normalised, which is the only delta `--write` introduces here).
+semicolons and whitespace layout are normalised, which is the only delta `--write` introduces here).
 
 The interesting part isn't what works. It's the three places where the
-cheat-sheet's literal syntax doesn't compile the way it reads, and the four
-places where I couldn't tell what you'd want.
+cheat-sheet's literal syntax doesn't compile the way it reads, and the open
+questions on the remaining style points.
 
 ---
 
@@ -100,7 +100,7 @@ condition. `if not a and b` is left alone.
 
 ## 2. Coverage of the 24 items
 
-15 automated, 6 partial, 2 report-only, 1 not covered.
+21 automated, 3 partial, 0 report-only, 0 not covered.
 
 | # | Cheat-sheet item | Status | Rule |
 |---|---|---|---|
@@ -108,24 +108,24 @@ condition. `if not a and b` is left alone.
 | 2 | `and` / `or` / `not` | ✅ | `prefer-word-operators` |
 | 3 | `is` over `===`, `isnt` over `!==` | ✅ dial-dependent | `prefer-word-operators`, `prefer-is-not` / `no-is-not` |
 | 4 | `foo?` / `not foo?` | ⚠️ partial | `prefer-existential-check` — autofixes only the **loose** `!= null` / `== null`; see below |
-| 5 | `T?` for `T \| undefined` | 📋 report-only | `prefer-optional-type` — TS emit wraps it as `(T \| undefined)` |
+| 5 | `T?` for `T \| undefined` | ✅ | `prefer-optional-type` — verified via `type-paren-style` delta |
 | 6 | `#` for `.length` | ✅ | `prefer-length-shorthand` (postfix, and **not** under `coffeeComment` — correction above) |
 | 7 | `x <? "foo"` | ✅ | `prefer-typeof-shorthand` |
 | 8 | No `;` | ✅ | `no-trailing-semicolons` |
-| 9 | Braces not needed / implicit blocks | ⚠️ partial | `prefer-indented-blocks`, `prefer-indented-object` — see gap below |
-| 10 | `b: a.b` → `a.b`; `a.{b,c}` | ⚠️ partial | `prefer-property-shorthand` does the first; `a.{b,c}` isn't implemented |
+| 9 | Braces not needed / implicit blocks | ✅ | `prefer-indented-blocks`, `prefer-indented-object` — statement blocks, paren-free heads, function/class/method declaration bodies |
+| 10 | `b: a.b` → `a.b`; `a.{b,c}` | ✅ | `prefer-property-shorthand` and `prefer-property-group-shorthand` |
 | 11 | No trailing commas | ✅ | `no-trailing-commas` |
 | 12 | `()` not needed in `() =>` | ✅ | `prefer-concise-arrow` |
 | 13 | Implicit `return` | ✅ opt-in | `prefer-implicit-return` — enabled explicitly in this gist's config; see below |
-| 14 | Calls without parens | ⚠️ partial | three rules with hardcoded callee lists (test blocks, matchers, zero-arg arrows) |
+| 14 | Calls without parens | ✅ | `prefer-implicit-call-args`, `prefer-implicit-block-call`, `prefer-implicit-arrow-arg` |
 | 15 | `.pinned` for `(f) => f.pinned` | ⚠️ partial | `prefer-ampersand-shorthand` suggests `&.pinned`, report-only — **Q1** |
 | 16 | `if`/`switch` without parens | ✅ | `prefer-bare-conditions` |
-| 17 | `return if …` | 📋 report-only | `prefer-postfix-conditional` — emit differs by block braces |
+| 17 | `return if …` | ✅ | `prefer-postfix-conditional` — verified via `block-brace-style` delta |
 | 18 | `for const …` → `for …` | ✅ | `prefer-bare-for` |
 | 19 | `unless` instead of `if not` | ✅ | `prefer-unless` (with the guard above) |
 | 20 | `@` for `this.` / `this` | ✅ | `prefer-at-shorthand` |
 | 21 | Terse imports | ✅ | `prefer-terse-imports` |
-| 22 | JSX tags need not be closed | ❌ | not implemented — **Q4** |
+| 22 | JSX tags need not be closed | ✅ | `prefer-unclosed-jsx` — unclosed tags, slashless self-closing, `<pre>`/`<textarea>` exception |
 | 23 | JSX attribute braces omitted | ✅ | `prefer-bare-jsx-values`, `prefer-jsx-attr-shorthand` |
 | 24 | JSX classes `.foo .bar` | ⚠️ partial | `prefer-jsx-shorthand` emits `.foo.bar` on `className` — **Q2, Q3** |
 
@@ -145,25 +145,18 @@ x !== undefined  ❌  true for null;      `x?` is false
 The strict and `undefined` forms are still reported, but with no fix attached and
 a message saying why. You can see both kinds in `transcript.md`.
 
-### On item 9 — the visible gap
+### On item 9 — de-bracing function, class, and method bodies
 
-This is the one that shows up worst in `after-utils.civet`. `prefer-indented-blocks`
-only recognises a head that **still has its parens**:
-
-```
-if (a) {  ->  if a          ✅ de-braced
-if a {    ->  if a {        ❌ braces stranded
-```
-
-And nothing de-braces a **function, class, or method body** at all — so
-`export function summarize(...) {` keeps its braces, and (until 0.7.0's guards)
-any block nested inside a braced body was skipped too. That's why the `after`
-files still look half-converted around the outer scopes. It's the single biggest
-remaining gap against your item 9, and it's what I'd build next.
+`prefer-indented-blocks` de-braces statement blocks (`if`, `unless`, `for`, `while`,
+`switch`, `try`, `catch`, `finally` with or without head parens) as well as
+`function`, `class`, and method declaration bodies. Arrow bodies (`=> { ... }`)
+stay braced by design: Civet parses a braced arrow body as an object literal, so
+de-bracing one is a semantic repair handled by `style/no-braced-arrow-body` during
+`--rewrite`.
 
 ---
 
-## 3. Four questions I couldn't answer from the sheet
+## 3. Three questions on remaining style points
 
 **Q1 — `.pinned` or `&.pinned`?** The sheet says `.pinned` for
 `(folder) => folder.pinned`. Both compile, but they emit differently:
@@ -193,16 +186,29 @@ passes `class` straight through — only `className` lowers to the shorthand:
 So `class="foo bar"` → `.foo .bar` would change the emitted attribute. Is `class`
 intended (React 19 accepts it), or is `className` the real target?
 
-**Q4 — unclosed JSX tags (item 22).** Dropping `</span>` changes the emit by a
-newline, and the false-positive surface looked large enough that I left it out.
-Worth automating, or is that one you'd rather hand-edit?
+### Notes on item 22 (unclosed JSX)
+
+Item 22 is automated in `style/prefer-unclosed-jsx` covering both unclosed tags
+(`<span>hi</span>` → `<span>hi`) and slashless self-closing (`<Foo a=1 />` → `<Foo a=1>`).
+Two findings from implementing it:
+1. **`<pre>` and `<textarea>` whitespace preservation**: Civet re-emits unclosed
+   closers on a new line, which changes text content for whitespace-sensitive
+   tags. They are preserved with their closers intact.
+2. **Same-name closer reparenting hazard**: `<div .outer><div .spot /></div>`
+   cannot drop `</div>` because Civet would pair `</div>` with `<div .spot>` rather
+   than `<div .outer>`, silently reparenting subsequent sibling nodes. The rule
+   guards against this.
 
 ---
 
 ## Reproducing
 
 ```bash
-npm i -D civet-clint@0.7.0
+# Test directly from git (no publish required):
+npm i -D github:shogi-dojo/civet-clint#c41e907
+
+# (Once published on npm: npm i -D civet-clint@0.7.0)
+
 npx clint --rewrite before-utils.ts before-Card.tsx --config clint.config.json
 npx clint --write  after-utils.civet after-Card.civet --config clint.config.json
 ```
@@ -225,6 +231,7 @@ conformant code. It is clean on this sample.
 
 Every autofix is verified by compiling the candidate and comparing emitted output
 against the original; anything that isn't provably equivalent (or bounded by a
-declared delta such as `semicolon-style`) is rejected rather than applied.
+declared delta such as `semicolon-style`, `block-brace-style`, or `type-paren-style`)
+is rejected rather than applied.
 
 Repo: https://github.com/shogi-dojo/civet-clint
