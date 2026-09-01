@@ -1,0 +1,78 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferTypeofShorthandRule: Rule = {
+  id: "style/prefer-typeof-shorthand"
+  meta: {
+    description: "Prefer '<?' shorthand over 'typeof x is \"type\"'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit (node) ->
+      return unless Array.isArray(node) and node.length >= 3
+
+      opIdx := node.findIndex (c: any) ->
+        c? and typeof c is "object" and (c.token is "===" or c.token is "is")
+      return if opIdx < 0
+
+      var left: any = null
+      for let i = opIdx - 1; i >= 0; i--
+        item := node[i]
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+          left = item
+          break
+
+      var right: any = null
+      for let i = opIdx + 1; i < node.length; i++
+        item := node[i]
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+          right = item
+          break
+
+      return unless left? and right? and left.type is "UnaryExpression"
+
+      pre := left.pre
+      return unless Array.isArray(pre) and pre.length > 0
+      preFlat := pre.flat(2).filter(Boolean)
+      typeofTok := preFlat.find (p: any) ->
+        p.token is "typeof" or p.token is "typeof "
+      return unless typeofTok?
+
+      rightSpan := tree.range(right)
+      return unless rightSpan?
+      rightText := tree.text(right).trim()
+      return unless /^["'`]/.test(rightText)
+
+      operand := left.expression
+      return unless operand?
+      operandText := tree.text(operand).trim()
+      return if operandText.length is 0
+
+      leftSpan := tree.range(left)
+      return unless leftSpan?
+
+      start := leftSpan.start
+      end := rightSpan.end
+      return if seen.has(start)
+      return if intersectsRange(ignoredRanges, start, leftSpan.end)
+      seen.add(start)
+
+      replacement := `${operandText} <? ${rightText}`
+      ctx.report({
+        ruleId: "style/prefer-typeof-shorthand"
+        message: `Use '${replacement}' instead of '${source.slice(start, end)}'`
+        pos: start
+        fix: {
+          start
+          end
+          replacement
+        }
+      })
+}

@@ -118,6 +118,32 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-bare-assignment"]).toBeUndefined()
       expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
 
+    it "provides a standard Civet idiomatic preset without legacy Coffee options", ->
+      preset := PRESETS["civet-idiomatic"]
+      expect(preset.civetOptions).toEqual({
+        react: true
+      })
+      expect(preset.compileOptions).toEqual({})
+      expect(preset.rules["style/prefer-unless"]).toBe("error")
+      expect(preset.rules["style/prefer-at-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-length-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-typeof-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-property-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-property-group-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-unclosed-jsx"]).toBe("error")
+      // Deliberately absent: the rule still proposes gate-rejected fixes on real
+      // code, which would make --check exit non-zero on conformant sources.
+      expect(preset.rules["style/prefer-implicit-return"]).toBeUndefined()
+      expect(preset.rules["style/prefer-bare-for"]).toBe("error")
+      expect(preset.rules["style/prefer-bare-conditions"]).toBe("error")
+      expect(preset.rules["style/prefer-walrus-declarations"]).toBe("error")
+      expect(preset.rules["style/prefer-existential-check"]).toBe("warn")
+      expect(preset.rules["style/prefer-optional-type"]).toBe("error")
+      // Autofixable since 0.7.0 via the block-brace-style delta, so it moves to
+      // `error` under the preset's "error only for autofixable rewrites" policy.
+      expect(preset.rules["style/prefer-postfix-conditional"]).toBe("error")
+      expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
+
     it "uses the neutral preset when no Clint config exists", async ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
       config := loadConfig(undefined, tmpDir)

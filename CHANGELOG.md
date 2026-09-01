@@ -7,6 +7,141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-24
+
+### Added
+
+- **`style/no-redundant-jsx-parens`** -- drops the parens left wrapping a JSX
+  element when a `return` becomes implicit, and dedents what they held:
+
+  ```
+  (                        <div .card>
+    <div .card>       ->     <span>hi
+      <span>hi
+  )
+  ```
+
+  Civet passes source parens through to the emit, so they are not free -- they
+  appear as `return ( … )` in the output and indent the element one level for
+  nothing. Verified through a new `return-paren-style` delta, which is compound
+  by design: removing the parens also dedents their contents, so it implies
+  `whitespace-style` rather than pretending the re-indentation belongs to another
+  rule. Restricted to a JSX body; parens around an object literal or a multi-line
+  binary expression are load-bearing. In both the `civet-idiomatic` and
+  `coffee-react` presets, since it is cleanup of this tool's own artifact rather
+  than a taste call, and it cannot fire unless `prefer-implicit-return` ran.
+  An explicit `return ( … )` is deliberately
+  left alone -- dropping those requires pulling the element onto the `return`
+  line, which changed emitted output on 8 files of a 441-file codebase.
+
+
+- **12 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
+  - `style/prefer-unless`: rewrites `if not X` and `if (!X)` to `unless X` with AST precedence guards on binary operators and existential checks.
+  - `style/prefer-at-shorthand`: rewrites `this.x`, `this?.x`, `this[k]`, `this.#p`, and bare `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`.
+  - `style/prefer-length-shorthand`: rewrites `arr.length` and `arr?.length` to `arr#` and `arr?#`.
+  - `style/prefer-typeof-shorthand`: rewrites `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`.
+  - `style/prefer-property-shorthand`: rewrites `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`.
+  - `style/prefer-optional-type`: now **autofixes** `T | undefined` → `T?` (style-guide item 5) via a new `type-paren-style` output delta -- the emit differs only by parentheses Civet wraps around lowered union types `(T | undefined)`. Guarded to exactly two union members, skip when already ending in `?`, and skips intersection types `(a | b) & c`.
+  - `style/prefer-implicit-return`: drops explicit trailing `return` keywords from function bodies, method declarations, and arrows, with guards for generators, object literal returns, and loop bodies.
+  - `style/prefer-bare-for`: rewrites `for const x of xs` and `for (const x of xs)` to `for x of xs`.
+  - `style/prefer-bare-conditions`: strips outer parentheses from `if`, `unless`, `while`, and `switch` condition expressions under the `whitespace-style` output delta.
+  - `style/prefer-postfix-conditional`: now **autofixes** `if (a) return x` → `return x if a` (style-guide item 17), via a new `block-brace-style` output delta -- the emit differs by exactly `if (a) return x` vs `if (a) { return x }`. Five shapes are reported without a fix because the postfix form would change or break them: an `else` branch (nowhere to go), an already-`then` one-liner (byte-identical as written), a JSX return value (`return <Navigate to=r replace if cond` parses `if` as a prop), and a braced return value or condition (outside what the normalizer can prove). A **negated** condition is also deferred, to `style/prefer-unless`: both rules match `if (not x) return` and rewrite the same span in opposite directions, and while either pair is fine on its own, a third rule editing the same file makes the engine's combined replay diverge and reject the whole batch -- one 739-line page of the integration corpus was left permanently unfixable with 82 findings. `prefer-unless` owns the shape because its `unless x return` is byte-identical to the input, whereas `return if not x` needs the delta. The message names `if a then return x` as the byte-identical alternative for projects that would rather not rely on the delta.
+  - `style/prefer-property-group-shorthand`: groups a run of shorthand properties that share a receiver -- `{ a.b, a.c }` → `{ a.{b,c} }` (style-guide item 10, second half). It matches only the already-shortened form, leaving `b: a.b` to `style/prefer-property-shorthand`, so the two never propose overlapping edits over the same characters; both are in the `civet-idiomatic` preset, so long-form source converges in two passes. The receiver must be a plain identifier: Civet caches a compound one to keep it single-evaluation (`{ a.q.b, a.q.c }` would emit `let ref;{b:(ref = a.q).b,c:ref.c}`), which is a behaviour change rather than a layout one. 146 sites grouped on the 441-file corpus.
+  - `style/prefer-unclosed-jsx`: implements style-guide item 22 -- drops a redundant closing tag (`<span>hi</span>` → `<span>hi`) and the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`), where indentation already delimits the element. Civet reads an unclosed element's extent from what *follows* it, so the rule fires only when the tag ends its line and the next non-blank line is neither deeper, a closing tag of the same name, nor a `)` / `}` closer -- each of those either reparents the following node or stops the parse. `<pre>` and `<textarea>` keep their closers, per the guide's stated exception. Both halves are one rule because the engine's combined-fix pass re-derives each rule's edits on the text other rules changed; split in two they invalidate each other's next-line guards and the batch is rejected. `closingTags` / `selfClosingSlash` options select one half. Verified on a 441-file React/Civet codebase: 3057 sites rewritten across two passes, zero rejected by the equivalence gate.
+- **`civet-idiomatic` preset**: bundles neutral-dial idiom rules covering standard modern Civet style without legacy CoffeeScript options.
+- Exported `noDiscardedArrowReturnRule` and `preferIndentedBlocksRule` alongside all new rules in `src/rules/index.civet`.
+
+### Changed
+
+- **New `type-paren-style` output delta.** Strips parentheses around single union types `(T | undefined)` emitted by Civet's lowering of `T?`, while preserving intersection types `(a | b) & c` and array types `(a | b)[]`. Consulted only for rules declaring `type-paren-style`.
+
+- **Widened `style/prefer-implicit-call-args`.** Replaced hardcoded callee lists with structural statement-level guards: fires on any trailing call that forms the entire statement, provided the argument list is non-empty and contains no top-level binary operator, `?`, or `:`.
+
+- **New `block-brace-style` output delta.** The equivalence gate gains a normalizer
+  which strips a brace pair that follows a `)` and wraps a single
+  statement with no `;`, `{`, `}`, or newline inside. It is anchored on `) {` so
+  object literals keep their braces, and it is consulted only for rules that declare
+  it, so its blast radius is that rule's own edits. `style/prefer-postfix-conditional`
+  is the only rule that declares it today.
+
+- **Widened `style/prefer-indented-blocks` to declaration bodies.** `function f(x) {`,
+  `class A {`, and method definitions (`m() {`, `constructor(x) {`, `get v() {`, and
+  their `static` / `async` / generator / `#private` / TS-return-type forms) now lose
+  their braces the same way statement blocks do; all are byte-identical in emit. The
+  parameter list may itself contain braces -- `function C(p: { x: number }) {` is the
+  ordinary React component signature, and it kept its braces until the head pattern
+  stopped stopping at the first `{`. Method definitions deliberately still do: a
+  method head has no keyword to tell it from a call, and `f(a, {b: 1}) {` must not be
+  de-braced. A
+  block nested inside a function is de-braced in the same pass rather than skipped.
+  Arrow bodies are still `style/no-braced-arrow-body`'s, and two shapes are refused
+  on purpose: `f(x) { a: 1 }` at statement level is a CALL (`f(x)({a: 1})`), not a
+  method, so a method head only counts inside a class body or object literal; and a
+  closer carrying anything but a chained `else` / `catch` / `finally` is left alone,
+  because an object literal's `},` between properties would be stranded.
+
+- **Widened `style/prefer-indented-blocks` to paren-free heads.** It only
+  recognised a head that still had its parens (`if (a) {`), so `if a {` was skipped
+  and its braces were stranded -- nothing else in the rule set removes a brace whose
+  head is paren-free. That gap is why `style/prefer-unless` and
+  `style/prefer-bare-for` each had to refuse a braced head. With it closed,
+  `if (not a) { … }` now converges all the way to `unless a` plus an indented body
+  in two passes, and the previously stuck `if not a { … }` converges too.
+
+- **Widened `style/prefer-existential-check`**: it now scans tokens rather than a
+  single regex, so it also sees reversed operands (`null != x`) and non-identifier
+  left-hand sides, and it autofixes the two shapes that are provably equivalent --
+  `x != null` → `x?` and `x == null` → `not x?`. Strict (`!==` / `===`) and
+  `undefined` comparisons are reported without a fix; see **Fixed** below.
+
+- `style/prefer-implicit-return` is **not** part of the `civet-idiomatic` preset.
+  It still proposes fixes the equivalence gate rejects (22 sites on a 441-file
+  production codebase), and a rejected fix surfaces as an error, so at `error` in
+  a preset it would make `clint --check` fail on conformant code. The rule is
+  registered and supported; enable it explicitly.
+- **Widened `style/prefer-walrus-declarations`**: added `let x = …` → `x .= …` support and removed the `autoLet` dialect requirement since both `.=` and `:=` compile byte-identically under standard Civet.
+
+### Fixed
+
+- **`style/prefer-existential-check` no longer advertises fixes the gate rejects.**
+  `x?` lowers to the *loose* `x != null`, so only `x != null` -> `x?` and
+  `x == null` -> `not x?` are behaviour-preserving. The rule attached a fix to
+  every shape, including strict `!==` / `===` and comparisons against
+  `undefined`, which are genuine behaviour changes (`x !== null` is true for
+  `undefined`; `x?` is false). The equivalence gate correctly rejected all of
+  them, so `clint` reported "N fixable with --write" on diagnostics that
+  `--write` could never apply, on every run. Those shapes are now reported
+  without a fix and the message states the reason.
+
+- **`style/prefer-length-shorthand` is now skipped under `coffeeComment`.** With
+  that option on, `#` opens a line comment, so `arr#` does not mean `arr.length`
+  -- it truncates the line (`const n = arr//`), and in JSX or an arrow body it
+  fails to parse outright. The rule reported 391 findings on a 441-file
+  `coffeeComment` codebase, every one of them rejected by the equivalence gate.
+  It now declares `forbids: ["coffeeComment"]` and is skipped there; the
+  shorthand is correct under every other dial.
+
+- **`style/prefer-implicit-return` no longer fires on a `return` that is not the
+  function's tail.** Scanning the final entry tuple for a `ReturnStatement` could
+  match one belonging to a nested block, and a valueless `return` still presents
+  an AST `expression`, so both reached the fix. Because fixes are accepted or
+  rejected per rule per file, one bad site also took the valid fixes in that file
+  down with it.
+
+- **`style/prefer-property-shorthand` only fires inside braced object literals.**
+  The style guide scopes the shorthand to braced objects; in a brace-free,
+  indentation-delimited object, `a.name` on its own line is a bare expression
+  statement rather than a property.
+
+- **`style/prefer-bare-for` keeps the parens on a single-line `for (...) body`.**
+  There the parens separate head from body; dropping them runs the two together.
+
+- **`style/prefer-unless` and `style/prefer-bare-for` defer a braced head to
+  `style/prefer-indented-blocks`.** That rule only recognises a head that still
+  has its parens, so rewriting `if (not a) {` into `unless a {` -- or stripping
+  the parens from `for (const x of xs) {` -- stranded the braces with no rule
+  able to remove them. `style/prefer-bare-conditions` already had this guard.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added

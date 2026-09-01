@@ -1,0 +1,58 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-typeof-shorthand"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, {
+    rules: {
+      [RULE]: "error"
+      "style/prefer-word-operators": "off"
+    }
+    fix: true
+    civetOptions: DIAL
+  })
+
+function expectTypeofEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-typeof-shorthand", ->
+  it "rewrites 'typeof x is \"string\"' to 'x <? \"string\"'", ->
+    expect(expectTypeofEquivalent('typeof x is "string"\n')).toBe('x <? "string"\n')
+
+  it "rewrites 'typeof x === \"number\"' to 'x <? \"number\"'", ->
+    expect(expectTypeofEquivalent('typeof x === "number"\n')).toBe('x <? "number"\n')
+
+  it "rewrites member access 'typeof a.b.c is \"object\"'", ->
+    expect(expectTypeofEquivalent('typeof a.b.c is "object"\n')).toBe('a.b.c <? "object"\n')
+
+  it "rewrites call expression 'typeof fn() is \"function\"'", ->
+    expect(expectTypeofEquivalent('typeof fn() is "function"\n')).toBe('fn() <? "function"\n')
+
+  it "is idempotent", ->
+    once := fix('typeof x is "string"\n').fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-typeof-shorthand guards", ->
+  it "bails on Yoda form '\"string\" === typeof x' because it compiles to instanceof", ->
+    unchanged('"string" === typeof x\n')
+
+  it "bails on negated 'typeof x !== \"string\"' because Civet emit differs", ->
+    unchanged('typeof x !== "string"\n')
+
+  it "leaves comments alone", ->
+    unchanged('// typeof x is "string"\n')
+
+  it "leaves strings alone", ->
+    unchanged('s := "typeof x is string"\n')

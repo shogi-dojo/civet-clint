@@ -208,6 +208,187 @@ export function normalizeWhitespaceStyle(code: string): string
     i++
   out
 
+// `if (a) return` vs `if (a) { return }` -- the only difference between a Civet
+// postfix conditional and its prefix form. Strips a brace pair that follows a `)`
+// and wraps a single statement: no `;`, `{`, `}`, or newline inside.
+//
+// Consulted only for rules that declare the `block-brace-style` delta, so its
+// blast radius is that rule's own edits. It is deliberately anchored on `) {`
+// rather than any brace, so object literals keep theirs.
+export function normalizeBlockBraceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "{" and /\)\s*$/.test(out)
+      close := code.indexOf("}", i + 1)
+      if close >= 0
+        inner := code.slice(i + 1, close)
+        if inner.trim().length > 0 and not /[{};\r\n]/.test(inner)
+          out += inner.trim()
+          i = close + 1
+          continue
+    out += ch
+    i++
+  out
+
+// `(x: string | undefined)` vs `(x: (string | undefined))` -- Civet wraps optional
+// types `T?` in parens when lowering to TypeScript `(T | undefined)`.
+// Strips a paren pair whose contents hold a top-level `|` and no nested
+// parens/braces/brackets, provided it is not adjacent to `&` or `[`.
+//
+// Consulted only for rules that declare the `type-paren-style` delta, so its
+// blast radius is that rule's own edits.
+export function normalizeTypeParenStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "("
+      var j = i + 1
+      var hasPipe = false
+      var invalid = false
+      while j < code.length
+        c := code[j]
+        break if c is ")"
+        if c is "(" or c is "{" or c is "}" or c is "[" or c is "]" or c is ":" or c is ";" or c is ","
+          invalid = true
+          break
+        if c is "|"
+          hasPipe = true
+        j++
+      if not invalid and hasPipe and j < code.length and code[j] is ")"
+        prevText := out.trimEnd()
+        nextText := code.slice(j + 1).trimStart()
+        prevChar := prevText.slice(-1)
+        nextChar := nextText[0] ?? ""
+        if prevChar isnt "&" and nextChar isnt "&" and nextChar isnt "["
+          inner := code.slice(i + 1, j)
+          unless inner.includes("=>")
+            out += inner
+            i = j + 1
+            continue
+    out += ch
+    i++
+  out
+
+// Drops a paren pair that wraps the whole of a `return` expression. Civet passes
+// source parens straight through, so `return (\n  <div>…\n)` emits `return (…)`
+// while the de-parenthesised source emits `return …` -- the same value either way.
+// Consulted only for rules that declare the `return-paren-style` delta, so its
+// blast radius is those rules' own edits.
+export function normalizeReturnParenStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "r" and code.startsWith("return", i) and not /[\w$]/.test(code[i - 1] ?? "") and not /[\w$]/.test(code[i + 6] ?? "")
+      var k = i + 6
+      while code[k] is " " or code[k] is "\t"
+        k++
+      if code[k] is "("
+        // Walk to the matching close, skipping nested parens and any string.
+        var depth = 0
+        var m = k
+        var bad = false
+        while m < code.length
+          c := code[m]
+          if c is '"' or c is "'" or c is "`"
+            q := c
+            m++
+            while m < code.length
+              if code[m] is "\\"
+                m += 2
+                continue
+              break if code[m] is q
+              m++
+            m++
+            continue
+          if c is "("
+            depth++
+          else if c is ")"
+            depth--
+            break if depth is 0
+          else if c is ";"
+            bad = true
+            break
+          m++
+        if not bad and depth is 0 and m < code.length
+          // Only when the close paren ends the statement: anything after it on
+          // the line (`.foo`, an operator) means the parens were doing work.
+          var t = m + 1
+          while code[t] is " " or code[t] is "\t"
+            t++
+          rest := code[t] ?? ""
+          if rest is "\n" or rest is "" or rest is "}" or rest is ";"
+            out += "return "
+            out += normalizeReturnParenStyle(code.slice(k + 1, m)).trim()
+            i = m + 1
+            continue
+    out += ch
+    i++
+  out
+
 export function compileSource(source: string, civetOptions: Record<string, any> = {}, filename: string = "unknown.civet"): string
   res := compileForOutput(source, { dial: civetOptions, filename })
   if res.ok
@@ -305,6 +486,17 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeTrailingCommaStyle(before) is normalizeTrailingCommaStyle(after)
       when "whitespace-style"
         normalizeWhitespaceStyle(before) is normalizeWhitespaceStyle(after)
+      when "block-brace-style"
+        normalizeBlockBraceStyle(before) is normalizeBlockBraceStyle(after)
+      when "type-paren-style"
+        normalizeTypeParenStyle(before) is normalizeTypeParenStyle(after)
+      when "return-paren-style"
+        // Compound on purpose: dropping the parens also dedents everything they
+        // wrapped, so the layout moves as well. A rule declaring this delta is
+        // asking for both, and saying so here is more honest than having the rule
+        // pretend the re-indentation is somebody else's.
+        normalizeWhitespaceStyle(normalizeReturnParenStyle(before)) is
+          normalizeWhitespaceStyle(normalizeReturnParenStyle(after))
       else
         false
 
@@ -567,9 +759,16 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           res = normalizeDeclarationStyle(res)
         if kinds.has("trailing-comma-style")
           res = normalizeTrailingCommaStyle(res)
+        if kinds.has("block-brace-style")
+          res = normalizeBlockBraceStyle(res)
+        if kinds.has("type-paren-style")
+          res = normalizeTypeParenStyle(res)
+        if kinds.has("return-paren-style")
+          res = normalizeReturnParenStyle(res)
         // Last: the normalizers above can leave whitespace differences behind,
-        // so collapsing must happen after they have run.
-        if kinds.has("whitespace-style")
+        // so collapsing must happen after they have run. `return-paren-style`
+        // implies it -- see the note in outputDeltaAllowed.
+        if kinds.has("whitespace-style") or kinds.has("return-paren-style")
           res = normalizeWhitespaceStyle(res)
         res
       // Same distinction as acceptCandidate: a repair phase is verified by the

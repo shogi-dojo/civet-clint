@@ -1,0 +1,46 @@
+{ formatScore } from ./format
+type { Player } from ./types
+
+export interface Standing {
+  id: string
+  rank: number?
+  tags: string[]
+}
+
+export class Leaderboard
+  entries: Standing[] = []
+
+  add(entry: Standing): number
+    @entries.push entry
+    @entries#
+
+  pinnedTags(): string[] {
+    @entries.flatMap((entry) => entry.tags)
+  }
+
+export function summarize(players: Player[], cutoff: number): string[]
+  board := new Leaderboard()
+  kept .= 0
+
+  unless cutoff
+    return []
+
+  for player of players
+    if player.score === null or player.score is undefined
+      continue
+    if player.score > cutoff and player.name# > 0
+      board.add { player.{id,tags} }
+      kept += 1
+
+  labels := board.pinnedTags().map((tag) => tag.trim())
+  isText := labels[0] <? "string"
+
+  labels
+
+export makeCounter := => {
+  n .= 0
+  => {
+    n += 1
+    n
+  }
+}

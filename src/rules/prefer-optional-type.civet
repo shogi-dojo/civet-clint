@@ -1,0 +1,73 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// Erik Demaine's Civet style guide, item 5: "Prefer `T?` over `T | undefined`."
+//
+//   (x: string | undefined)   ->   (x: string?)
+//
+// The emitted JS differs only by parentheses around the union: Civet lowers `T?` to
+// `(T | undefined)`. The fix declares the `type-paren-style` delta and the engine
+// proves the rest.
+export const preferOptionalTypeRule: Rule = {
+  id: "style/prefer-optional-type"
+  meta: {
+    description: "Prefer optional type shorthand 'T?' over 'T | undefined'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    stringRanges := tree.stringRanges()
+    ignoredRanges := [...commentRanges, ...stringRanges]
+    seen := new Set<number>()
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("type-paren-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    re1 := /([a-zA-Z_$][a-zA-Z0-9_$.<>]*)\s*\|\s*undefined\b/g
+
+    var match: RegExpExecArray | null = null
+    while (match = re1.exec(source)) !== null
+      pos := match.index
+      matchEnd := match.index + match[0].length
+      continue if seen.has(pos)
+      continue if intersectsRange(ignoredRanges, pos, matchEnd)
+
+      ident := match[1]
+      // Skip if the annotation already ends in `?`
+      continue if ident.endsWith("?")
+
+      // Check balanced generics if `<` is present
+      if ident.includes("<")
+        openCount := (ident.match(/</g) ?? []).length
+        closeCount := (ident.match(/>/g) ?? []).length
+        continue unless openCount is closeCount
+
+      // Guard: exactly two union members (no preceding/following `|` or `&`)
+      prefix := source.slice(0, pos).trimEnd()
+      continue if prefix.endsWith("|") or prefix.endsWith("&")
+
+      suffix := source.slice(matchEnd).trimStart()
+      continue if suffix.startsWith("|") or suffix.startsWith("&") or suffix.startsWith("?")
+
+      seen.add(pos)
+
+      replacement := `${ident}?`
+      edit := { start: pos, end: matchEnd, replacement }
+      edits.push(edit)
+      ctx.report({
+        ruleId: "style/prefer-optional-type"
+        message: `Use optional type shorthand '${replacement}' instead of '${match[0]}'`
+        pos
+        fix: edit
+      })
+}

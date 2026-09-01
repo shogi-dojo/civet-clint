@@ -1,0 +1,47 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-bare-conditions"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectConditionEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-bare-conditions", ->
+  it "strips condition parens from 'if (a)'", ->
+    expect(expectConditionEquivalent("if (a)\n  b()\n")).toBe("if a\n  b()\n")
+
+  it "strips condition parens from 'unless (a)'", ->
+    expect(expectConditionEquivalent("unless (a)\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "strips condition parens from 'while (a)'", ->
+    expect(expectConditionEquivalent("while (a)\n  b()\n")).toBe("while a\n  b()\n")
+
+  it "strips condition parens from 'switch (a)' under whitespace delta", ->
+    expect(expectConditionEquivalent("switch (a)\n  case 1: b()\n")).toBe("switch a\n  case 1: b()\n")
+
+  it "is idempotent", ->
+    once := fix("if (a)\n  b()\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-bare-conditions guards", ->
+  it "bails on 'if (a) and b' because parens do not span the entire condition", ->
+    unchanged("if (a) and b\n  c()\n")
+
+  it "bails on doubled parens 'if ((a))' because Civet preserves the inner pair", ->
+    unchanged("if ((a))\n  b()\n")
+
+  it "leaves braced 'if (a) {' to prefer-indented-blocks", ->
+    unchanged("if (a) {\n  b()\n}\n")

@@ -29,6 +29,60 @@ describe "style/prefer-indented-blocks", ->
     expect(fix("f = =>\n  while (a) {\n    g()\n    k()\n  }\n").fixedSource)
       .toBe("f = =>\n  while a\n    g()\n    k()\n")
 
+  it "de-braces a head that has already lost its parens", ->
+    // Before this, `if a {` was skipped and the braces were stranded: no other
+    // rule removes a brace whose head is paren-free.
+    expect(fix("f = =>\n  if a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free unless head", ->
+    // A trailing `h()` keeps the block out of expression position, where a braced
+    // body already mis-parses as an object literal before any fix is applied.
+    expect(fix("f = =>\n  unless a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  unless a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free for head", ->
+    expect(fix("f = =>\n  for x of xs {\n    g(x)\n    k(x)\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  for x of xs\n    g(x)\n    k(x)\n  h()\n")
+
+  it "keeps parens that do not wrap the whole condition", ->
+    // `if (a) and b` -- the parens are load-bearing, so only the braces go.
+    expect(fix("f = =>\n  if (a) and b {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if (a) and b\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a function declaration", ->
+    expect(fix("function f(x) {\n  g(x)\n  k(x)\n}\n").fixedSource)
+      .toBe("function f(x)\n  g(x)\n  k(x)\n")
+
+  it "de-braces an exported function and a TS return type", ->
+    expect(fix("export function f(x: number): void {\n  g(x)\n  k(x)\n}\n").fixedSource)
+      .toBe("export function f(x: number): void\n  g(x)\n  k(x)\n")
+
+  it "de-braces a function whose parameter list contains an object type", ->
+    // The ordinary React component signature. A `{` in the parameter list used to
+    // defeat the head pattern, so the flagship example in the style-guide gist kept
+    // its JS braces while item 9 was advertised as fully automated.
+    expect(fix("export default function C(p: { x: number }) {\n  g(p)\n  k(p)\n}\n").fixedSource)
+      .toBe("export default function C(p: { x: number })\n  g(p)\n  k(p)\n")
+
+  it "leaves a call that takes an object argument and opens a block", ->
+    // `f(a, {b: 1}) {` has no `function` keyword to mark it a declaration, so it
+    // must not be reached by the widened head pattern -- de-bracing a call's
+    // trailing block changes what is being invoked.
+    unchanged("f(a, {b: 1}) {\n  g()\n}\n")
+
+  it "de-braces a class and its methods in one pass", ->
+    expect(fix("class A {\n  m(x) {\n    g()\n    k()\n  }\n}\n").fixedSource)
+      .toBe("class A\n  m(x)\n    g()\n    k()\n")
+
+  it "de-braces a block nested inside a function it also de-braces", ->
+    expect(fix("function f(x) {\n  if (a) {\n    g()\n    k()\n  }\n  h()\n}\n").fixedSource)
+      .toBe("function f(x)\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces an object method while the object keeps its braces", ->
+    expect(fix("o := {\n  m(x) {\n    g()\n    k()\n  }\n}\n").fixedSource)
+      .toBe("o := {\n  m(x)\n    g()\n    k()\n}\n")
+
   it "reports every braced block it finds", ->
     result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
     expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
@@ -58,6 +112,18 @@ describe "style/prefer-indented-blocks exclusions", ->
     result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
     expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
     expect(result.fixedSource).toBeUndefined()
+
+  it "leaves a call with a braced object argument", ->
+    // `f(x) { a: 1 }` is a CALL -- it compiles to `f(x)({a: 1})`, not a method.
+    // The same line only means "method" inside a class body or object literal.
+    unchanged("f(x) {\n  a: 1\n}\n")
+
+  it "leaves a method whose closer carries a trailing comma", ->
+    // De-bracing strands the `,` that separates the object's properties.
+    unchanged("o := ({\n  clone() {\n    return x\n  },\n  json: f\n})\n")
+
+  it "leaves an arrow body and anything nested in one", ->
+    unchanged("f := (x) => {\n  if (a) {\n    g()\n  }\n  h()\n}\n")
 
   it "leaves an empty block", ->
     unchanged("f = =>\n  if (a) {\n  }\n")

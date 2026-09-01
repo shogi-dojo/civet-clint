@@ -8,7 +8,7 @@
 
 - **Stable Release:** Published on npm as [`civet-clint`](https://www.npmjs.com/package/civet-clint) under the `latest` dist-tag.
 - **Compiler Version:** Pinned to `@danielx/civet@0.11.15`.
-- **Real-World Validation:** Enforced in production CI across a 266-file Civet codebase with all 17 built-in rules passing at `error` level (see [Production Case Study](case-study-production.md)).
+- **Real-World Validation:** Enforced in production CI across a 266-file Civet codebase with built-in rules passing at `error` level (see [Production Case Study](case-study-production.md)).
 - **Safety Engine:** Verified byte-for-byte identical output by default, with an opt-in reference compilation mechanism for bounded quote-style transforms.
 
 ---

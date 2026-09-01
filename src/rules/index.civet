@@ -14,6 +14,7 @@ import { noMixedInterpolationRule } from "./no-mixed-interpolation.civet"
 import { noTrailingSemicolonsRule } from "./no-trailing-semicolons.civet"
 import { noTrailingCommasRule } from "./no-trailing-commas.civet"
 import { noBracedArrowBodyRule } from "./no-braced-arrow-body.civet"
+import { noDiscardedArrowReturnRule } from "./no-discarded-arrow-return.civet"
 import { preferIndentedObjectRule } from "./prefer-indented-object.civet"
 import { preferBareAssignmentRule } from "./prefer-bare-assignment.civet"
 import { preferExplicitDeclarationsRule } from "./prefer-explicit-declarations.civet"
@@ -27,12 +28,26 @@ import { noPipeOperatorRule } from "./no-pipe-operator.civet"
 import { preferRangeOperatorRule } from "./prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./prefer-bare-jsx-values.civet"
+import { preferUnclosedJsxRule } from "./prefer-unclosed-jsx.civet"
+import { noRedundantJsxParensRule } from "./no-redundant-jsx-parens.civet"
+import { preferPropertyGroupShorthandRule } from "./prefer-property-group-shorthand.civet"
 import { preferHashCommentsRule } from "./prefer-hash-comments.civet"
 import { preferSlashCommentsRule } from "./prefer-slash-comments.civet"
 import { preferWalrusDeclarationsRule } from "./prefer-walrus-declarations.civet"
 import { preferImplicitBlockCallRule } from "./prefer-implicit-block-call.civet"
+import { preferIndentedBlocksRule } from "./prefer-indented-blocks.civet"
 import { preferImplicitCallArgsRule } from "./prefer-implicit-call-args.civet"
 import { preferImplicitArrowArgRule } from "./prefer-implicit-arrow-arg.civet"
+import { preferUnlessRule } from "./prefer-unless.civet"
+import { preferAtShorthandRule } from "./prefer-at-shorthand.civet"
+import { preferLengthShorthandRule } from "./prefer-length-shorthand.civet"
+import { preferTypeofShorthandRule } from "./prefer-typeof-shorthand.civet"
+import { preferPropertyShorthandRule } from "./prefer-property-shorthand.civet"
+import { preferImplicitReturnRule } from "./prefer-implicit-return.civet"
+import { preferBareForRule } from "./prefer-bare-for.civet"
+import { preferBareConditionsRule } from "./prefer-bare-conditions.civet"
+import { preferOptionalTypeRule } from "./prefer-optional-type.civet"
+import { preferPostfixConditionalRule } from "./prefer-postfix-conditional.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -47,9 +62,10 @@ export {
   noIsNotRule,
   preferIsNotRule,
   noMixedInterpolationRule,
-  noTrailingSemicolonsRule
+  noTrailingSemicolonsRule,
   noTrailingCommasRule,
   noBracedArrowBodyRule,
+  noDiscardedArrowReturnRule,
   preferIndentedObjectRule,
   preferBareAssignmentRule,
   preferExplicitDeclarationsRule,
@@ -63,10 +79,24 @@ export {
   preferRangeOperatorRule,
   preferTerseImportsRule,
   preferBareJsxValuesRule,
+  preferUnclosedJsxRule,
+  noRedundantJsxParensRule,
+  preferPropertyGroupShorthandRule,
   preferHashCommentsRule,
   preferSlashCommentsRule,
   preferWalrusDeclarationsRule,
   preferImplicitBlockCallRule,
+  preferIndentedBlocksRule,
   preferImplicitCallArgsRule,
-  preferImplicitArrowArgRule
+  preferImplicitArrowArgRule,
+  preferUnlessRule,
+  preferAtShorthandRule,
+  preferLengthShorthandRule,
+  preferTypeofShorthandRule,
+  preferPropertyShorthandRule,
+  preferImplicitReturnRule,
+  preferBareForRule,
+  preferBareConditionsRule,
+  preferOptionalTypeRule,
+  preferPostfixConditionalRule
 }

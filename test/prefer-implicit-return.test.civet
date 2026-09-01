@@ -1,0 +1,67 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-implicit-return"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectReturnEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-implicit-return", ->
+  it "drops trailing return in a function declaration", ->
+    expect(expectReturnEquivalent("function f(x) {\n  const y = x + 1\n  return y\n}\n"))
+      .toBe("function f(x) {\n  const y = x + 1\n  y\n}\n")
+
+  it "drops trailing return in a thin arrow function", ->
+    expect(expectReturnEquivalent("const f = (x) ->\n  y := x + 1\n  return y\n"))
+      .toBe("const f = (x) ->\n  y := x + 1\n  y\n")
+
+  it "drops trailing return in a fat arrow function", ->
+    expect(expectReturnEquivalent("const f = (x) => {\n  const y = x + 1\n  return y\n}\n"))
+      .toBe("const f = (x) => {\n  const y = x + 1\n  y\n}\n")
+
+  it "drops trailing return in a method definition", ->
+    expect(expectReturnEquivalent("class Foo {\n  bar() {\n    return 42\n  }\n}\n"))
+      .toBe("class Foo {\n  bar() {\n    42\n  }\n}\n")
+
+  it "is idempotent", ->
+    once := fix("function f(x) {\n  const y = x + 1\n  return y\n}\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-implicit-return guards", ->
+  it "bails on generator functions because explicit return is preserved in JS emit", ->
+    unchanged("function* g() {\n  return 1\n}\n")
+
+  it "bails on object literal returns because de-returning adds parentheses in JS emit", ->
+    unchanged("function f() {\n  return { a: 1 }\n}\n")
+
+  it "bails on bare return statements with no value", ->
+    unchanged("function f() {\n  return\n}\n")
+
+  it "bails on return inside a loop body", ->
+    unchanged("function f(xs) {\n  for (const x of xs) {\n    return x\n  }\n}\n")
+
+  it "leaves a valueless 'return' alone", ->
+    // Deleting a bare `return` does not preserve the return value -- the function
+    // would start returning whatever the preceding statement evaluated to. A
+    // valueless return still presents an AST `expression`, so this needs a source
+    // check, not just a structural one.
+    unchanged("f := =>\n  g()\n  return\n")
+
+  it "leaves a 'return' that is not the last statement", ->
+    // Matched via the function's final entry tuple, but control flow depends on it.
+    unchanged("f := (t) =>\n  if t.a\n    return t.a()\n  if t.b\n    t.b()\n")
+

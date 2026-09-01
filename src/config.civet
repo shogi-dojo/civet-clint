@@ -44,6 +44,11 @@ export const PRESETS: Record<string, PresetDefinition> = {
   }
   "coffee-react": {
     rules: {
+      // Cleanup of this tool's own artifact rather than a taste call: parens
+      // orphaned by prefer-implicit-return. It cannot fire unless that rule ran,
+      // so it costs nothing to carry here and means the cleanup does not depend
+      // on which preset you started from.
+      "style/no-redundant-jsx-parens": "error"
       "style/prefer-word-operators": "error"
       "style/prefer-concise-arrow": "error"
       "style/prefer-jsx-shorthand": "error"
@@ -95,6 +100,51 @@ export const PRESETS: Record<string, PresetDefinition> = {
       coffeeIsnt: true
       coffeeRange: true
       coffeeComment: true
+      react: true
+    }
+    compileOptions: {}
+  }
+  // Idiomatic Civet preset: bundles neutral-dial idiom rules covering standard
+  // Civet style without legacy CoffeeScript options.
+  "civet-idiomatic": {
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/prefer-walrus-declarations": "error"
+      "style/prefer-terse-imports": "error"
+      "style/no-trailing-commas": "error"
+      "style/prefer-indented-object": "error"
+      "style/prefer-indented-blocks": "error"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-implicit-block-call": "error"
+      "style/prefer-implicit-call-args": "error"
+      "style/prefer-implicit-arrow-arg": "error"
+      "style/prefer-jsx-shorthand": "error"
+      "style/prefer-bare-jsx-values": "error"
+      "style/prefer-unclosed-jsx": "error"
+      "style/no-redundant-jsx-parens": "error"
+      "style/prefer-unless": "error"
+      "style/prefer-at-shorthand": "error"
+      "style/prefer-length-shorthand": "error"
+      "style/prefer-typeof-shorthand": "error"
+      "style/prefer-property-shorthand": "error"
+      "style/prefer-property-group-shorthand": "error"
+      // style/prefer-implicit-return is deliberately NOT in this preset. Civet's
+      // implicit-return semantics are subtle enough that the rule still proposes
+      // fixes the equivalence gate rejects -- 22 sites on a 441-file production
+      // codebase, each one making `clint --write` non-convergent and `--check`
+      // exit non-zero on conformant code. The rule is correct for the shapes it
+      // does handle and stays available opt-in; it should not gate CI by default
+      // until that number is zero.
+      "style/prefer-bare-for": "error"
+      "style/prefer-bare-conditions": "error"
+      "style/prefer-existential-check": "warn"
+      "style/prefer-optional-type": "error"
+      "style/prefer-postfix-conditional": "error"
+      "style/prefer-ampersand-shorthand": "warn"
+      "style/prefer-jsx-attr-shorthand": "warn"
+    }
+    civetOptions: {
       react: true
     }
     compileOptions: {}
