@@ -1,7 +1,7 @@
 React from react
 { Badge } from ./Badge
 
-export default function PlayerCard(props: { player: Player; onSelect: () => void }) {
+export default function PlayerCard(props: { player: Player; onSelect: () => void })
   player := props.player
   hasRank := player.rank !== null
 
@@ -11,4 +11,3 @@ export default function PlayerCard(props: { player: Player; onSelect: () => void
       <span .score>{formatScore(player.score)}
       <pre .raw>{JSON.stringify(player)}</pre>
   )
-}

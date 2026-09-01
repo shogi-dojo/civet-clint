@@ -62,7 +62,13 @@ function civetHead(keyword: string, tail: string): string | undefined
 //
 // `=> {` is deliberately absent. An arrow body is style/no-braced-arrow-body's:
 // de-bracing one is a semantic repair, not a layout change.
-FUNCTION_HEAD := /^(?:[A-Za-z_$][\w$.]*\s*(?::=|=)\s*)?(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b[^{]*\)\s*(?::[^{]*?)?\s*\{$/
+// The parameter list may itself contain braces -- `function C(p: { x: number })`
+// is the ordinary React component signature -- so this reaches the body brace with
+// a greedy `.*\)` rather than `[^{]*\)`. That is safe here only because the literal
+// `function` keyword makes the line a declaration: a call that happens to take an
+// object argument (`f(a, {b: 1}) {`) cannot reach this pattern. METHOD_HEAD below
+// keeps `[^{]*` for exactly that reason -- it has no keyword to disambiguate.
+FUNCTION_HEAD := /^(?:[A-Za-z_$][\w$.]*\s*(?::=|=)\s*)?(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b.*\)\s*(?::[^{]*?)?\s*\{$/
 CLASS_HEAD := /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b[^{]*\{$/
 METHOD_HEAD := /^(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?\*?\s*[#A-Za-z_$][\w$]*\s*\([^{]*\)\s*(?::[^{]*?)?\s*\{$/
 ARROW_HEAD := /=>\s*\{$/

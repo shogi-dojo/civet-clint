@@ -58,6 +58,19 @@ describe "style/prefer-indented-blocks", ->
     expect(fix("export function f(x: number): void {\n  g(x)\n  k(x)\n}\n").fixedSource)
       .toBe("export function f(x: number): void\n  g(x)\n  k(x)\n")
 
+  it "de-braces a function whose parameter list contains an object type", ->
+    // The ordinary React component signature. A `{` in the parameter list used to
+    // defeat the head pattern, so the flagship example in the style-guide gist kept
+    // its JS braces while item 9 was advertised as fully automated.
+    expect(fix("export default function C(p: { x: number }) {\n  g(p)\n  k(p)\n}\n").fixedSource)
+      .toBe("export default function C(p: { x: number })\n  g(p)\n  k(p)\n")
+
+  it "leaves a call that takes an object argument and opens a block", ->
+    // `f(a, {b: 1}) {` has no `function` keyword to mark it a declaration, so it
+    // must not be reached by the widened head pattern -- de-bracing a call's
+    // trailing block changes what is being invoked.
+    unchanged("f(a, {b: 1}) {\n  g()\n}\n")
+
   it "de-braces a class and its methods in one pass", ->
     expect(fix("class A {\n  m(x) {\n    g()\n    k()\n  }\n}\n").fixedSource)
       .toBe("class A\n  m(x)\n    g()\n    k()\n")

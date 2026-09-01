@@ -43,7 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Widened `style/prefer-indented-blocks` to declaration bodies.** `function f(x) {`,
   `class A {`, and method definitions (`m() {`, `constructor(x) {`, `get v() {`, and
   their `static` / `async` / generator / `#private` / TS-return-type forms) now lose
-  their braces the same way statement blocks do; all are byte-identical in emit. A
+  their braces the same way statement blocks do; all are byte-identical in emit. The
+  parameter list may itself contain braces -- `function C(p: { x: number }) {` is the
+  ordinary React component signature, and it kept its braces until the head pattern
+  stopped stopping at the first `{`. Method definitions deliberately still do: a
+  method head has no keyword to tell it from a call, and `f(a, {b: 1}) {` must not be
+  de-braced. A
   block nested inside a function is de-braced in the same pass rather than skipped.
   Arrow bodies are still `style/no-braced-arrow-body`'s, and two shapes are refused
   on purpose: `f(x) { a: 1 }` at statement level is a CALL (`f(x)({a: 1})`), not a

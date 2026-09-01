@@ -354,9 +354,13 @@ byte-identical against `@danielx/civet@0.11.15`:
 
 ```civet
 if (a) {  ✅   if a {  ✅   function f(x) {  ✅   class A {  ✅   m(x) {  ✅
+
+function C(p: { x: number }) {  ✅    // a brace in the parameter list is fine here:
+                                      // the `function` keyword is what makes the
+                                      // line unambiguously a declaration
 ```
 
-Three do not, each for a different reason:
+Four do not, each for a different reason:
 
 ```civet
 f := (x) => { … }    // style/no-braced-arrow-body's — de-bracing is a repair,
@@ -366,6 +370,9 @@ f(x) { a: 1 }        // a CALL, not a method: compiles to `f(x)({a: 1})`. The sa
                      // line only means "method" inside a class or object literal
 clone() { … },       // the closer carries a `,` that separates object properties;
                      // de-bracing would strand it
+m(p: { x: 1 }) { … } // a method has no keyword to tell it from a call, so a brace
+                     // in ITS parameter list is left alone -- `f(a, {b: 1}) {` must
+                     // not be de-braced, and the two are not distinguishable here
 ```
 
 #### `style/prefer-indented-blocks` — the two shapes reported without a fix
