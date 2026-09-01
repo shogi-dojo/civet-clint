@@ -44,6 +44,11 @@ export const PRESETS: Record<string, PresetDefinition> = {
   }
   "coffee-react": {
     rules: {
+      // Cleanup of this tool's own artifact rather than a taste call: parens
+      // orphaned by prefer-implicit-return. It cannot fire unless that rule ran,
+      // so it costs nothing to carry here and means the cleanup does not depend
+      // on which preset you started from.
+      "style/no-redundant-jsx-parens": "error"
       "style/prefer-word-operators": "error"
       "style/prefer-concise-arrow": "error"
       "style/prefer-jsx-shorthand": "error"

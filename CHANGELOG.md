@@ -27,7 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by design: removing the parens also dedents their contents, so it implies
   `whitespace-style` rather than pretending the re-indentation belongs to another
   rule. Restricted to a JSX body; parens around an object literal or a multi-line
-  binary expression are load-bearing. An explicit `return ( … )` is deliberately
+  binary expression are load-bearing. In both the `civet-idiomatic` and
+  `coffee-react` presets, since it is cleanup of this tool's own artifact rather
+  than a taste call, and it cannot fire unless `prefer-implicit-return` ran.
+  An explicit `return ( … )` is deliberately
   left alone -- dropping those requires pulling the element onto the `return`
   line, which changed emitted output on 8 files of a 441-file codebase.
 
