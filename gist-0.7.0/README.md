@@ -154,6 +154,14 @@ stay braced by design: Civet parses a braced arrow body as an object literal, so
 de-bracing one is a semantic repair handled by `style/no-braced-arrow-body` during
 `--rewrite`.
 
+One asymmetry worth flagging, because it is visible in `after-Card.civet`. A brace
+inside the *parameter list* is fine on a `function` declaration -- the ordinary React
+component signature `function C(p: { x: number }) {` de-braces normally. The same
+brace on a bare method head does not, and that is deliberate: a method head has no
+keyword to tell it apart from a call, and `f(a, {b: 1}) {` is a call whose trailing
+block must stay put. `function` is the disambiguator, so only heads carrying it get
+the looser treatment.
+
 ---
 
 ## 3. Three questions on remaining style points
