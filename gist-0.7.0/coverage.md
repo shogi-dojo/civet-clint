@@ -28,6 +28,7 @@ Civet dial** unless a row says otherwise.
 | 21 | Terse imports | `prefer-terse-imports` |
 | 22 | JSX tags need not be closed | `prefer-unclosed-jsx` |
 | 23 | JSX attribute braces omitted | `prefer-bare-jsx-values`, `prefer-jsx-attr-shorthand` |
+| — | Parens left around a returned JSX element | `no-redundant-jsx-parens` (not a sheet item; falls out of implicit return) |
 | 24 | JSX classes `.foo .bar` | `prefer-jsx-shorthand` — **partial, Q2/Q3** |
 
 ### Item 4 — why only the loose form

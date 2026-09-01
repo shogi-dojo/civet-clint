@@ -24,6 +24,7 @@ import { preferRangeOperatorRule } from "./rules/prefer-range-operator.civet"
 import { preferTerseImportsRule } from "./rules/prefer-terse-imports.civet"
 import { preferBareJsxValuesRule } from "./rules/prefer-bare-jsx-values.civet"
 import { preferUnclosedJsxRule } from "./rules/prefer-unclosed-jsx.civet"
+import { noRedundantJsxParensRule } from "./rules/no-redundant-jsx-parens.civet"
 import { preferPropertyGroupShorthandRule } from "./rules/prefer-property-group-shorthand.civet"
 import { preferHashCommentsRule } from "./rules/prefer-hash-comments.civet"
 import { preferSlashCommentsRule } from "./rules/prefer-slash-comments.civet"
@@ -129,6 +130,7 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferTerseImportsRule)
   registry.register(preferBareJsxValuesRule)
   registry.register(preferUnclosedJsxRule)
+  registry.register(noRedundantJsxParensRule)
   registry.register(preferPropertyGroupShorthandRule)
   registry.register(preferHashCommentsRule)
   registry.register(preferSlashCommentsRule)

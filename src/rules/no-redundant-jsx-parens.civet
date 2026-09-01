@@ -1,0 +1,106 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+// A JSX element converted from `return ( … )` keeps the parens Civet inherited
+// from the TSX, one to a line:
+//
+//   (
+//     <div .card>
+//       <span>hi
+//   )
+//
+// Civet passes source parens through to the emit, so they are not free -- they
+// show up as `return ( … )` in the output and they push the whole element in by
+// one level for no reason. Dropping them and dedenting what they wrapped gives
+// the same value, which is what the `return-paren-style` delta covers.
+//
+// Restricted to a JSX body on purpose. Parens around other expressions can be
+// load-bearing (an object literal would reparse as a block; a multi-line binary
+// expression needs them to keep going), and a JSX element is the one shape that
+// is unambiguous on its own line.
+export const noRedundantJsxParensRule: Rule = {
+  id: "style/no-redundant-jsx-parens"
+  meta: {
+    description: "Drop parens wrapping a multi-line JSX element"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "cleanup"
+    capabilities: { requires: ["react"] }
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("return-paren-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    lines := source.split("\n")
+    offsets: number[] := []
+    var running = 0
+    for line of lines
+      offsets.push(running)
+      running += line.length + 1
+
+    for each line, idx of lines
+      // Only the bare `(` left behind when a `return` was made implicit.
+      //
+      // An explicit `return (` looks like the same job and is not: Civet re-emits
+      // `return` plus an indented block WITH the parens, so the element has to be
+      // pulled onto the return line, and doing that changed emitted output on 8
+      // files of a 441-file codebase (311 rejected fixes). The trigger was never
+      // pinned down, so the rule stays on the shape it can prove.
+      continue unless line.trim() is "("
+      openIndent := line.length - line.trimStart().length
+
+      // The matching `)` is the next line at the same indent that is just `)`.
+      var closeIdx = -1
+      var probe = idx + 1
+      while probe < lines.length
+        candidate := lines[probe]
+        trimmed := candidate.trim()
+        if trimmed.length > 0
+          indent := candidate.length - candidate.trimStart().length
+          if indent <= openIndent
+            closeIdx = probe if trimmed is ")"
+            break
+        probe++
+      continue if closeIdx < 0
+
+      body := lines.slice(idx + 1, closeIdx)
+      continue if body.length is 0
+      firstNonBlank := body.find (l) -> l.trim().length > 0
+      continue unless firstNonBlank?
+      // Only a JSX element. Anything else may need the parens.
+      continue unless firstNonBlank.trimStart().startsWith("<")
+
+      bodyIndent := firstNonBlank.length - firstNonBlank.trimStart().length
+      continue unless bodyIndent > openIndent
+      // Every non-blank body line has to clear the paren, or the dedent below
+      // would pull something out of the element.
+      continue unless body.every (l) ->
+        l.trim().length is 0 or (l.length - l.trimStart().length) >= bodyIndent
+
+      start := offsets[idx]
+      end := offsets[closeIdx] + lines[closeIdx].length
+      continue if intersectsRange(ignoredRanges, start, end)
+
+      shift := bodyIndent - openIndent
+      dedented := body.map (l) -> l.trim().length is 0 ? l : l.slice(shift)
+      replacement := dedented.join("\n")
+
+      edit := { start, end, replacement }
+      edits.push(edit)
+      ctx.report({
+        ruleId: "style/no-redundant-jsx-parens"
+        message: "Drop the parens wrapping this JSX element -- indentation already delimits it"
+        pos: start
+        fix: edit
+      })
+}

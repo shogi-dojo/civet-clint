@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`style/no-redundant-jsx-parens`** -- drops the parens left wrapping a JSX
+  element when a `return` becomes implicit, and dedents what they held:
+
+  ```
+  (                        <div .card>
+    <div .card>       ->     <span>hi
+      <span>hi
+  )
+  ```
+
+  Civet passes source parens through to the emit, so they are not free -- they
+  appear as `return ( … )` in the output and indent the element one level for
+  nothing. Verified through a new `return-paren-style` delta, which is compound
+  by design: removing the parens also dedents their contents, so it implies
+  `whitespace-style` rather than pretending the re-indentation belongs to another
+  rule. Restricted to a JSX body; parens around an object literal or a multi-line
+  binary expression are load-bearing. An explicit `return ( … )` is deliberately
+  left alone -- dropping those requires pulling the element onto the `return`
+  line, which changed emitted output on 8 files of a 441-file codebase.
+
+
 - **12 new fixable style rules** implementing idiomatic Civet conventions from Erik Demaine's official Civet style guide:
   - `style/prefer-unless`: rewrites `if not X` and `if (!X)` to `unless X` with AST precedence guards on binary operators and existential checks.
   - `style/prefer-at-shorthand`: rewrites `this.x`, `this?.x`, `this[k]`, `this.#p`, and bare `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`.

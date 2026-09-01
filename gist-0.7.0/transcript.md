@@ -76,7 +76,7 @@ u.civet
   35:37    warning  Use '&' shorthand '.map &.trim()' instead of verbose callback  [style/prefer-ampersand-shorthand]
 
 ✖ 5 problems (0 errors, 5 warnings)
-✔ Fixed 1 problem
+✔ Fixed 2 problems
 ```
 
 ## 4. Final state

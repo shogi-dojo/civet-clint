@@ -61,12 +61,10 @@ export default function PlayerCard(props: { player: Player; onSelect: () => void
   player := props.player
   hasRank := player.rank !== null
 
-  (
-    <div .player-card.featured #main-card onClick=props.onSelect>
-      <Badge label=player.name count=player.tags# active=props.active>
-      <span .score>{formatScore(player.score)}
-      <pre .raw>{JSON.stringify(player)}</pre>
-  )
+  <div .player-card.featured #main-card onClick=props.onSelect>
+    <Badge label=player.name count=player.tags# active=props.active>
+    <span .score>{formatScore(player.score)}
+    <pre .raw>{JSON.stringify(player)}</pre>
 ```
 
 The imports are item 21. Item 22 runs throughout: `<Badge>` loses its `/`,

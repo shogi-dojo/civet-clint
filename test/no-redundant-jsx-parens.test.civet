@@ -1,0 +1,70 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeReturnParenStyle, normalizeWhitespaceStyle } from "../src/engine.civet"
+
+RULE := "style/no-redundant-jsx-parens"
+DIAL := { react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+function expectEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  norm := (s: string) -> normalizeWhitespaceStyle(normalizeReturnParenStyle(compileSource(s, DIAL)))
+  expect(norm(fixed)).toBe(norm(source))
+  fixed
+
+describe "normalizeReturnParenStyle", ->
+  it "drops parens wrapping a whole return expression", ->
+    expect(normalizeReturnParenStyle("return (a)")).toBe("return a")
+    expect(normalizeReturnParenStyle("return (f(x))")).toBe("return f(x)")
+
+  it "keeps parens that are doing work", ->
+    // A member access or operator after the close paren means the parens bound
+    // something; stripping them would change what the expression means.
+    expect(normalizeReturnParenStyle("return (a).foo")).toBe("return (a).foo")
+    expect(normalizeReturnParenStyle("return (a + b) * 2")).toBe("return (a + b) * 2")
+
+  it "does not reach inside strings or comments", ->
+    expect(normalizeReturnParenStyle('const s = "return (x)"')).toBe('const s = "return (x)"')
+    expect(normalizeReturnParenStyle("// return (x)")).toBe("// return (x)")
+
+  it "ignores an identifier that merely starts with 'return'", ->
+    expect(normalizeReturnParenStyle("returnValue (a)")).toBe("returnValue (a)")
+
+describe "style/no-redundant-jsx-parens", ->
+  it "drops the parens and dedents the element", ->
+    src := "f := ->\n  (\n    <div .a>\n      <span>hi\n  )\n"
+    expect(expectEquivalent(src)).toBe("f := ->\n  <div .a>\n    <span>hi\n")
+
+  it "is idempotent", ->
+    src := "f := ->\n  (\n    <div .a>\n      <span>hi\n  )\n"
+    once := fix(src).fixedSource ?? src
+    expect(fix(once).fixedSource ?? once).toBe(once)
+
+  it "leaves parens around a non-JSX body", ->
+    // An object literal would reparse as a block, and a binary expression needs
+    // the parens to keep going across lines. Only JSX is unambiguous alone.
+    unchanged("f := ->\n  (\n    a + b\n  )\n")
+    unchanged("f := ->\n  (\n    { a: 1 }\n  )\n")
+
+  it "leaves a paren line that is not alone", ->
+    unchanged("f := ->\n  g(\n    <div .a>\n  )\n")
+
+  it "leaves parens whose close is not alone on its line", ->
+    unchanged("f := ->\n  (\n    <div .a>\n  ).foo\n")
+
+  it "leaves an explicit 'return (' alone", ->
+    // Dropping these means pulling the element onto the return line, which
+    // changed emitted output on a real codebase. Reported by nothing, fixed by
+    // nothing -- see the note in the rule.
+    unchanged("f := ->\n  return (\n    <div .a>hi\n  )\n")
+
+  it "preserves relative indentation of a nested element", ->
+    src := "f := ->\n  (\n    <ul>\n      <li>\n        <b>x\n  )\n"
+    expect(expectEquivalent(src)).toBe("f := ->\n  <ul>\n    <li>\n      <b>x\n")
