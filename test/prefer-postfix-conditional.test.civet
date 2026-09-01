@@ -74,3 +74,24 @@ describe "style/prefer-postfix-conditional exclusions", ->
 
   it "leaves an if whose body is not a return", ->
     unchanged("f = =>\n  if (a) g()\n  h()\n")
+
+  it "defers a negated condition to style/prefer-unless", ->
+    // Both rules match `if (not x) return` and rewrite the same span in opposite
+    // directions. Deferring here is what keeps a file containing both shapes
+    // fixable: with a third rule also editing it, the combined replay diverges and
+    // the engine rejects the entire batch.
+    unchanged("f = =>\n  if (not a) return\n  g()\n")
+    // The `!` spelling needs prefer-word-operators off, or that rule turns it into
+    // `not a` first and the assertion measures the wrong rewrite.
+    bang := "f = =>\n  if (!a) return\n  g()\n"
+    res := lintSource(bang, {
+      rules: { [RULE]: "error", "style/prefer-word-operators": "off" }
+      fix: true
+      civetOptions: DIAL
+    })
+    expect(res.fixedSource ?? bang).toBe(bang)
+
+  it "still rewrites a condition that merely contains 'not' later on", ->
+    // The guard is anchored, so `a is not b` is not mistaken for a negated head.
+    expect(fix("f = =>\n  if (a isnt b) return\n  g()\n").fixedSource)
+      .toBe("f = =>\n  return if a isnt b\n  g()\n")

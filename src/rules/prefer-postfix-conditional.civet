@@ -84,6 +84,15 @@ export const preferPostfixConditionalRule: Rule = {
       // is outside what it can prove. Reporting it is right; autofixing it would be
       // a fix the gate then rejects, which surfaces as an error.
       return if /[{};]/.test(returnText) or /[{};]/.test(condText)
+      // A negated condition belongs to style/prefer-unless. Both rules match
+      // `if (not x) return`, and each rewrites the same span in its own direction
+      // -- with a third rule also editing the file the combined replay diverges and
+      // the whole batch is rejected, leaving the file unfixable (82 findings on one
+      // 739-line page of the integration corpus). prefer-unless wins the overlap
+      // because its `unless x return` is byte-identical to the input, whereas
+      // `return if not x` needs the block-brace-style delta -- the cheaper rewrite
+      // should own the shape.
+      return if /^(?:not\b|!)/.test(condText)
 
       replacement := `${returnText} if ${condText}`
       edit := { start: span.start, end: span.end, replacement }
