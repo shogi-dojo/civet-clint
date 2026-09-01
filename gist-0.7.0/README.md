@@ -2,7 +2,7 @@
 
 Hi Erik — you asked for real JS/TS on one side and the Civet you'd want on the
 other. This is that, built from your cheat-sheet and turned into a linter that
-autofixes 21 of its 24 items.
+autofixes **21 of its 24 items** on stock Civet, no dials required.
 
 **Everything in the `after-*` files is literal tool output, not hand-written.**
 
@@ -10,24 +10,24 @@ autofixes 21 of its 24 items.
 
 ## 1. What's covered
 
-**21 of 24 items autofix.** These just work — declarations, operators, `@`, `#`,
-`<?`, `T?`, no semicolons or trailing commas, implicit blocks and returns,
-paren-free calls and conditions, `unless`, `return if`, terse imports, and the
-JSX items (unclosed tags, slashless self-closing, attribute braces):
+Declarations and operators, `@`, `arr#`, `<?`, `T?`, no semicolons or trailing
+commas, implicit blocks and returns, paren-free calls and conditions, `unless`,
+`return if`, terse imports, and all three JSX items — unclosed tags, slashless
+self-closing, and attribute braces.
 
-> 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23
+Item-by-item mapping is in **`coverage.md`**.
 
-**3 need your call** — they're flagged but not autofixed, because each would
-change the emitted JavaScript rather than just the layout:
+**Three need your call.** They're flagged but never autofixed, because each
+would change the emitted JavaScript rather than just the layout:
 
 | # | Item | Why it stops |
 |---|---|---|
-| 4 | `foo?` | Only the loose `!= null` form is safe. `x !== null` is *true* for `undefined` but `x?` is *false* — different behaviour, not different style. |
-| 15 | `.pinned` | Emits `$ => $.pinned` — renames the parameter. **Q1** |
+| 4 | `foo?` | `x?` lowers to the loose `x != null`. Rewriting `x !== null` would flip the answer for `undefined`. |
+| 15 | `.pinned` | Emits `$ => $.pinned` — that renames the parameter. **Q1** |
 | 24 | `.foo .bar` | `class` passes through untouched; only `className` lowers. **Q2, Q3** |
 
-The tool never applies a fix it can't prove safe: it compiles before and after
-and compares the output. Anything that doesn't match gets reported, not rewritten.
+Every fix is checked by compiling before and after and comparing the output.
+Anything that doesn't match is reported, not rewritten.
 
 ---
 
@@ -69,12 +69,11 @@ export default function PlayerCard(props: { player: Player; onSelect: () => void
   )
 ```
 
-That `!== null` on line 3 is item 4 declining to fire — `player.rank?` would
-compile to the loose `!= null`, which answers differently for `undefined`.
-
 The imports are item 21. Item 22 runs throughout: `<Badge>` loses its `/`,
 `<span>` loses its closing tag, and `<pre>` keeps both — it's whitespace-sensitive,
 so dropping the closer would change the rendered text. `<textarea>` too.
+
+That `!== null` on line 6 is item 4 declining to fire, for the reason above.
 
 `after-utils.civet` covers the non-JSX items. Two things stay braced there on
 purpose: **arrow bodies** (Civet parses `=> { ... }` as an object literal, so
@@ -83,27 +82,19 @@ is indistinguishable from a call like `f(a, {b: 1}) {`, whose block must stay).
 
 ---
 
-## 4. Three corrections to the cheat-sheet
+## 4. Two notes on the sheet
 
-Checked against `@danielx/civet@0.11.15`.
+Both on the default dial, checked against `@danielx/civet@0.11.15`.
 
-**`is not` and `isnt` aren't interchangeable, and which one works flips.**
+**`#` for `.length` is postfix.** It's `arr#`; `#arr` is a private field:
 
 ```
-                      default        coffeeIsnt      coffeeNot
-a is not b            a !== b  ✅     a !== b  ✅      a === !b  ❌
-a isnt b              a(isnt(b)) ❌   a !== b  ✅      a !== b  ✅
+arr#    ->  arr.length
+#arr    ->  this.#arr
 ```
 
-Neither spelling is safe on its own — the sheet should name the dial.
-
-**`#` for `.length` is postfix, and clashes with `#` comments.** It's `arr#`,
-not `#arr` (`#arr` is a private field). Under `coffeeComment`, `#` starts a
-comment and the shorthand silently stops working.
-
-**`unless` needs the negation to cover the whole condition.** Your parenthetical
-"(if entire condition is negated)" is load-bearing, because `not` binds tighter
-than `and`:
+**"(if entire condition is negated)" is load-bearing** — worth spelling out,
+because `not` binds tighter than `and`:
 
 ```
 if not a and b   ->  (!a) && b     # not the same as
@@ -111,7 +102,7 @@ unless a and b   ->  !(a && b)
 ```
 
 Same trap with the existential: `if not a?` is `a == null`, but `unless a?` is
-`!(a != null)`. The tool leaves these alone rather than rewriting them.
+`!(a != null)`. The tool leaves both alone rather than rewriting them.
 
 ---
 
