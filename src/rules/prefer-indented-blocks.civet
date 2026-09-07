@@ -1,5 +1,6 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import { intersectsRange, applyEdits, normalizeWhitespaceStyle } from "../utils.civet"
+import { compileForOutput } from "../compiler.civet"
 
 // A JS-style braced statement block is a migration leftover: Civet delimits
 // `if` / `for` / `while` / `try` bodies by indentation, so the braces and the
@@ -15,10 +16,15 @@ import { intersectsRange } from "../utils.civet"
 // NOT handled here, on purpose:
 //   * `=> { … }` arrow bodies — that is style/no-braced-arrow-body, and de-bracing
 //     one is a semantic repair rather than a layout change.
-//   * A single-statement body whose statement ends in `;`. `if (a) { g(); }`
-//     parses as an OBJECT with a method definition (`if (a) ({ g() {; } })`) and
-//     `g()` never runs, so the source is already broken; report it but never
-//     autofix, because the "before" side of the equivalence check is the bug.
+//
+// A single-statement body ending in `;` LOOKS like the object mis-parse
+// (`if (a) { g(); }` reads `g` as a method name, so `g()` never runs) — but only
+// bare-call bodies do. `return false;`, `xs.push(y);`, and `x = 1;` compile
+// normally; for those the de-braced candidate emits identically modulo
+// whitespace, and the fix below verifies that per candidate before attaching.
+// A block that really does mis-parse compiles differently, fails the check, and
+// keeps the report-only diagnostic — repairing it changes the program, which is
+// the repair phase's job, not an idiom fix's.
 HEAD := /^(?:\}\s*)?(if|unless|else\s+if|else|for|while|switch|try|catch|finally)\b(.*)$/
 
 // Strip the outer parens of a head condition, but only when they wrap the WHOLE
@@ -84,6 +90,30 @@ function classifyHead(trimmed: string): HeadKind
   return "function" if FUNCTION_HEAD.test(trimmed)
   return "method" if METHOD_HEAD.test(trimmed)
   "object"
+
+// True when applying both edits leaves the emitted program unchanged once
+// insignificant whitespace is normalized. This is what separates a braced
+// single-statement body that merely LOOKS like the object mis-parse from one
+// that really is: the former compiles identically after de-bracing, the latter
+// does not. A compile failure counts as not provable.
+function debraceIsLayoutOnly(
+  source: string,
+  baselineOutput: string | undefined,
+  dial: Record<string, any>,
+  headEdit: Fix,
+  closeEdit: Fix
+): boolean
+  { output: candidate } := applyEdits(source, [headEdit, closeEdit])
+  return false if candidate is source
+  baseline := if baselineOutput?
+    baselineOutput
+  else
+    base := compileForOutput(source, { dial })
+    return false unless base.ok
+    base.output!
+  res := compileForOutput(candidate, { dial })
+  return false unless res.ok
+  normalizeWhitespaceStyle(baseline) is normalizeWhitespaceStyle(res.output!)
 
 export const preferIndentedBlocksRule: Rule = {
   id: "style/prefer-indented-blocks"
@@ -186,15 +216,11 @@ export const preferIndentedBlocksRule: Rule = {
         trimmed.replace(/\s*\{$/, "")
       continue unless newHead?
 
-      // A one-statement body ending in `;` is ALREADY an object mis-parse
-      // (`if (a) ({ g() {; } })` -- g() never runs), so the "before" side of the
-      // equivalence check is itself the bug. Report it; repair it by hand.
-      //
-      // Other braced blocks in expression position mis-parse the same way (a block
-      // that is the last statement of a function compiles to `return ({ g: g() })`).
-      // Those are NOT special-cased here: the engine's equivalence gate compiles
-      // both sides and rejects the fix on its own, which is exactly the desired
-      // outcome -- reported, not silently rewritten.
+      // A one-statement body ending in `;` may be an object mis-parse
+      // (`if (a) { g(); }` -- g() never runs), but only bare-call bodies are.
+      // De-brace candidates that provably compile identically (whitespace aside);
+      // leave the rest as a report-only diagnostic -- fixing those changes the
+      // program, which is the repair phase's job.
       misparsed := bodyLines is 1 and lastBody.endsWith(";")
 
       headStart := lineStarts[i] + openIndent
@@ -223,19 +249,21 @@ export const preferIndentedBlocksRule: Rule = {
         // Drop the whole line, including its newline.
         { start: lineStarts[closeLine], end: lineStarts[closeLine] + lines[closeLine].length + 1, replacement: "" }
 
-      unless misparsed
+      provable := not misparsed or debraceIsLayoutOnly(source, ctx.baselineOutput, ctx.parseOptions, headEdit, closeEdit)
+
+      if provable
         edits.push(headEdit)
         edits.push(closeEdit)
 
       ctx.report({
         ruleId: "style/prefer-indented-blocks"
-        message: misparsed
-          ? "Braced single-statement block with a trailing ';' parses as an object literal — drop the braces and indent the body"
-          : "Prefer indentation over braces for a statement block"
+        message: provable
+          ? "Prefer indentation over braces for a statement block"
+          : "Braced single-statement block with a trailing ';' parses as an object literal — drop the braces and indent the body"
         pos: headStart
-        ...(misparsed ? {} : { fix: headEdit })
+        ...(provable ? { fix: headEdit } : {})
       })
-      unless misparsed
+      if provable
         ctx.report({
           ruleId: "style/prefer-indented-blocks"
           message: "Prefer indentation over braces for a statement block"

@@ -2,11 +2,12 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeWhitespaceStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
 export { normalizeBlockBraceStyle }
+export { normalizeWhitespaceStyle }
 import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 import { RULE_PHASE_ORDER } from "./types.civet"
@@ -182,54 +183,6 @@ export function normalizeTrailingCommaStyle(code: string): string
 //
 // String and comment contents are copied through untouched: whitespace is
 // significant inside them, and collapsing it would change the program.
-export function normalizeWhitespaceStyle(code: string): string
-  var out = ""
-  var i = 0
-  while i < code.length
-    ch := code[i]
-    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
-      block := code[i + 1] is "*"
-      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
-      stop := end < 0 ? code.length : (block ? end + 2 : end)
-      out += code.slice(i, stop)
-      i = stop
-      continue
-    if ch is "`" or ch is '"' or ch is "'"
-      quote := ch
-      var j = i + 1
-      while j < code.length
-        if code[j] is "\\"
-          j += 2
-          continue
-        break if code[j] is quote
-        break if code[j] is "\n" and quote isnt "`"
-        j++
-      out += code.slice(i, Math.min(j + 1, code.length))
-      i = j + 1
-      continue
-    if /\s/.test(ch)
-      var k = i
-      while k < code.length and /\s/.test(code[k])
-        k++
-      // Keep one space only where removing it would join two tokens.
-      prev := out.slice(-1)
-      next := code[k] ?? ""
-      isWordChar := (c: string): boolean -> /[A-Za-z0-9_$]/.test(c)
-      if isWordChar(prev) and isWordChar(next)
-        out += " "
-      i = k
-      continue
-    out += ch
-    i++
-  out
-
-// `if (a) return` vs `if (a) { return }` -- the only difference between a Civet
-// postfix conditional and its prefix form. Strips a brace pair that follows a `)`
-// and wraps a single statement: no `;`, `{`, `}`, or newline inside.
-//
-// Consulted only for rules that declare the `block-brace-style` delta, so its
-// blast radius is that rule's own edits. It is deliberately anchored on `) {`
-// rather than any brace, so object literals keep theirs.
 export function normalizeTypeParenStyle(code: string): string
   var out = ""
   var i = 0

@@ -104,6 +104,21 @@ describe "style/prefer-indented-blocks exclusions", ->
     expect(diags.length).toBeGreaterThan(0)
     expect(result.fixedSource).toBeUndefined()
 
+  it "de-braces a single-statement body that only looks like the mis-parse", ->
+    // `return false;` is not a valid method name, so the braced body compiles
+    // normally -- the bare-`g();` heuristic does not apply. The rule compiles
+    // the de-braced candidate per site and attaches the fix when the emit is
+    // unchanged modulo whitespace (and the default-preset semicolons rule then
+    // drops the `;` in the same batch).
+    expect(fix("f = =>\n  if (a) {\n    return false;\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    return false\n  h()\n")
+
+  it "de-braces a single-statement member-call body", ->
+    // `xs.push(y);` cannot read as a method definition (dotted name), so the
+    // de-brace is layout-only and provable.
+    expect(fix("f = =>\n  if (a) {\n    xs.push(y);\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    xs.push(y)\n  h()\n")
+
   it "reports but does not autofix a block in expression position", ->
     // A braced block that is the LAST statement of a function already mis-parses
     // into an object (`if (a) return ({ g: g(), k: k() })`). De-bracing repairs

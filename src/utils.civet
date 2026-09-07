@@ -150,8 +150,19 @@ export function normalizeSemicolonStyle(code: string): string
   var out = ""
   var i = 0
   var parenDepth = 0
+  var braceDepth = 0
   while i < code.length
     ch := code[i]
+    if ch is "{"
+      braceDepth++
+      out += ch
+      i++
+      continue
+    if ch is "}"
+      braceDepth = Math.max(0, braceDepth - 1)
+      out += ch
+      i++
+      continue
     if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
       block := code[i + 1] is "*"
       end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
@@ -202,7 +213,12 @@ export function normalizeSemicolonStyle(code: string): string
       out += ch
       i++
       continue
-    if ch is ";" and parenDepth is 0
+    // Line-final `;` inside a braced block is a statement terminator even when a
+    // call's parens are still open (Civet emits callback bodies as
+    // `filter((x) => { ... })`, so the whole body sits at paren depth >= 1). A
+    // `for ( ;; )` separator, the one `;` that is load-bearing, never sits inside
+    // braces -- there braceDepth is 0 and the guard below leaves it alone.
+    if ch is ";" and (parenDepth is 0 or braceDepth > 0)
       var k = i + 1
       while k < code.length and (code[k] is " " or code[k] is "\t")
         k++
@@ -340,3 +356,52 @@ export function normalizeBlockBraceStyle(code: string): string
 //
 // Consulted only for rules that declare the `type-paren-style` delta, so its
 // blast radius is that rule's own edits.
+
+export function normalizeWhitespaceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if /\s/.test(ch)
+      var k = i
+      while k < code.length and /\s/.test(code[k])
+        k++
+      // Keep one space only where removing it would join two tokens.
+      prev := out.slice(-1)
+      next := code[k] ?? ""
+      isWordChar := (c: string): boolean -> /[A-Za-z0-9_$]/.test(c)
+      if isWordChar(prev) and isWordChar(next)
+        out += " "
+      i = k
+      continue
+    out += ch
+    i++
+  out
+
+// `if (a) return` vs `if (a) { return }` -- the only difference between a Civet
+// postfix conditional and its prefix form. Strips a brace pair that follows a `)`
+// and wraps a single statement: no `;`, `{`, `}`, or newline inside.
+//
+// Consulted only for rules that declare the `block-brace-style` delta, so its
+// blast radius is that rule's own edits. It is deliberately anchored on `) {`
+// rather than any brace, so object literals keep theirs.
