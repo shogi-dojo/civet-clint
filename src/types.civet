@@ -47,7 +47,11 @@ export interface RuleContext
     fix?: Fix
   }) => void
   getLineColumn: (pos: number) => { line: number, column: number }
-  declareEquivalenceReference?: (delta: OutputDelta, build: EquivalenceReference) => void
+  // `delta` lists the emit dimensions the fix is allowed to move: a single kind,
+  // or several when one rewrite touches more than one (e.g. a postfix conditional
+  // gains braces AND drops a semicolon). The gate composes the kinds' normalizers
+  // and requires the composed emit to match, so only declared dimensions may move.
+  declareEquivalenceReference?: (delta: OutputDelta | OutputDelta[], build: EquivalenceReference) => void
 
 export interface RuleCapability
   requires?: string[]

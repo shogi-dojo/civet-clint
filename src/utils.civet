@@ -231,3 +231,112 @@ export function normalizeSemicolonStyle(code: string): string
 // `const x = 1` keeps `const`, so the byte-identical gate would otherwise reject
 // every prefer-bare-assignment fix. Strings and comments are skipped, and the
 // match is word-bounded, so `constant` and `"const"` are left alone.
+
+// Index of the brace that closes the one at `open`, or -1. String and comment
+// ranges are skipped, so the `}` inside a template literal's `${...}` is never
+// mistaken for the closing brace of a statement block.
+function findBlockClose(code: string, open: number): number
+  var depth = 1
+  var i = open
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      return -1 if end < 0
+      i = block ? end + 2 : end
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      i = j + 1
+      continue
+    if ch is "{"
+      depth++
+    else if ch is "}"
+      depth--
+      return i if depth is 0
+    i++
+  -1
+
+// True when `code` holds a brace, semicolon, or newline OUTSIDE string and comment
+// ranges. Template-literal contents (including `${...}` expressions) count as
+// inert: the scanner copies them verbatim, so a braced statement body wrapping
+// `throw new Error(\`x ${y}\`)` is still provably brace-style-only.
+function containsStructuralChar(code: string): boolean
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      return true if end < 0
+      i = block ? end + 2 : end
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      i = j + 1
+      continue
+    return true if ch is "{" or ch is "}" or ch is ";" or ch is "\n" or ch is "\r"
+    i++
+  false
+
+export function normalizeBlockBraceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "{" and /\)\s*$/.test(out)
+      close := findBlockClose(code, i + 1)
+      if close >= 0
+        inner := code.slice(i + 1, close)
+        if inner.trim().length > 0 and not containsStructuralChar(inner)
+          out += inner.trim()
+          i = close + 1
+          continue
+    out += ch
+    i++
+  out
+
+// `(x: string | undefined)` vs `(x: (string | undefined))` -- Civet wraps optional
+// types `T?` in parens when lowering to TypeScript `(T | undefined)`.
+// Strips a paren pair whose contents hold a top-level `|` and no nested
+// parens/braces/brackets, provided it is not adjacent to `&` or `[`.
+//
+// Consulted only for rules that declare the `type-paren-style` delta, so its
+// blast radius is that rule's own edits.

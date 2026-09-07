@@ -37,7 +37,6 @@ function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number
   results: { pos: number, fix: Fix }[] := []
   lines := source.split("\n")
   var currentOffset = 0
-  var parenDepth = 0
 
   for line of lines
     lineLen := line.length
@@ -47,14 +46,14 @@ function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number
         continue
 
       ch := line[i]
-      if ch is "("
-        parenDepth++
-        continue
-      if ch is ")"
-        parenDepth = Math.max(0, parenDepth - 1)
-        continue
 
-      if ch is ";" and parenDepth is 0
+      // No textual paren-depth tracking here: Civet closes calls and parenthesized
+      // headers at dedent, often without any `)` in the source, so counting parens
+      // line-by-line drifts permanently out of sync and hides every later
+      // semicolon. Over-guessing costs nothing -- safeSemicolons compiles each
+      // candidate group, and a `;` that is load-bearing (a `for ( ;; )` header,
+      // a call argument separator) fails that verification and is dropped.
+      if ch is ";"
         restOfLine := line.slice(i + 1)
         trimmedRest := restOfLine.trim()
 

@@ -172,12 +172,15 @@ describe "Configuration matrix", ->
       expect(res.isEquivalencePreserved).toBe(true)
 
     it "keeps safe default-dial edits when an unsafe spelling shares the file", ->
-      res := lintSource("a === b\nc !== d", {
+      // `!=` is the spelling that stays put without the Coffee dial (its emit,
+      // loose `!=`, differs from any word operator). `!==` is strict, so it can
+      // safely become `is not` even under the default dial.
+      res := lintSource("a === b\nc != d", {
         config: neutralConfig()
         fix: true
       })
       expect(res.isEquivalencePreserved).toBe(true)
-      expect(res.fixedSource).toBe("a is b\nc !== d")
+      expect(res.fixedSource).toBe("a is b\nc != d")
 
   describe "Coffee options dial", ->
     it "rewrites == to is when coffeeEq is enabled", ->

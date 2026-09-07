@@ -1,5 +1,7 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import type { SyntaxTree } from "../syntax.civet"
+import { intersectsRange, applyEdits, normalizeBlockBraceStyle, normalizeSemicolonStyle } from "../utils.civet"
+import { compileForOutput } from "../compiler.civet"
 
 const DISALLOWED_OPERAND_TYPES = new Set([
   "Existence"
@@ -7,6 +9,72 @@ const DISALLOWED_OPERAND_TYPES = new Set([
   "CompareOp"
   "LogicOp"
 ])
+
+// A one-liner head whose body starts with one of these is rewritten to the postfix
+// form (`if (not a) return x` -> `return x unless a`). The prefix spelling
+// (`unless a return x`, `unless a throw x`) is not an option: bare `unless a f()`
+// parses as a call `a(f())`, and a value-bearing `unless a return x` appends a
+// stray `return` to the emitted block. Erik's style guide asks for the postfix
+// form anyway ("For one-liners like `if (...) return`, prefer `return if ...`").
+const POSTFIXABLE_BODY = /^(?:return\b|throw\b|continue\b|break\b)/
+
+// A one-liner body led by a bare identifier (`f()`, `x = 1`) also moves to the
+// postfix form; anything with less conventional shape is left alone.
+const EXPRESSION_BODY = /^[A-Za-z_$][A-Za-z0-9_$.]*\s*(?:[=(]|$)/
+
+type Candidate = { pos: number, fix: Fix }
+
+// Postfix rewrites can flip how Civet parses the *surrounding* braced arrow body:
+// rewriting the only statement of `() => { if (!a) setHovered(null); }` yields
+// `() => { setHovered(null) unless a; }`, whose body now reads as an object
+// literal method. Each candidate is therefore verified by compiling with and
+// without it and comparing brace-normalized output; the set is bisected so a
+// file where every site is provable costs two compiles.
+function safeBodies(
+  source: string,
+  dial: Record<string, any>,
+  baselineOutput: string | undefined,
+  candidates: Candidate[]
+): Candidate[]
+  return candidates if candidates.length is 0
+
+  normalize := (code: string): string ->
+    normalizeSemicolonStyle(normalizeBlockBraceStyle(code))
+
+  baseline := if baselineOutput?
+    normalize(baselineOutput)
+  else
+    base := compileForOutput(source, { dial })
+    return [] unless base.ok
+    normalize(base.output!)
+
+  groupIsSafe := (group: Candidate[]): boolean ->
+    return true if group.length is 0
+    { output } := applyEdits(source, group.map((c) -> c.fix))
+    return false if output is source
+    res := compileForOutput(output, { dial })
+    res.ok and normalize(res.output!) is baseline
+
+  accepted: Candidate[] := []
+  partition := (group: Candidate[], depth: number): void ->
+    return if group.length is 0
+    if groupIsSafe(group)
+      accepted.push(...group)
+      return
+    return if group.length is 1 or depth > 24
+    mid := Math.floor(group.length / 2)
+    partition(group.slice(0, mid), depth + 1)
+    partition(group.slice(mid), depth + 1)
+
+  partition(candidates, 0)
+  accepted.sort (a, b) -> a.fix.start - b.fix.start
+
+  // Two removals that are each safe alone can still interact; re-verify the union
+  // and shrink it until it holds, mirroring style/no-trailing-semicolons.
+  var result = accepted
+  while result.length > 0 and not groupIsSafe(result)
+    result = result.slice(0, Math.floor(result.length / 2))
+  result
 
 export const preferUnlessRule: Rule = {
   id: "style/prefer-unless"
@@ -21,6 +89,23 @@ export const preferUnlessRule: Rule = {
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+
+    // Postfix rewrites reorder a whole one-liner, so the emitted `if (!a) { ... }`
+    // gains a block around the statement and any trailing `;` changes position.
+    // The declared deltas prove both dimensions are the only differences. Prefix
+    // rewrites (block heads, postfix conditions) stay byte-identical and never
+    // consult the builder: the engine accepts them on the byte-identical fast
+    // path before reaching it.
+    edits: Fix[] := []
+    ctx.declareEquivalenceReference?.(["block-brace-style", "semicolon-style"], (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    candidates: Candidate[] := []
 
     tree.visit "IfStatement", (node) ->
       return if node.negated
@@ -68,16 +153,55 @@ export const preferUnlessRule: Rule = {
       seen.add(start)
 
       operandText := tree.text(operand)
-      replacement := `unless ${operandText}`
+      bodyRaw := headLine.slice(end - start)
+      bodyText := bodyRaw.trim()
 
+      if bodyText.length > 0
+        // One-liner with a same-line statement: `unless a <stmt>` mis-parses, so
+        // the statement moves to the postfix form instead. The statement is moved
+        // verbatim, so only the condition region needed the string/comment check
+        // above; the body itself must simply contain nothing that changes meaning
+        // when ` unless a` is appended after it. String contents are blanked out
+        // first so a brace inside a template literal is not mistaken for an object
+        // literal.
+        guardedChars := bodyRaw.split("")
+        for range of tree.stringRanges()
+          s := Math.max(range.start, end) - end
+          e := Math.min(range.end, end + bodyRaw.length) - end
+          continue if e <= 0 or s >= bodyRaw.length
+          for let k = s; k < e; k++
+            guardedChars[k] = " "
+        guardedBody := guardedChars.join("").trim()
+        return unless POSTFIXABLE_BODY.test(bodyText) or EXPRESSION_BODY.test(bodyText)
+        return if /[{}<>]|\b(?:then|else|if|unless)\b|=>|(?:^|[^\\])#|\/\/|\/\*/.test(guardedBody)
+        var core = bodyText
+        if core.endsWith(";")
+          core = core.slice(0, -1).trimEnd()
+        return if core.includes(";")
+        // The trailing `;` is dropped with the rewrite, and the semicolon-style
+        // delta covers its loss: on Civet 0.11.5 a postfix statement followed by
+        // `;` (`return null unless a;`) mis-compiles into a call, so the `;` must
+        // not survive the rewrite even on compilers where it merely relocates.
+        bodyEnd := end + bodyRaw.trimEnd().length
+        replacement := `${core} unless ${operandText}`
+        candidates.push({
+          pos: start
+          fix: { start, end: bodyEnd, replacement }
+        })
+        return
+
+      replacement := `unless ${operandText}`
+      candidates.push({
+        pos: start
+        fix: { start, end, replacement }
+      })
+
+    for candidate of safeBodies(source, ctx.parseOptions, ctx.baselineOutput, candidates)
+      edits.push(candidate.fix)
       ctx.report({
         ruleId: "style/prefer-unless"
-        message: `Use 'unless ${operandText}' instead of '${source.slice(start, end)}'`
-        pos: start
-        fix: {
-          start
-          end
-          replacement
-        }
+        message: `Use '${candidate.fix.replacement}' instead of '${source.slice(candidate.fix.start, candidate.fix.end)}'`
+        pos: candidate.pos
+        fix: candidate.fix
       })
 }

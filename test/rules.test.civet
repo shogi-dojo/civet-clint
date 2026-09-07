@@ -50,11 +50,13 @@ describe "Rules Test Suite", ->
       expect(res.fixedSource).toBe("a is undefined\nb isnt undefined")
 
     it "continues after an operator whose preferred spelling is unavailable", ->
-      res := lintSource("a !== b\nc === d", {
+      // `!=` needs the CoffeeScript dial (coffeeEq + coffeeIsnt) before it can
+      // become a word operator, so it stays put; the next operator still rewrites.
+      res := lintSource("a != b\nc === d", {
         rules: { "style/prefer-word-operators": "error" }
         fix: true
       })
-      expect(res.fixedSource).toBe("a !== b\nc is d")
+      expect(res.fixedSource).toBe("a != b\nc is d")
 
     it "does not replace operators inside strings, comments, or JSX text", ->
       input := 's := "=== && || !"\n// comment with !== and ||\n<div>=== and &&</div>'

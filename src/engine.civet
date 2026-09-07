@@ -2,10 +2,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
+export { normalizeBlockBraceStyle }
 import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 import { RULE_PHASE_ORDER } from "./types.civet"
@@ -25,6 +26,20 @@ export interface LintOptions
   phase?: RulePhase
   // Run each phase in order, re-parsing between them. See lintPhased.
   phases?: RulePhase[]
+
+// Canonical application order for output-delta normalizers. A rule declaring
+// several kinds, and the combined batch composing every rule's kinds, both walk
+// this same sequence so single-rule and multi-rule verification agree.
+export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
+  "semicolon-style"
+  "quote-style"
+  "declaration-style"
+  "trailing-comma-style"
+  "block-brace-style"
+  "type-paren-style"
+  "return-paren-style"
+  "whitespace-style"
+]
 
 export function normalizeQuoteStyle(code: string): string
   var out = ""
@@ -215,50 +230,6 @@ export function normalizeWhitespaceStyle(code: string): string
 // Consulted only for rules that declare the `block-brace-style` delta, so its
 // blast radius is that rule's own edits. It is deliberately anchored on `) {`
 // rather than any brace, so object literals keep theirs.
-export function normalizeBlockBraceStyle(code: string): string
-  var out = ""
-  var i = 0
-  while i < code.length
-    ch := code[i]
-    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
-      block := code[i + 1] is "*"
-      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
-      stop := end < 0 ? code.length : (block ? end + 2 : end)
-      out += code.slice(i, stop)
-      i = stop
-      continue
-    if ch is "`" or ch is '"' or ch is "'"
-      quote := ch
-      var j = i + 1
-      while j < code.length
-        if code[j] is "\\"
-          j += 2
-          continue
-        break if code[j] is quote
-        break if code[j] is "\n" and quote isnt "`"
-        j++
-      out += code.slice(i, Math.min(j + 1, code.length))
-      i = j + 1
-      continue
-    if ch is "{" and /\)\s*$/.test(out)
-      close := code.indexOf("}", i + 1)
-      if close >= 0
-        inner := code.slice(i + 1, close)
-        if inner.trim().length > 0 and not /[{};\r\n]/.test(inner)
-          out += inner.trim()
-          i = close + 1
-          continue
-    out += ch
-    i++
-  out
-
-// `(x: string | undefined)` vs `(x: (string | undefined))` -- Civet wraps optional
-// types `T?` in parens when lowering to TypeScript `(T | undefined)`.
-// Strips a paren pair whose contents hold a top-level `|` and no nested
-// parens/braces/brackets, provided it is not adjacent to `&` or `[`.
-//
-// Consulted only for rules that declare the `type-paren-style` delta, so its
-// blast radius is that rule's own edits.
 export function normalizeTypeParenStyle(code: string): string
   var out = ""
   var i = 0
@@ -469,36 +440,47 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
   commentRanges := syntax.commentRanges()
 
   equivalenceReferences := new Map<string, EquivalenceReference>()
-  outputDeltas := new Map<string, OutputDelta>()
+  outputDeltas := new Map<string, OutputDelta[]>()
   var currentRuleId = ""
   var suppressFixForCurrentRule = false
 
-  outputDeltaAllowed := (ruleId: string, before: string, after: string): boolean ->
-    kind := outputDeltas.get(ruleId)
+  applyDeltaNormalizer := (kind: OutputDelta, code: string): string ->
     switch kind
       when "quote-style"
-        normalizeQuoteStyle(before) is normalizeQuoteStyle(after)
+        normalizeQuoteStyle(code)
       when "semicolon-style"
-        normalizeSemicolonStyle(before) is normalizeSemicolonStyle(after)
+        normalizeSemicolonStyle(code)
       when "declaration-style"
-        normalizeDeclarationStyle(before) is normalizeDeclarationStyle(after)
+        normalizeDeclarationStyle(code)
       when "trailing-comma-style"
-        normalizeTrailingCommaStyle(before) is normalizeTrailingCommaStyle(after)
+        normalizeTrailingCommaStyle(code)
       when "whitespace-style"
-        normalizeWhitespaceStyle(before) is normalizeWhitespaceStyle(after)
+        normalizeWhitespaceStyle(code)
       when "block-brace-style"
-        normalizeBlockBraceStyle(before) is normalizeBlockBraceStyle(after)
+        normalizeBlockBraceStyle(code)
       when "type-paren-style"
-        normalizeTypeParenStyle(before) is normalizeTypeParenStyle(after)
+        normalizeTypeParenStyle(code)
       when "return-paren-style"
         // Compound on purpose: dropping the parens also dedents everything they
         // wrapped, so the layout moves as well. A rule declaring this delta is
         // asking for both, and saying so here is more honest than having the rule
         // pretend the re-indentation is somebody else's.
-        normalizeWhitespaceStyle(normalizeReturnParenStyle(before)) is
-          normalizeWhitespaceStyle(normalizeReturnParenStyle(after))
+        normalizeWhitespaceStyle(normalizeReturnParenStyle(code))
       else
-        false
+        code
+
+  // Compose a rule's declared kinds in normalizeCombined's canonical order, so a
+  // rewrite that moves several dimensions at once (say braces and a semicolon) is
+  // judged by the same composite the combined batch would use.
+  outputDeltaAllowed := (ruleId: string, before: string, after: string): boolean ->
+    kinds := outputDeltas.get(ruleId) ?? []
+    var resBefore = before
+    var resAfter = after
+    for kind of DELTA_NORMALIZER_ORDER
+      continue unless kinds.includes(kind)
+      resBefore = applyDeltaNormalizer(kind, resBefore)
+      resAfter = applyDeltaNormalizer(kind, resAfter)
+    resBefore is resAfter
 
   context: RuleContext := {
     source
@@ -511,7 +493,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     declareEquivalenceReference: (delta, build) ->
       if currentRuleId
         equivalenceReferences.set(currentRuleId, build)
-        outputDeltas.set(currentRuleId, delta)
+        outputDeltas.set(currentRuleId, Array.isArray(delta) ? delta : [delta])
     report: (d) ->
       ruleLevel := mergedRules[d.ruleId] or "off"
       return if ruleLevel is "off"
@@ -710,6 +692,21 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         })
 
     { output: combinedCandidate, appliedEdits } := applyEdits(source, approvedFixes)
+    // applyEdits drops an edit that overlaps one approved earlier (keeping the
+    // outermost span). A rule whose every surviving edit was dropped that way must
+    // also stay out of the reference chain below: the chain re-applies each rule's
+    // builder, so including it would re-apply an edit the candidate really dropped
+    // and the reference would diverge from the combined output.
+    survivingFixKeys := new Set(appliedEdits.map (edit) -> `${edit.start}:${edit.end}:${edit.replacement}`)
+    fixRuleByKey := new Map<string, string>()
+    for [ruleId, ruleFixes] of fixesByRule
+      continue unless approvedRuleIds.has(ruleId)
+      for f of ruleFixes
+        fixRuleByKey.set(`${f.start}:${f.end}:${f.replacement}`, ruleId)
+    chainRuleIds := new Set<string>()
+    for key of survivingFixKeys
+      ruleId := fixRuleByKey.get(key)
+      chainRuleIds.add(ruleId) if ruleId?
     if combinedCandidate isnt source
       combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
       // Each rule's reference builder is written against the ORIGINAL source and uses
@@ -724,11 +721,19 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       // each builder is rebuilt on the string it is actually about to transform.
       combinedReference := ->
         var acc = source
-        for id of approvedRuleIds
+        for id of chainRuleIds
           rule := registry.get(id)
           continue unless rule?
           accParse := parseSyntax(acc, { dial: civetOptions, compileOptions, filename })
           break unless accParse.ok and accParse.syntax?
+
+          // The baseline must track the accumulated text, not the original source.
+          // A rule that self-verifies its removals against `baselineOutput` (as
+          // no-trailing-semicolons does) would otherwise compare against an emit
+          // that still contains an earlier rule's verbatim-layout edits, judge its
+          // own edit output-changing, and drop out of the chain -- leaving the
+          // reference missing a change the combined candidate really makes.
+          accCompiled := compileForOutput(acc, { dial: civetOptions, compileOptions, filename })
 
           var rebuilt: EquivalenceReference | undefined = undefined
           scratchContext: RuleContext := {
@@ -737,6 +742,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
             syntax: accParse.syntax!
             options: resolveRuleOptions(id, mergedRuleOptions[id], registry)
             getLineColumn: createLineColumnIndex(acc)
+            baselineOutput: if accCompiled.ok then accCompiled.output else undefined
             declareEquivalenceReference: (_delta, build) -> rebuilt = build
             report: -> undefined
           }
@@ -750,26 +756,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         acc
       normalizeCombined := (code: string): string ->
         var res = code
-        kinds := new Set(Array.from(approvedRuleIds).map((id) -> outputDeltas.get(id)).filter(Boolean))
-        if kinds.has("semicolon-style")
-          res = normalizeSemicolonStyle(res)
-        if kinds.has("quote-style")
-          res = normalizeQuoteStyle(res)
-        if kinds.has("declaration-style")
-          res = normalizeDeclarationStyle(res)
-        if kinds.has("trailing-comma-style")
-          res = normalizeTrailingCommaStyle(res)
-        if kinds.has("block-brace-style")
-          res = normalizeBlockBraceStyle(res)
-        if kinds.has("type-paren-style")
-          res = normalizeTypeParenStyle(res)
-        if kinds.has("return-paren-style")
-          res = normalizeReturnParenStyle(res)
-        // Last: the normalizers above can leave whitespace differences behind,
-        // so collapsing must happen after they have run. `return-paren-style`
-        // implies it -- see the note in outputDeltaAllowed.
-        if kinds.has("whitespace-style") or kinds.has("return-paren-style")
-          res = normalizeWhitespaceStyle(res)
+        kinds := new Set(Array.from(chainRuleIds).flatMap((id) -> outputDeltas.get(id) ?? []))
+        for kind of DELTA_NORMALIZER_ORDER
+          continue unless kinds.has(kind)
+          res = applyDeltaNormalizer(kind, res)
         res
       // Same distinction as acceptCandidate: a repair phase is verified by the
       // mis-parse disappearing, not by the emit staying identical.
@@ -784,8 +774,14 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
               false
             else
               referenceRes := compileForOutput(reference, { dial: civetOptions, compileOptions, filename })
+              // The chain replays every surviving rule in isolation, so it can
+              // re-derive an edit the combined candidate had to drop as an overlap
+              // conflict (a rule's span shielding another rule's edit). Judging the
+              // chain against the candidate through the declared deltas -- exactly
+              // like the original-vs-combined check below -- tolerates that benign
+              // divergence while still rejecting any undeclared difference.
               referenceRes.ok and
-                referenceRes.output is combinedRes.output and
+                normalizeCombined(referenceRes.output!) is normalizeCombined(combinedRes.output!) and
                 normalizeCombined(originalCompiled!) is normalizeCombined(combinedRes.output!)
         )
       )
