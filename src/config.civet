@@ -1,7 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ClintConfig, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleEntry, RuleLevel, RuleOptions, SkippedRule } from "./types.civet"
+import type { ClintConfig, CompilerPreference, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleEntry, RuleLevel, RuleOptions, SkippedRule } from "./types.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
+import { resolveCivetCompiler } from "./compiler.civet"
 
 const TOP_LEVEL_COMPILE_OPTIONS = new Set([
   "filename"
@@ -64,6 +65,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/no-pipe-operator": "error"
       "style/prefer-existential-check": "warn"
       "style/prefer-jsx-attr-shorthand": "warn"
+      "style/no-braced-arrow-body": "error"
       "style/prefer-ampersand-shorthand": "warn"
       "style/no-single-param-arrow-without-parens": "warn"
       "style/prefer-named-export-default": "warn"
@@ -119,6 +121,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-implicit-block-call": "error"
       "style/prefer-implicit-call-args": "error"
       "style/prefer-implicit-arrow-arg": "error"
+      "style/no-braced-arrow-body": "error"
       "style/prefer-jsx-shorthand": "error"
       "style/prefer-bare-jsx-values": "error"
       "style/prefer-unclosed-jsx": "error"
@@ -127,6 +130,11 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-at-shorthand": "error"
       "style/prefer-length-shorthand": "error"
       "style/prefer-typeof-shorthand": "error"
+      "style/prefer-in-operator": "error"
+      "style/prefer-new-shorthand": "error"
+      "style/prefer-slice-shorthand": "error"
+      "style/prefer-range-loop": "warn"
+      "style/prefer-switch": "warn"
       "style/prefer-property-shorthand": "error"
       "style/prefer-property-group-shorthand": "error"
       // style/prefer-implicit-return is deliberately NOT in this preset. Civet's
@@ -144,9 +152,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-ampersand-shorthand": "warn"
       "style/prefer-jsx-attr-shorthand": "warn"
     }
-    civetOptions: {
-      react: true
-    }
+    civetOptions: {}
     compileOptions: {}
   }
 }
@@ -432,6 +438,8 @@ export function loadConfig(
         throw new Error("Each override must have a 'files' string or array of strings")
       if override.preset? and not PRESETS[override.preset]
         throw new Error(`Unknown preset in override: "${override.preset}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
+      if override.compiler? and override.compiler isnt "project" and override.compiler isnt "bundled"
+        throw new Error(`Invalid compiler preference "${override.compiler}": expected "project" or "bundled"`)
       if override.rules?
         for ruleId of Object.keys(override.rules)
           normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
@@ -443,6 +451,11 @@ export function loadConfig(
   { dial: userDial, compileOptions: userCompileOptions, resolvedPath: resolvedCivetConfigPath } := loadCivetConfig(explicitCivetConfigPath, cwd)
   civetOptions := { ...presetDef.civetOptions, ...userDial }
   compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
+  var compilerPreference: CompilerPreference = userConfig.compiler or "project"
+  unless compilerPreference is "project" or compilerPreference is "bundled"
+    throw new Error(`Invalid compiler preference "${compilerPreference}": expected "project" or "bundled"`)
+  compilerRoot := configPath ? path.dirname(configPath) : cwd
+  compilerResolution := resolveCivetCompiler(compilerRoot, compilerPreference)
 
   skippedRules := computeSkippedRules(mergedRules, civetOptions, registry)
   validateRuleConflicts(mergedRules, registry)
@@ -454,6 +467,12 @@ export function loadConfig(
     civetConfigPath: resolvedCivetConfigPath
     civetOptions
     compileOptions
+    compiler: compilerResolution.compiler
+    compilerVersion: compilerResolution.version
+    compilerPath: compilerResolution.path
+    compilerPreference
+    compilerUsedBundled: compilerResolution.usedBundled
+    compilerWarning: compilerResolution.warning
     configPath
     skippedRules
     overrides: userConfig.overrides
@@ -473,6 +492,7 @@ export function resolveConfigForFile(
   var effectiveCivetConfigPath = baseConfig.civetConfigPath
   var effectiveCivetOptions: CompileDial = { ...baseConfig.civetOptions }
   var effectiveCompileOptions: CompileOptions = { ...baseConfig.compileOptions }
+  var compilerPreference: CompilerPreference = baseConfig.compilerPreference
   var effectiveRules: Record<string, RuleLevel> = { ...baseConfig.rules }
   var effectiveRuleOptions: Record<string, RuleOptions> = { ...(baseConfig.ruleOptions or {}) }
   matchingOverrides: string[] := []
@@ -506,6 +526,9 @@ export function resolveConfigForFile(
     if override.compileOptions
       effectiveCompileOptions = { ...effectiveCompileOptions, ...override.compileOptions }
 
+    if override.compiler?
+      compilerPreference = override.compiler
+
     if override.rules
       for ruleId of Object.keys(override.rules)
         { level, options } := normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
@@ -519,6 +542,7 @@ export function resolveConfigForFile(
 
   skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
   validateRuleConflicts(effectiveRules, registry)
+  compilerResolution := resolveCivetCompiler(configBase, compilerPreference)
 
   {
     preset: effectivePreset
@@ -527,6 +551,12 @@ export function resolveConfigForFile(
     civetConfigPath: effectiveCivetConfigPath
     civetOptions: effectiveCivetOptions
     compileOptions: effectiveCompileOptions
+    compiler: compilerResolution.compiler
+    compilerVersion: compilerResolution.version
+    compilerPath: compilerResolution.path
+    compilerPreference
+    compilerUsedBundled: compilerResolution.usedBundled
+    compilerWarning: compilerResolution.warning
     configPath: baseConfig.configPath
     skippedRules
     overrides: baseConfig.overrides

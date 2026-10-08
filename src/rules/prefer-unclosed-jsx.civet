@@ -1,4 +1,5 @@
 import type { Rule, RuleContext } from "../types.civet"
+import type { SyntaxTree } from "../syntax.civet"
 import { intersectsRange } from "../utils.civet"
 
 // Erik Demaine's Civet style guide, item 22: "JSX tags don't need to be closed,
@@ -29,6 +30,24 @@ import { intersectsRange } from "../utils.civet"
 // as its one exception, and for a whitespace-preserving element the re-emitted
 // closer is exactly the kind of layout change that is not safe to assume away.
 const WHITESPACE_SENSITIVE = new Set(["pre", "textarea"])
+
+// Find the last JSX text leaf in an element's final-child chain. An unclosed
+// ancestor can share the same source endpoint as a nested closed element, so
+// checking only the element's direct children misses text before that nested
+// closer (for example, `<span><b>P</b>LAYGROUND</span>` inside another `<span>`).
+function endsInJsxTextAt(node: any, end: number, tree: SyntaxTree): boolean
+  return false unless node?
+  if node.type is "JSXText"
+    return tree.range(node)?.end is end
+
+  children := Array.isArray(node.jsxChildren)
+    ? node.jsxChildren
+    : Array.isArray(node.children)
+      ? node.children.find((child: any) -> Array.isArray(child?.jsxChildren))?.jsxChildren
+      : undefined
+  return false unless Array.isArray(children)
+  lastChild := children[children.length - 1]
+  endsInJsxTextAt(lastChild, end, tree)
 
 // Locate the `>` or `/>` that terminates the opening tag starting at `openIdx`
 // (where `source[openIdx]` is `<`). Quotes and `{…}` are skipped so an attribute
@@ -69,9 +88,6 @@ export const preferUnclosedJsxRule: Rule = {
     fixable: true
     defaultSeverity: "error"
     phase: "idiom"
-    capabilities: {
-      requires: ["react"]
-    }
     defaultOptions: {
       // `<span>hi</span>` -> `<span>hi`
       closingTags: true
@@ -146,6 +162,11 @@ export const preferUnclosedJsxRule: Rule = {
         // following line would be adopted as a child.
         lineStart := source.lastIndexOf("\n", closeIdx) + 1
         beforeOnLine := source.slice(lineStart, closeIdx)
+        // If an inline closer follows a JSX text child, removing it moves the
+        // following newline and indentation into that text node. The generic
+        // whitespace delta cannot distinguish JSX text from formatting, so keep
+        // this closer explicitly and preserve the emitted text exactly.
+        return if beforeOnLine.trim().length > 0 and endsInJsxTextAt(node, closeIdx, tree)
         refLine := source.slice(lineStart, tailEnd)
         nextLine := nextLineAfter(tailEnd)
         return if nextLine? and indentOf(nextLine) > indentOf(refLine)

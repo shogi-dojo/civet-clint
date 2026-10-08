@@ -1,0 +1,81 @@
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
+
+const ASSIGNMENT_AFTER_NAME = /^\s*(?:\+\+|--|\+=|-=|\*=|\/=|%=|=(?!=|>))/
+
+export const preferFunctionDeclarationRule: Rule = {
+  id: "style/prefer-function-declaration"
+  meta: {
+    description: "Prefer function declarations for named const arrow functions with block bodies"
+    fixable: true
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    allTokens := tree.tokens()
+    var fixes: Fix[] = []
+    ctx.declareEquivalenceReference?.("function-declaration", (input: string) ->
+      return undefined if fixes.length is 0
+      applyEdits(input, fixes).output
+    )
+
+    tree.visit "ArrowFunction", (arrow) ->
+      return unless arrow.block?.type is "BlockStatement" and not arrow.block.bare
+      arrowRange := tree.range(arrow)
+      bodyRange := tree.range(arrow.block)
+      return unless arrowRange? and bodyRange?
+      lineStartCandidate := source.lastIndexOf("\n", arrowRange.start - 1)
+      lineStart := lineStartCandidate < 0 ? 0 : lineStartCandidate + 1
+      prefix := source.slice(lineStart, arrowRange.start)
+      header := /^([ \t]*)(export[ \t]+)?const[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*=[ \t]*$/.exec(prefix)
+      return unless header
+
+      name := header[3]!
+      nameStart := lineStart + prefix.indexOf(name)
+      arrowToken := tree.tokens(arrow).find (token) -> token.value is "=>" and not token.synthetic
+      return unless arrowToken?
+      var signature = source.slice(arrowRange.start, arrowToken.range.start).trim()
+      asyncArrow := /^async\b/.test(signature)
+      signature = signature.replace(/^async\s+/, "") if asyncArrow
+      return unless signature.length > 0
+      bodyText := source.slice(arrowToken.range.end, arrowRange.end).trim()
+      return unless bodyText.startsWith("{") and bodyText.endsWith("}")
+
+      var unsafeLexicalBinding = tree.tokens(arrow).some (token) ->
+        return false if token.synthetic or intersectsRange(ignoredRanges, token.range.start, token.range.end)
+        token.raw.trim() is "this" or token.raw.trim() is "arguments" or token.raw.trim() is "super"
+      tokenRun := tree.tokens(arrow).filter (token) -> not token.synthetic and not intersectsRange(ignoredRanges, token.range.start, token.range.end)
+      for let i = 0; i + 2 < tokenRun.length; i++
+        unsafeLexicalBinding = true if tokenRun[i].raw.trim() is "new" and tokenRun[i + 1].raw.trim() is "." and tokenRun[i + 2].raw.trim() is "target"
+
+      usedBefore := allTokens.some (token) ->
+        token.range.start < nameStart and token.raw.trim() is name and not token.synthetic and
+          not intersectsRange(ignoredRanges, token.range.start, token.range.end)
+      reassigned := allTokens.some (token) ->
+        return false unless token.range.start > nameStart and token.raw.trim() is name and not token.synthetic
+        return false if intersectsRange(ignoredRanges, token.range.start, token.range.end)
+        next := source.slice(token.range.end).match(ASSIGNMENT_AFTER_NAME)
+        previous := source.slice(0, token.range.start).match(/(?:\+\+|--)\s*$/)
+        Boolean(next or previous)
+
+      canFix := not unsafeLexicalBinding and not usedBefore and not reassigned
+      var fix: any = undefined
+      if canFix
+        indent := header[1] or ""
+        exportPrefix := header[2] ? "export " : ""
+        functionPrefix := asyncArrow ? "async function" : "function"
+        replacement := `${indent}${exportPrefix}${functionPrefix} ${name}${signature} ${bodyText}`
+        fix = { start: lineStart, end: arrowRange.end, replacement }
+        fixes.push(fix)
+
+      ctx.report({
+        ruleId: "style/prefer-function-declaration"
+        message: canFix
+          ? `Prefer a function declaration for '${name}'`
+          : `Consider a function declaration for '${name}', but verify its scope and bindings manually`
+        pos: lineStart
+        fix
+      })
+}

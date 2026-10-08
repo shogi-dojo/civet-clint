@@ -20,27 +20,43 @@ function unchanged(source: string)
   expect(res.fixedSource ?? source).toBe(source)
 
 describe "style/prefer-unclosed-jsx", ->
-  it "drops a closing tag that ends its line", ->
-    // Every closer in the element goes, including the outermost one: indentation
-    // already delimits all of them.
+  it "keeps inline text closers while dropping outer closers", ->
     expect(expectEquivalent("x := <div>\n  <span>hi</span>\n</div>\n"))
-      .toBe("x := <div>\n  <span>hi\n")
+      .toBe("x := <div>\n  <span>hi</span>\n")
 
-  it "drops closing tags from sibling elements", ->
+  it "keeps text closers on sibling elements", ->
     expect(expectEquivalent("x := <div>\n  <span>a</span>\n  <b>c</b>\n</div>\n"))
-      .toBe("x := <div>\n  <span>a\n  <b>c\n")
+      .toBe("x := <div>\n  <span>a</span>\n  <b>c</b>\n")
 
-  it "drops a closer that sits alone on its line, taking the line with it", ->
+  it "keeps an inline text closer inside a multiline element", ->
     expect(expectEquivalent("x := <div>\n  <b>\n    <i>y</i>\n  </b>\n</div>\n"))
-      .toBe("x := <div>\n  <b>\n    <i>y\n")
+      .toBe("x := <div>\n  <b>\n    <i>y</i>\n")
 
   it "drops the closer of an element holding an expression container", ->
     expect(expectEquivalent("x := <div>\n  <span>{v}</span>\n</div>\n"))
       .toBe("x := <div>\n  <span>{v}\n")
 
-  it "drops a closer inside a parenthesised group", ->
+  it "keeps an inline text closer inside a parenthesised group", ->
     expect(expectEquivalent("x := (\n  <div>\n    <span>a</span>\n  </div>\n)\n"))
-      .toBe("x := (\n  <div>\n    <span>a\n)\n")
+      .toBe("x := (\n  <div>\n    <span>a</span>\n)\n")
+
+  it "preserves emitted text when the closer follows inline text", ->
+    source := "x := <span>word</span>\n"
+    res := fix(source)
+    expect(res.fixedSource).toBeUndefined()
+    expect(compileSource(res.fixedSource ?? source, DIAL)).toBe(compileSource(source, DIAL))
+
+  it "preserves trailing text after a nested inline element", ->
+    source := "x := <span><b>P</b>LAYGROUND</span>\n"
+    res := fix(source)
+    expect(res.fixedSource).toBeUndefined()
+    expect(compileSource(res.fixedSource ?? source, DIAL)).toBe(compileSource(source, DIAL))
+
+  it "does not confuse a nested closer with an unclosed same-name ancestor", ->
+    source := "x := <span>\n  <span><b>P</b>LAYGROUND</span>\n"
+    res := fix(source)
+    expect(res.fixedSource).toBeUndefined()
+    expect(compileSource(res.fixedSource ?? source, DIAL)).toBe(compileSource(source, DIAL))
 
   it "is idempotent", ->
     once := fix("x := <div>\n  <span>hi</span>\n</div>\n").fixedSource!
@@ -113,10 +129,10 @@ describe "style/prefer-unclosed-jsx — self-closing exclusions", ->
       .toBe("x := <div>\n  {a ? <Foo /> : <Bar />}\n")
 
   it "leaves a tag followed by text on the same line", ->
-    // The <Icon/> slash stays -- " b" would become its child. The <span> closer
-    // still goes: it ends its line and nothing follows.
+    // The <Icon/> slash stays -- " b" would become its child. The text-bearing
+    // <span> closer stays too, so the next line cannot become part of its text.
     expect(expectEquivalent("x := <span>a <Icon /> b</span>\n"))
-      .toBe("x := <span>a <Icon /> b\n")
+      .toBe("x := <span>a <Icon /> b</span>\n")
 
   it "leaves a tag whose enclosing closer shares its name", ->
     // `</div>` would pair with the slashless `<div>`, so the outer element loses
@@ -147,4 +163,4 @@ describe "style/prefer-unclosed-jsx — options", ->
       fix: true
       civetOptions: DIAL
     })
-    expect(res.fixedSource).toBe("x := <div>\n  <span>hi\n  <Foo />\n")
+    expect(res.fixedSource).toBe("x := <div>\n  <span>hi</span>\n  <Foo />\n")

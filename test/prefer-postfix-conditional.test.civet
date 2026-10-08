@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { lintSource, compileSource, normalizeBlockBraceStyle } from "../src/engine.civet"
+import { lintSource, compileSource, normalizeBlockBraceStyle, normalizeSemicolonStyle } from "../src/engine.civet"
 
 RULE := "style/prefer-postfix-conditional"
 DIAL := { autoLet: true }
@@ -11,8 +11,8 @@ function expectEquivalent(source: string)
   res := fix(source)
   fixed := res.fixedSource ?? source
   expect(res.isEquivalencePreserved).toBe(true)
-  expect(normalizeBlockBraceStyle(compileSource(fixed, DIAL)))
-    .toBe(normalizeBlockBraceStyle(compileSource(source, DIAL)))
+  expect(normalizeBlockBraceStyle(normalizeSemicolonStyle(compileSource(fixed, DIAL))))
+    .toBe(normalizeBlockBraceStyle(normalizeSemicolonStyle(compileSource(source, DIAL))))
   fixed
 
 function unchanged(source: string)

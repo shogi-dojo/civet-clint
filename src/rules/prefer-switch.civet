@@ -1,0 +1,57 @@
+import type { Rule, RuleContext } from "../types.civet"
+
+const EQUALITY_TEST = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:===|is)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?|true|false|null|undefined|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\s*$/
+
+export const preferSwitchRule: Rule = {
+  id: "style/prefer-switch"
+  meta: {
+    description: "Prefer switch statements for chains of strict equality checks"
+    fixable: false
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    tree := ctx.syntax
+    seen := new Set<number>()
+
+    testName := (node: any): string | undefined ->
+      condition := node.condition
+      return undefined unless condition?
+      expr := condition.expression ?? condition
+      text := tree.text(expr).trim()
+      match := EQUALITY_TEST.exec(text)
+      match?[1]
+
+    tree.visit "IfStatement", (node) ->
+      return if tree.hasAncestorType(node, "ElseClause")
+      span := tree.range(node)
+      return unless span? and not seen.has(span.start)
+      firstName := testName(node)
+      return unless firstName?
+
+      var cursor: any = node
+      var count = 0
+      while cursor?.type is "IfStatement"
+        currentName := testName(cursor)
+        break unless currentName is firstName
+        count++
+        clause := cursor.else
+        break unless clause?.block?
+        blockText := tree.text(clause.block).trim()
+        break unless /^if\b/.test(blockText)
+        var nextIf: any = undefined
+        tree.visit clause.block, "IfStatement", (candidate) ->
+          candidateRange := tree.range(candidate)
+          nextRange := tree.range(nextIf)
+          if candidateRange? and (not nextRange? or candidateRange.start < nextRange.start)
+            nextIf = candidate
+        break unless nextIf?
+        cursor = nextIf
+
+      if count >= 2
+        seen.add(span.start)
+        ctx.report({
+          ruleId: "style/prefer-switch"
+          message: `Consider a switch statement for repeated strict equality checks on '${firstName}'`
+          pos: span.start
+        })
+}

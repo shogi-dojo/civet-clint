@@ -1,0 +1,44 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+import { normalizeFunctionDeclarationStyle } from "../src/utils.civet"
+
+RULE := "style/prefer-function-declaration"
+
+function fix(source: string)
+  lintSource(source, {
+    rules: { [RULE]: "error", "style/prefer-word-operators": "off" }
+    fix: true
+  })
+
+describe RULE, ->
+  it "converts a safe named const arrow block to a function declaration", ->
+    source := "const f = (x) => { return x + 1 }\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("function f(x) { return x + 1 }\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(normalizeFunctionDeclarationStyle(compileSource(source))).toBe(compileSource(res.fixedSource!))
+
+  it "preserves export, default parameters, and return types", ->
+    source := "export const f = (x: number = 1): number => { return x + 1 }\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("export function f(x: number = 1): number { return x + 1 }\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "preserves generic function signatures", ->
+    source := "const id = <T>(x: T): T => { return x }\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("function id<T>(x: T): T { return x }\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "reports but does not fix lexical this, use-before, or reassignment cases", ->
+    cases := [
+      "const f = (x) => { return this.value + x }\n"
+      "f()\nconst f = (x) => { return x }\n"
+      "const f = (x) => { return x }\nf = other\n"
+    ]
+    for source of cases
+      res := fix(source)
+      diags := res.diagnostics.filter (d) -> d.ruleId is RULE
+      expect(diags).toHaveLength(1)
+      expect(diags[0].fix).toBeUndefined()
+      expect(res.isEquivalencePreserved).toBe(true)

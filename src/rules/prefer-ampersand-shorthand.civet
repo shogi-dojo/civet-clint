@@ -1,5 +1,6 @@
-import type { Rule, RuleContext } from "../types.civet"
+import type { Rule, RuleContext, Fix } from "../types.civet"
 import type { SyntaxTree } from "../syntax.civet"
+import { applyEdits } from "../utils.civet"
 
 const SHORTHAND_METHODS = new Set([
   "map", "filter", "find", "findIndex", "findLast", "findLastIndex"
@@ -83,11 +84,18 @@ export const preferAmpersandShorthandRule: Rule = {
   id: "style/prefer-ampersand-shorthand"
   meta: {
     description: "Prefer '&' block shorthand for single-parameter property access callbacks"
-    fixable: false
+    fixable: true
     defaultSeverity: "warn"
+    defaultOptions: { autofixPlaceholders: false }
   }
   check: (ctx: RuleContext) ->
     tree := ctx.syntax
+    source := ctx.source
+    var fixes: Fix[] = []
+    ctx.declareEquivalenceReference?.("placeholder-param", (input: string) ->
+      return undefined if fixes.length is 0
+      applyEdits(input, fixes).output
+    )
 
     tree.visit "CallExpression", (node) ->
       children := tree.children(node)
@@ -127,9 +135,27 @@ export const preferAmpersandShorthandRule: Rule = {
         pos := parameterPos arrow, tree
         continue unless pos?
 
+        arrowSpan := tree.range(arrow)
+        paramsSpan := tree.range(arrow.parameters ?? arrow.signature?.parameters)
+        continue unless arrowSpan? and paramsSpan?
+
+        // The placeholder fix intentionally renames the callback's one parameter
+        // to `$`. Keep it opt-in and only accept a plain identifier parameter and
+        // a direct non-optional property chain: no defaults, types, calls, or
+        // side effects can move into the abbreviated form.
+        parameterText := source.slice(paramsSpan.start, paramsSpan.end).trim()
+        isPlainParameter := parameterText.replace(/\s/g, "") is `(${paramName})`
+        simplePlaceholder := body?.type is "MemberExpression" and not chain.includes("?.") and (arrow.async?.length or 0) is 0
+        canFix := ctx.options.autofixPlaceholders is true and isPlainParameter and simplePlaceholder
+        var fix: any = undefined
+        if canFix
+          fix = { start: arrowSpan.start, end: arrowSpan.end, replacement: `&${chain}` }
+          fixes.push(fix)
+
         ctx.report({
           ruleId: "style/prefer-ampersand-shorthand"
           message: `Use '&' shorthand '.${method} &${chain}' instead of verbose callback`
           pos
+          fix
         })
 }

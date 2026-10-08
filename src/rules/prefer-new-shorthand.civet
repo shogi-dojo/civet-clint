@@ -1,0 +1,57 @@
+import type { Rule, RuleContext } from "../types.civet"
+import type { Fix } from "../types.civet"
+import { intersectsRange, applyEdits } from "../utils.civet"
+
+const EMPTY_CONSTRUCTOR_CALL = /^new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(\)(.*)$/
+
+export const preferNewShorthandRule: Rule = {
+  id: "style/prefer-new-shorthand"
+  meta: {
+    description: "Omit empty constructor parentheses after 'new'"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    edits: Fix[] := []
+    ctx.declareEquivalenceReference?.("new-call-style", (input: string) ->
+      return undefined if edits.length is 0
+      { output } := applyEdits(input, edits)
+      output
+    )
+
+    tree.visit "NewExpression", (node) ->
+      span := tree.range(node)
+      return unless span?
+      raw := source.slice(span.start, span.end)
+      leading := raw.length - raw.trimStart().length
+      expression := raw.trim()
+      match := expression.match(EMPTY_CONSTRUCTOR_CALL)
+      return unless match
+
+      constructor := match[1]
+      var tail: string = match[2]
+      var replacement: string = `new ${constructor}`
+      // Removing constructor parentheses before a member/index access changes
+      // the parse unless the constructed value remains grouped.
+      if tail.length > 0
+        return unless /^\s*(?:\.|\[)/.test(tail)
+        tail = tail.trimStart()
+        replacement = `(new ${constructor})${tail}`
+      else
+        replacement = `new ${constructor}`
+
+      start := span.start + leading
+      end := span.end
+      return if intersectsRange(ignoredRanges, start, end)
+      fix: Fix := { start, end, replacement }
+      edits.push(fix)
+      ctx.report({
+        ruleId: "style/prefer-new-shorthand"
+        message: `Use '${replacement}' instead of '${expression}'`
+        pos: start
+        fix
+      })
+}

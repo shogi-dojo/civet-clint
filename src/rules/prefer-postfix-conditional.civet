@@ -6,9 +6,9 @@ import { intersectsRange } from "../utils.civet"
 //
 //   if (a) return x   ->   return x if a
 //
-// The emitted JS differs by exactly one thing -- the prefix form emits
-// `if (a) return x`, the postfix form `if (a) { return x }` -- so the fix declares
-// the `block-brace-style` delta and the engine proves the rest.
+// The postfix form can also add the return's statement terminator after the block.
+// Declare both output deltas so the engine removes that terminator before comparing
+// the block shape, then proves that the surrounding output stayed the same.
 //
 // A project that would rather not loosen the gate at all has a byte-identical
 // alternative: `if a then return x` emits the unbraced form. The message says so.
@@ -29,7 +29,7 @@ export const preferPostfixConditionalRule: Rule = {
     seen := new Set<number>()
 
     edits: { start: number, end: number, replacement: string }[] := []
-    ctx.declareEquivalenceReference?.("block-brace-style", (input: string) ->
+    ctx.declareEquivalenceReference?.(["semicolon-style", "block-brace-style"], (input: string) ->
       return undefined unless edits.length > 0
       var out = input
       for edit of [...edits].sort((a, b) -> b.start - a.start)

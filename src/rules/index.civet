@@ -48,6 +48,12 @@ import { preferBareForRule } from "./prefer-bare-for.civet"
 import { preferBareConditionsRule } from "./prefer-bare-conditions.civet"
 import { preferOptionalTypeRule } from "./prefer-optional-type.civet"
 import { preferPostfixConditionalRule } from "./prefer-postfix-conditional.civet"
+import { preferInOperatorRule } from "./prefer-in-operator.civet"
+import { preferNewShorthandRule } from "./prefer-new-shorthand.civet"
+import { preferSliceShorthandRule } from "./prefer-slice-shorthand.civet"
+import { preferRangeLoopRule } from "./prefer-range-loop.civet"
+import { preferSwitchRule } from "./prefer-switch.civet"
+import { preferFunctionDeclarationRule } from "./prefer-function-declaration.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -99,4 +105,10 @@ export {
   preferBareConditionsRule,
   preferOptionalTypeRule,
   preferPostfixConditionalRule
+  preferInOperatorRule
+  preferNewShorthandRule
+  preferSliceShorthandRule
+  preferRangeLoopRule
+  preferSwitchRule
+  preferFunctionDeclarationRule
 }

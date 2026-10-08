@@ -48,8 +48,8 @@ describe "style/prefer-typeof-shorthand guards", ->
   it "bails on Yoda form '\"string\" === typeof x' because it compiles to instanceof", ->
     unchanged('"string" === typeof x\n')
 
-  it "bails on negated 'typeof x !== \"string\"' because Civet emit differs", ->
-    unchanged('typeof x !== "string"\n')
+  it "rewrites negated typeof checks to '!<?'", ->
+    expect(expectTypeofEquivalent('typeof x !== "string"\n')).toBe('x !<? "string"\n')
 
   it "leaves comments alone", ->
     unchanged('// typeof x is "string"\n')

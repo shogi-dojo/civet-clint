@@ -2,7 +2,7 @@
 
 Hi Erik — you asked for real JS/TS on one side and the Civet you'd want on the
 other. This is that, built from your cheat-sheet and turned into a linter that
-autofixes **21 of its 24 items** on stock Civet, no dials required.
+autofixes the syntax-safe conventions on stock Civet, no dials required.
 
 **Everything in the `after-*` files is literal tool output, not hand-written.**
 
@@ -82,7 +82,7 @@ is indistinguishable from a call like `f(a, {b: 1}) {`, whose block must stay).
 
 ## 4. Two notes on the sheet
 
-Both on the default dial, checked against `@danielx/civet@0.11.15`.
+Both on the default dial, checked against `@danielx/civet@0.11.16`.
 
 **`#` for `.length` is postfix.** It's `arr#`; `#arr` is a private field:
 

@@ -1,8 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
-import type { CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeWhitespaceStyle } from "./utils.civet"
+import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
@@ -19,6 +19,7 @@ export interface LintOptions
   registry?: RuleRegistry
   civetOptions?: Record<string, any>
   compileOptions?: Record<string, any>
+  compiler?: CivetCompiler
   fix?: boolean
   rules?: Record<string, RuleLevel>
   ruleOptions?: Record<string, RuleOptions>
@@ -39,6 +40,11 @@ export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "block-brace-style"
   "type-paren-style"
   "return-paren-style"
+  "inequality-style"
+  "new-call-style"
+  "placeholder-param"
+  "range-loop"
+  "function-declaration"
   "whitespace-style"
 ]
 
@@ -331,6 +337,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
   mergedRuleOptions := { ...(resolvedConfig.ruleOptions or {}), ...(options.ruleOptions or {}) }
   civetOptions: CompileDial := { ...resolvedConfig.civetOptions, ...(options.civetOptions or {}) }
   compileOptions: CompileOptions := { ...resolvedConfig.compileOptions, ...(options.compileOptions or {}) }
+  compiler := options.compiler or resolvedConfig.compiler
 
   for ruleId of Object.keys(mergedRules)
     level := mergedRules[ruleId]
@@ -347,7 +354,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
   var syntax: SyntaxTree | undefined = undefined
   var originalCompiled: string | undefined = undefined
 
-  parseRes := parseSyntax(source, { dial: civetOptions, compileOptions, filename })
+  parseRes := parseSyntax(source, { dial: civetOptions, compileOptions, filename, compiler })
   if not parseRes.ok
     diag: Diagnostic := {
       ruleId: "syntax-error"
@@ -369,7 +376,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     }
   syntax = parseRes.syntax!
 
-  baselineRes := compileForOutput(source, { dial: civetOptions, compileOptions, filename })
+  baselineRes := compileForOutput(source, { dial: civetOptions, compileOptions, filename, compiler })
   if not baselineRes.ok
     diag: Diagnostic := {
       ruleId: "compile-error"
@@ -419,6 +426,16 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         // asking for both, and saying so here is more honest than having the rule
         // pretend the re-indentation is somebody else's.
         normalizeWhitespaceStyle(normalizeReturnParenStyle(code))
+      when "inequality-style"
+        normalizeInequalityStyle(code)
+      when "new-call-style"
+        normalizeNewCallStyle(code)
+      when "placeholder-param"
+        normalizePlaceholderParamStyle(code)
+      when "range-loop"
+        normalizeRangeLoopStyle(code)
+      when "function-declaration"
+        normalizeFunctionDeclarationStyle(code)
       else
         code
 
@@ -441,6 +458,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     filename
     parseOptions: civetOptions
     baselineOutput: originalCompiled
+    compiler
     options: {}
     getLineColumn
     declareEquivalenceReference: (delta, build) ->
@@ -610,7 +628,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       return false unless build?
       referenceSource := build(source)
       return false unless referenceSource? and referenceSource isnt source
-      referenceRes := compileForOutput(referenceSource, { dial: civetOptions, compileOptions, filename })
+      referenceRes := compileForOutput(referenceSource, { dial: civetOptions, compileOptions, filename, compiler })
       return false unless referenceRes.ok and referenceRes.output is candidateOutput
       outputDeltaAllowed(ruleId, originalCompiled!, candidateOutput)
 
@@ -620,7 +638,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       { output: ruleCandidate, appliedEdits: ruleApplied } := applyEdits(source, ruleFixes)
       continue if ruleCandidate is source
 
-      candidateRes := compileForOutput(ruleCandidate, { dial: civetOptions, compileOptions, filename })
+      candidateRes := compileForOutput(ruleCandidate, { dial: civetOptions, compileOptions, filename, compiler })
       if candidateRes.ok
         if acceptCandidate(ruleId, candidateRes.output!)
           approvedFixes.push(...ruleApplied)
@@ -661,7 +679,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       ruleId := fixRuleByKey.get(key)
       chainRuleIds.add(ruleId) if ruleId?
     if combinedCandidate isnt source
-      combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename })
+      combinedRes := compileForOutput(combinedCandidate, { dial: civetOptions, compileOptions, filename, compiler })
       // Each rule's reference builder is written against the ORIGINAL source and uses
       // absolute offsets, so chaining the builders would feed rule N+1 a string whose
       // positions have already shifted. Instead, derive each rule's edit against the
@@ -677,7 +695,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         for id of chainRuleIds
           rule := registry.get(id)
           continue unless rule?
-          accParse := parseSyntax(acc, { dial: civetOptions, compileOptions, filename })
+          accParse := parseSyntax(acc, { dial: civetOptions, compileOptions, filename, compiler })
           break unless accParse.ok and accParse.syntax?
 
           // The baseline must track the accumulated text, not the original source.
@@ -686,7 +704,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           // that still contains an earlier rule's verbatim-layout edits, judge its
           // own edit output-changing, and drop out of the chain -- leaving the
           // reference missing a change the combined candidate really makes.
-          accCompiled := compileForOutput(acc, { dial: civetOptions, compileOptions, filename })
+          accCompiled := compileForOutput(acc, { dial: civetOptions, compileOptions, filename, compiler })
 
           var rebuilt: EquivalenceReference | undefined = undefined
           scratchContext: RuleContext := {
@@ -696,6 +714,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
             options: resolveRuleOptions(id, mergedRuleOptions[id], registry)
             getLineColumn: createLineColumnIndex(acc)
             baselineOutput: if accCompiled.ok then accCompiled.output else undefined
+            compiler
             declareEquivalenceReference: (_delta, build) -> rebuilt = build
             report: -> undefined
           }
@@ -726,7 +745,7 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
             if reference is source
               false
             else
-              referenceRes := compileForOutput(reference, { dial: civetOptions, compileOptions, filename })
+              referenceRes := compileForOutput(reference, { dial: civetOptions, compileOptions, filename, compiler })
               // The chain replays every surviving rule in isolation, so it can
               // re-derive an edit the combined candidate had to drop as an overlap
               // conflict (a rule's span shielding another rule's edit). Judging the
@@ -839,7 +858,10 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
   fileConfig := resolveConfigForFile(baseConfig, filePath, process.cwd(), registry)
 
-  res := options.phases?
+  hasRepairRules := Object.keys(fileConfig.rules).some (ruleId) ->
+    fileConfig.rules[ruleId] isnt "off" and (registry.get(ruleId)?.meta.phase is "repair")
+  shouldRunPhases := options.phases? or (options.fix and hasRepairRules)
+  res := shouldRunPhases
     ? lintPhased(content, { ...options, config: fileConfig, filename: filePath, registry })
     : lintSource(content, { ...options, config: fileConfig, filename: filePath, registry })
 
@@ -889,7 +911,7 @@ export async function rewriteFile(filePath: string, options: LintOptions = {}): 
   civetOptions: CompileDial := { ...fileConfig.civetOptions, ...(options.civetOptions or {}) }
   compileOptions: CompileOptions := { ...fileConfig.compileOptions, ...(options.compileOptions or {}) }
 
-  parseRes := parseSyntax(content, { dial: civetOptions, compileOptions, filename: filePath })
+  parseRes := parseSyntax(content, { dial: civetOptions, compileOptions, filename: filePath, compiler: fileConfig.compiler })
   if not parseRes.ok
     return {
       filePath
@@ -909,7 +931,7 @@ export async function rewriteFile(filePath: string, options: LintOptions = {}): 
       fixableCount: 0
     }
 
-  baselineRes := compileForOutput(content, { dial: civetOptions, compileOptions, filename: filePath })
+  baselineRes := compileForOutput(content, { dial: civetOptions, compileOptions, filename: filePath, compiler: fileConfig.compiler })
   if not baselineRes.ok
     return {
       filePath
@@ -941,4 +963,3 @@ export async function rewriteFile(filePath: string, options: LintOptions = {}): 
     phases: options.phases or RULE_PHASE_ORDER
     registry
   })
-

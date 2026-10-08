@@ -13,6 +13,7 @@ import {
   type SourceRange,
   type SourceToken,
   parseCliArgs,
+  resolveCivetCompiler,
   RuleRegistry,
   noTrailingSemicolonsRule,
   preferBareAssignmentRule,
@@ -29,6 +30,8 @@ import {
   type ClintConfig,
   type CompileDialOptions,
   type CompileResult,
+  type CompilerPreference,
+  type CompilerResolution,
   type ConfigOverride,
   type LintOptions,
   type LintResult,
@@ -43,6 +46,7 @@ const override: ConfigOverride = {
 
 const userConfig: ClintConfig = {
   preset: 'coffee-react',
+  compiler: 'project',
   rules: { 'style/no-is-not': 'warn' },
   overrides: [override],
 }
@@ -71,6 +75,8 @@ const options: LintOptions = { config: resolved, registry: defaultReg, fix: true
 const result: LintResult = lintSource('fn := () => a === b', options)
 const compileOptions: CompileDialOptions = { dial: {}, compileOptions: { js: true } }
 const compiled: CompileResult = compileForOutput('x := 1', compileOptions)
+const compilerPreference: CompilerPreference = 'bundled'
+const compilerResolution: CompilerResolution = resolveCivetCompiler(process.cwd(), compilerPreference)
 const parsed: CompileResult = parseSyntax('x := 1', { dial: {} })
 const rule: Rule | undefined = allRules['style/prefer-word-operators']
 
@@ -83,6 +89,7 @@ void clonedReg
 void fileResolved
 void result
 void compiled
+void compilerResolution
 void parsed
 void rule
 void customRule

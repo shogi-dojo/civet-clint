@@ -1,6 +1,6 @@
-import type { Rule, RuleContext, Fix } from "../types.civet"
+import type { CivetCompiler, Rule, RuleContext, Fix } from "../types.civet"
 import type { SyntaxTree } from "../syntax.civet"
-import { intersectsRange, applyEdits, normalizeBlockBraceStyle, normalizeSemicolonStyle } from "../utils.civet"
+import { intersectsRange, applyEdits, normalizeBlockBraceStyle, normalizeSemicolonStyle, normalizeWhitespaceStyle, normalizeInequalityStyle } from "../utils.civet"
 import { compileForOutput } from "../compiler.civet"
 
 const DISALLOWED_OPERAND_TYPES = new Set([
@@ -34,17 +34,18 @@ function safeBodies(
   source: string,
   dial: Record<string, any>,
   baselineOutput: string | undefined,
-  candidates: Candidate[]
+  candidates: Candidate[],
+  compiler?: CivetCompiler
 ): Candidate[]
   return candidates if candidates.length is 0
 
   normalize := (code: string): string ->
-    normalizeSemicolonStyle(normalizeBlockBraceStyle(code))
+    normalizeWhitespaceStyle(normalizeSemicolonStyle(normalizeBlockBraceStyle(normalizeInequalityStyle(code))))
 
   baseline := if baselineOutput?
     normalize(baselineOutput)
   else
-    base := compileForOutput(source, { dial })
+    base := compileForOutput(source, { dial, compiler })
     return [] unless base.ok
     normalize(base.output!)
 
@@ -52,7 +53,7 @@ function safeBodies(
     return true if group.length is 0
     { output } := applyEdits(source, group.map((c) -> c.fix))
     return false if output is source
-    res := compileForOutput(output, { dial })
+    res := compileForOutput(output, { dial, compiler })
     res.ok and normalize(res.output!) is baseline
 
   accepted: Candidate[] := []
@@ -79,7 +80,7 @@ function safeBodies(
 export const preferUnlessRule: Rule = {
   id: "style/prefer-unless"
   meta: {
-    description: "Prefer 'unless' over 'if not' / 'if (!...)' for negated conditions"
+    description: "Prefer unless/until and loop for negated conditions and infinite while loops"
     fixable: true
     defaultSeverity: "error"
     phase: "idiom"
@@ -89,6 +90,17 @@ export const preferUnlessRule: Rule = {
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+    // Index source keywords once. Calling tree.tokens(node) for every nested if
+    // repeatedly walks overlapping subtrees and scales quadratically.
+    sourceKeywords := tree.tokens().filter (token) ->
+      not token.synthetic and ["if", "while"].includes(token.raw.trim())
+
+    findHeadKeyword := (word: string, node: any, conditionEnd: number) ->
+      nodeSpan := tree.range(node)
+      return undefined unless nodeSpan?
+      sourceKeywords.find (token) ->
+        token.value.trim() is word and
+        token.range.start >= nodeSpan.start and token.range.end <= conditionEnd
 
     // Postfix rewrites reorder a whole one-liner, so the emitted `if (!a) { ... }`
     // gains a block around the statement and any trailing `;` changes position.
@@ -97,7 +109,7 @@ export const preferUnlessRule: Rule = {
     // consult the builder: the engine accepts them on the byte-identical fast
     // path before reaching it.
     edits: Fix[] := []
-    ctx.declareEquivalenceReference?.(["block-brace-style", "semicolon-style"], (input: string) ->
+    ctx.declareEquivalenceReference?.(["block-brace-style", "semicolon-style", "whitespace-style", "inequality-style"], (input: string) ->
       return undefined unless edits.length > 0
       var out = input
       for edit of [...edits].sort((a, b) -> b.start - a.start)
@@ -116,27 +128,40 @@ export const preferUnlessRule: Rule = {
       condSpan := tree.range(cond)
       return unless condSpan?
 
-      tokens := tree.tokens(node)
-      ifTok := tokens.find (t) ->
-        (t.raw.trim() is "if" or t.value.trim() is "if") and not t.synthetic
+      ifTok := findHeadKeyword("if", node, condSpan.start)
       return unless ifTok?
 
       expr := cond.expression
-      return unless expr? and expr.type is "UnaryExpression"
+      var conditionText: string | undefined = undefined
+      if expr?.type is "UnaryExpression"
+        pre := expr.pre
+        return unless Array.isArray(pre) and pre.length > 0
+        preFlat := pre.flat(2).filter(Boolean)
+        opToken := preFlat.find (p: any) ->
+          p.token is "!" or p.token is "not" or p.token is "not "
+        return unless opToken?
 
-      pre := expr.pre
-      return unless Array.isArray(pre) and pre.length > 0
-      preFlat := pre.flat(2).filter(Boolean)
-      opToken := preFlat.find (p: any) ->
-        p.token is "!" or p.token is "not" or p.token is "not "
-      return unless opToken?
-
-      operand := expr.expression
-      return unless operand? and not Array.isArray(operand)
-      return if DISALLOWED_OPERAND_TYPES.has(operand.type)
-
-      opSpan := tree.range(operand)
-      return unless opSpan?
+        operand := expr.expression
+        return unless operand? and not Array.isArray(operand)
+        return if DISALLOWED_OPERAND_TYPES.has(operand.type)
+        conditionText = tree.text(operand).trim()
+      else
+        // `if a is not b` is the same whole-condition negation as `unless a is b`.
+        // Only accept a direct comparison token in the condition's top-level
+        // children; an `is not` nested in a call or mixed with `and`/`or` is not
+        // the whole condition and must keep its precedence.
+        parts := tree.children(cond)
+        comparisons := parts.filter (part: any) ->
+          part?.token and ["!==", "===", "==", "!=", "<", ">", "<=", ">=", "&&", "||"].includes(part.token)
+        opIndex := parts.findIndex (part: any) ->
+          part?.token is "!==" and tree.text(part).trim() is "is not"
+        return unless opIndex >= 0 and comparisons.length is 1
+        operands := parts.filter (part: any) -> part?.type?
+        return unless operands.length is 2
+        leftText := tree.text(operands[0]).trim()
+        rightText := tree.text(operands[1]).trim()
+        return unless leftText.length > 0 and rightText.length > 0
+        conditionText = `${leftText} is ${rightText}`
 
       start := ifTok.range.start
       end := condSpan.end
@@ -152,7 +177,7 @@ export const preferUnlessRule: Rule = {
       return if intersectsRange(ignoredRanges, start, end)
       seen.add(start)
 
-      operandText := tree.text(operand)
+      operandText := conditionText!
       bodyRaw := headLine.slice(end - start)
       bodyText := bodyRaw.trim()
 
@@ -196,7 +221,41 @@ export const preferUnlessRule: Rule = {
         fix: { start, end, replacement }
       })
 
-    for candidate of safeBodies(source, ctx.parseOptions, ctx.baselineOutput, candidates)
+    tree.visit "IterationStatement", (node) ->
+      return unless node.subtype is "while"
+      cond := node.condition
+      return unless cond?
+      condSpan := tree.range(cond)
+      return unless condSpan?
+      whileTok := findHeadKeyword("while", node, condSpan.start)
+      return unless whileTok?
+
+      start := whileTok.range.start
+      end := condSpan.end
+      headLineEnd := source.indexOf("\n", start)
+      headLine := source.slice(start, headLineEnd < 0 ? source.length : headLineEnd)
+      return if headLine.trim().endsWith("{")
+      return if headLine.slice(end - start).trim().length > 0
+      return if intersectsRange(ignoredRanges, start, end) or seen.has(start)
+      seen.add(start)
+
+      expr := cond.expression
+      var replacement: string = ""
+      if expr?.type is "UnaryExpression"
+        pre := (expr.pre or []).flat(2).filter(Boolean)
+        opToken := pre.find (part: any) -> part.token is "!" or part.token is "not" or part.token is "not "
+        operand := expr.expression
+        return unless opToken? and operand? and not Array.isArray(operand)
+        return if DISALLOWED_OPERAND_TYPES.has(operand.type)
+        replacement = `until ${tree.text(operand).trim()}`
+      else if expr?.type is "Literal" and expr.raw is "true"
+        replacement = "loop"
+      else
+        return
+
+      candidates.push({ pos: start, fix: { start, end, replacement } })
+
+    for candidate of safeBodies(source, ctx.parseOptions, ctx.baselineOutput, candidates, ctx.compiler)
       edits.push(candidate.fix)
       ctx.report({
         ruleId: "style/prefer-unless"

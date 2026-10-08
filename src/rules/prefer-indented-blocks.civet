@@ -1,4 +1,4 @@
-import type { Rule, RuleContext, Fix } from "../types.civet"
+import type { CivetCompiler, Rule, RuleContext, Fix } from "../types.civet"
 import { intersectsRange, applyEdits, normalizeWhitespaceStyle } from "../utils.civet"
 import { compileForOutput } from "../compiler.civet"
 
@@ -101,17 +101,18 @@ function debraceIsLayoutOnly(
   baselineOutput: string | undefined,
   dial: Record<string, any>,
   headEdit: Fix,
-  closeEdit: Fix
+  closeEdit: Fix,
+  compiler?: CivetCompiler
 ): boolean
   { output: candidate } := applyEdits(source, [headEdit, closeEdit])
   return false if candidate is source
   baseline := if baselineOutput?
     baselineOutput
   else
-    base := compileForOutput(source, { dial })
+    base := compileForOutput(source, { dial, compiler })
     return false unless base.ok
     base.output!
-  res := compileForOutput(candidate, { dial })
+  res := compileForOutput(candidate, { dial, compiler })
   return false unless res.ok
   normalizeWhitespaceStyle(baseline) is normalizeWhitespaceStyle(res.output!)
 
@@ -249,7 +250,7 @@ export const preferIndentedBlocksRule: Rule = {
         // Drop the whole line, including its newline.
         { start: lineStarts[closeLine], end: lineStarts[closeLine] + lines[closeLine].length + 1, replacement: "" }
 
-      provable := not misparsed or debraceIsLayoutOnly(source, ctx.baselineOutput, ctx.parseOptions, headEdit, closeEdit)
+      provable := not misparsed or debraceIsLayoutOnly(source, ctx.baselineOutput, ctx.parseOptions, headEdit, closeEdit, ctx.compiler)
 
       if provable
         edits.push(headEdit)

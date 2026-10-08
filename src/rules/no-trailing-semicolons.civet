@@ -1,4 +1,4 @@
-import type { Fix, Rule, RuleContext } from "../types.civet"
+import type { CivetCompiler, Fix, Rule, RuleContext } from "../types.civet"
 import type { SyntaxTree } from "../syntax.civet"
 import { intersectsRange, applyEdits, normalizeSemicolonStyle } from "../utils.civet"
 import { parseSyntax, compileForOutput } from "../compiler.civet"
@@ -21,11 +21,11 @@ import { parseSyntax, compileForOutput } from "../compiler.civet"
 
 // True when removing the semicolon leaves the emitted program unchanged once
 // pass-through semicolons are normalized away. A compile failure counts as unsafe.
-function removalIsSafe(source: string, fix: Fix, dial: Record<string, any>): boolean
+function removalIsSafe(source: string, fix: Fix, dial: Record<string, any>, compiler?: CivetCompiler): boolean
   candidate := source.slice(0, fix.start) + fix.replacement + source.slice(fix.end)
-  withSemi := compileForOutput(source, { dial })
+  withSemi := compileForOutput(source, { dial, compiler })
   return false unless withSemi.ok
-  without := compileForOutput(candidate, { dial })
+  without := compileForOutput(candidate, { dial, compiler })
   return false unless without.ok
   normalizeSemicolonStyle(withSemi.output!) is normalizeSemicolonStyle(without.output!)
 
@@ -108,7 +108,8 @@ function safeSemicolons(
   source: string,
   tree: SyntaxTree,
   dial: Record<string, any>,
-  baselineOutput?: string
+  baselineOutput?: string,
+  compiler?: CivetCompiler
 ): { pos: number, fix: Fix }[]
   found := findTrailingSemicolons(source, tree)
   return found if found.length is 0
@@ -119,14 +120,14 @@ function safeSemicolons(
   baseline := if baselineOutput?
     normalizeSemicolonStyle(baselineOutput)
   else
-    base := compileForOutput(source, { dial })
+    base := compileForOutput(source, { dial, compiler })
     return [] unless base.ok
     normalizeSemicolonStyle(base.output!)
 
   groupIsSafe := (group: { pos: number, fix: Fix }[]): boolean ->
     return true if group.length is 0
     { output } := applyEdits(source, group.map((f) -> f.fix))
-    res := compileForOutput(output, { dial })
+    res := compileForOutput(output, { dial, compiler })
     res.ok and normalizeSemicolonStyle(res.output!) is baseline
 
   // Depth-bounded so a pathological file can never blow the stack.
@@ -164,19 +165,20 @@ function safeSemicolonsCached(
   source: string,
   tree: SyntaxTree,
   dial: Record<string, any>,
-  baselineOutput?: string
+  baselineOutput?: string,
+  compiler?: CivetCompiler
 ): { pos: number, fix: Fix }[]
   key := source
   return lastValue if lastKey is key
-  value := safeSemicolons(source, tree, dial, baselineOutput)
+  value := safeSemicolons(source, tree, dial, baselineOutput, compiler)
   lastKey = key
   lastValue = value
   value
 
-function buildReference(input: string, dial: Record<string, any>): string | undefined
-  parseRes := parseSyntax(input, { dial })
+function buildReference(input: string, dial: Record<string, any>, compiler?: CivetCompiler): string | undefined
+  parseRes := parseSyntax(input, { dial, compiler })
   return undefined unless parseRes.ok
-  found := safeSemicolonsCached(input, parseRes.syntax!, dial)
+  found := safeSemicolonsCached(input, parseRes.syntax!, dial, undefined, compiler)
   return undefined if found.length is 0
   fixes := found.map((f) -> f.fix)
   { output } := applyEdits(input, fixes)
@@ -196,9 +198,9 @@ export const noTrailingSemicolonsRule: Rule = {
   check: (ctx: RuleContext) ->
     if ctx.declareEquivalenceReference?
       ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
-        buildReference(input, ctx.parseOptions)
+        buildReference(input, ctx.parseOptions, ctx.compiler)
 
-    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions, ctx.baselineOutput)
+    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions, ctx.baselineOutput, ctx.compiler)
     for item of found
       ctx.report({
         ruleId: "style/no-trailing-semicolons"

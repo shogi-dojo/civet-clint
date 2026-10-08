@@ -1,0 +1,26 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-new-shorthand"
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true })
+
+describe RULE, ->
+  it "omits empty constructor parentheses", ->
+    source := "x := new Foo()\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("x := new Foo\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(compileSource(source)).toBe("const x = new Foo()\n")
+    expect(compileSource(res.fixedSource!)).toBe("const x = new Foo\n")
+
+  it "keeps a constructed value grouped before chained access", ->
+    source := "x := new Foo().bar\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("x := (new Foo).bar\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "does not rewrite constructors with arguments or dynamic constructors", ->
+    source := "x := new Foo(value)\ny := new (factory())()\n"
+    expect(fix(source).fixedSource).toBeUndefined()

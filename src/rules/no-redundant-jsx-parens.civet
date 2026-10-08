@@ -25,7 +25,6 @@ export const noRedundantJsxParensRule: Rule = {
     fixable: true
     defaultSeverity: "error"
     phase: "cleanup"
-    capabilities: { requires: ["react"] }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

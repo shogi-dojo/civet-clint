@@ -7,6 +7,18 @@ export type RuleOptions = Record<string, any>
 export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions]
 export type CompileDial = Record<string, any>
 export type CompileOptions = Record<string, any>
+export type CompilerPreference = "project" | "bundled"
+
+export interface CivetCompiler
+  compile: (source: string, options?: Record<string, any>) => any
+
+export interface CompilerResolution
+  compiler: CivetCompiler
+  version: string
+  path: string
+  preference: CompilerPreference
+  usedBundled: boolean
+  warning?: string
 
 export interface Fix
   start: number
@@ -23,7 +35,7 @@ export interface Diagnostic
   fix?: Fix
 
 export type EquivalenceReference = (source: string) => string | undefined
-export type OutputDelta = "quote-style" | "semicolon-style" | "declaration-style" | "trailing-comma-style" | "whitespace-style" | "block-brace-style" | "type-paren-style" | "return-paren-style"
+export type OutputDelta = "quote-style" | "semicolon-style" | "declaration-style" | "trailing-comma-style" | "whitespace-style" | "block-brace-style" | "type-paren-style" | "return-paren-style" | "inequality-style" | "new-call-style" | "placeholder-param" | "range-loop" | "function-declaration"
 
 export interface RuleContext
   source: string
@@ -37,6 +49,7 @@ export interface RuleContext
   // it is the identical value, already paid for. Absent only if a caller built a
   // context without one.
   baselineOutput?: string
+  compiler?: CivetCompiler
   report: (diag: {
     ruleId: string
     severity?: Severity
@@ -96,6 +109,7 @@ export interface ConfigOverride
   files: string | string[]
   preset?: string
   civetConfig?: string
+  compiler?: CompilerPreference
   rules?: Record<string, RuleEntry>
   civetOptions?: CompileDial
   compileOptions?: CompileOptions
@@ -103,6 +117,7 @@ export interface ConfigOverride
 export interface ClintConfig
   preset?: string
   civetConfig?: string
+  compiler?: CompilerPreference
   rules?: Record<string, RuleEntry>
   overrides?: ConfigOverride[]
 
@@ -117,6 +132,12 @@ export interface ResolvedConfig
   civetConfigPath?: string
   civetOptions: CompileDial
   compileOptions: CompileOptions
+  compiler: CivetCompiler
+  compilerVersion: string
+  compilerPath: string
+  compilerPreference: CompilerPreference
+  compilerUsedBundled: boolean
+  compilerWarning?: string
   configPath?: string
   skippedRules: SkippedRule[]
   overrides?: ConfigOverride[]

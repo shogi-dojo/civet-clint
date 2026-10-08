@@ -170,7 +170,7 @@ describe "Rules Test Suite", ->
 
       it "preserves the 0.1.1 result for a returned JSX element", ->
         input := 'render := =>\n  return <div className="container">x</div>'
-        expect(jsxFix(input).fixedSource ?? input).toBe(input)
+        expect(jsxFix(input).fixedSource ?? input).toBe('render := =>\n  return <div .container>x</div>')
 
       it "rewrites className that precedes a spread", ->
         res := jsxFix '<div className="btn" {...props}>x</div>'

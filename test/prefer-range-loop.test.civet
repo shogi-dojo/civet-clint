@@ -1,0 +1,40 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+import { normalizeRangeLoopStyle } from "../src/utils.civet"
+
+RULE := "style/prefer-range-loop"
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true })
+
+describe RULE, ->
+  it "rewrites ascending exclusive and inclusive loops to ranges", ->
+    for [source, expected] of [
+      ["for (let i = 0; i < n; i++) {\n  visit(i)\n}\n", "for i of [0..<n] {\n  visit(i)\n}\n"]
+      ["for (let i = 0; i <= n; i++) {\n  visit(i)\n}\n", "for i of [0..n] {\n  visit(i)\n}\n"]
+    ]
+      res := fix(source)
+      expect(res.fixedSource).toBe(expected)
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(normalizeRangeLoopStyle(compileSource(res.fixedSource!))).toBe(compileSource(source))
+
+  it "rewrites descending exclusive and inclusive loops to ranges", ->
+    for [source, expected] of [
+      ["for (let i = n; i > 0; i--) {\n  visit(i)\n}\n", "for i of [n..>0] {\n  visit(i)\n}\n"]
+      ["for (let i = n; i >= 0; i--) {\n  visit(i)\n}\n", "for i of [n + 1>..0] {\n  visit(i)\n}\n"]
+    ]
+      res := fix(source)
+      expect(res.fixedSource).toBe(expected)
+      expect(res.isEquivalencePreserved).toBe(true)
+
+  it "falls back to an assignment-style C loop when range guards fail", ->
+    for source of [
+      "for (let i = 0; i < n; i++) {\n  visit(i)\n}\nuse(i)\n"
+      "for (let i = 0; i < n; i++) {\n  i += 2\n}\n"
+      "for (let i = 0; i < n; i++) {\n  visit(i)\n  n++\n}\n"
+      "for (let i = 0; i < getLimit(); i++) {\n  visit(i)\n}\n"
+      "for (let i = 0; i < n; i++) {\n  save(() => i)\n}\n"
+    ]
+      res := fix(source)
+      expect(res.fixedSource).toContain("for i .= ")
+      expect(res.isEquivalencePreserved).toBe(true)

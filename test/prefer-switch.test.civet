@@ -1,0 +1,22 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+
+RULE := "style/prefer-switch"
+
+describe RULE, ->
+  it "reports a same-variable strict equality chain without a fix", ->
+    source := "if (kind === 'move')\n  move()\nelse if (kind === 'rotate')\n  rotate()\nelse\n  ignore()\n"
+    res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" }, fix: true })
+    diags := res.diagnostics.filter (d) -> d.ruleId is RULE
+    expect(diags).toHaveLength(1)
+    expect(diags[0].message).toContain("'kind'")
+    expect(diags[0].fix).toBeUndefined()
+    expect(res.fixedSource).toBeUndefined()
+
+  it "ignores a single test and chains that compare different variables", ->
+    for source of [
+      "if (kind === 'move')\n  move()\n"
+      "if (kind === 'move')\n  move()\nelse if (mode === 'rotate')\n  rotate()\n"
+    ]
+      res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" } })
+      expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)

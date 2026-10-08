@@ -58,9 +58,19 @@ export type RuleLevel = 'off' | 'warn' | 'error';
 export type RuleOptions = Record<string, any>;
 export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions];
 export type EquivalenceReference = (source: string) => string | undefined;
-export type OutputDelta = 'quote-style' | 'semicolon-style';
+export type CompilerPreference = 'project' | 'bundled';
+export type OutputDelta = 'quote-style' | 'semicolon-style' | 'declaration-style' | 'trailing-comma-style' | 'whitespace-style' | 'block-brace-style' | 'type-paren-style' | 'return-paren-style' | 'inequality-style' | 'new-call-style' | 'placeholder-param' | 'range-loop' | 'function-declaration';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
+export interface CivetCompiler { compile(source: string, options?: Record<string, any>): any; }
+export interface CompilerResolution {
+  compiler: CivetCompiler;
+  version: string;
+  path: string;
+  preference: CompilerPreference;
+  usedBundled: boolean;
+  warning?: string;
+}
 export interface SourceRange {
   start: number;
   end: number;
@@ -109,6 +119,7 @@ export interface CompileDialOptions {
   dial: CompileDial;
   compileOptions?: CompileOptions;
   filename?: string;
+  compiler?: CivetCompiler;
 }
 export interface SyntaxParseOptions extends CompileDialOptions {}
 export interface CompileResult {
@@ -140,9 +151,11 @@ export interface RuleContext {
   filename?: string;
   parseOptions: CompileDial;
   options: RuleOptions;
+  baselineOutput?: string;
+  compiler?: CivetCompiler;
   report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
-  declareEquivalenceReference?(delta: OutputDelta, build: EquivalenceReference): void;
+  declareEquivalenceReference?(delta: OutputDelta | OutputDelta[], build: EquivalenceReference): void;
 }
 export interface Diagnostic {
   ruleId: string;
@@ -156,6 +169,7 @@ export interface Diagnostic {
 export interface RuleCapability {
   requires?: string[];
   requiresAny?: string[];
+  forbids?: string[];
 }
 export type RulePhase = "repair" | "idiom" | "cleanup";
 export declare const RULE_PHASE_ORDER: RulePhase[];
@@ -182,6 +196,7 @@ export interface ConfigOverride {
   files: string | string[];
   preset?: string;
   civetConfig?: string;
+  compiler?: CompilerPreference;
   rules?: Record<string, RuleEntry>;
   civetOptions?: CompileDial;
   compileOptions?: CompileOptions;
@@ -200,6 +215,7 @@ export interface LintResult {
 export interface ClintConfig {
   preset?: string;
   civetConfig?: string;
+  compiler?: CompilerPreference;
   rules?: Record<string, RuleEntry>;
   overrides?: ConfigOverride[];
 }
@@ -214,6 +230,12 @@ export interface ResolvedConfig {
   civetConfigPath?: string;
   civetOptions: CompileDial;
   compileOptions: CompileOptions;
+  compiler: CivetCompiler;
+  compilerVersion: string;
+  compilerPath: string;
+  compilerPreference: CompilerPreference;
+  compilerUsedBundled: boolean;
+  compilerWarning?: string;
   configPath?: string;
   skippedRules: SkippedRule[];
   overrides?: ConfigOverride[];
@@ -235,6 +257,7 @@ export interface LintOptions {
   filename?: string;
   config?: ResolvedConfig;
   registry?: RuleRegistry;
+  compiler?: CivetCompiler;
   civetOptions?: Record<string, any>;
   compileOptions?: Record<string, any>;
   fix?: boolean;
@@ -281,6 +304,12 @@ export const preferRangeOperatorRule: Rule;
 export const preferTerseImportsRule: Rule;
 export const preferBareJsxValuesRule: Rule;
 export const preferHashCommentsRule: Rule;
+export const preferInOperatorRule: Rule;
+export const preferNewShorthandRule: Rule;
+export const preferSliceShorthandRule: Rule;
+export const preferRangeLoopRule: Rule;
+export const preferSwitchRule: Rule;
+export const preferFunctionDeclarationRule: Rule;
 export function findConfigFile(cwd?: string): string | undefined;
 export function findCivetConfigFile(cwd?: string): string | undefined;
 export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial: CompileDial; compileOptions: CompileOptions; resolvedPath?: string };
@@ -294,9 +323,13 @@ export function globToRegex(glob: string): RegExp;
 export function matchesFilePattern(filePath: string, pattern: string, configBaseDir?: string): boolean;
 export function parseSyntax(source: string, options: SyntaxParseOptions): CompileResult;
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult;
+export function resolveCivetCompiler(cwd?: string, preference?: CompilerPreference): CompilerResolution;
 export function compileSource(source: string, civetOptions?: Record<string, any>, filename?: string): string;
 export function normalizeQuoteStyle(code: string): string;
 export function normalizeSemicolonStyle(code: string): string;
+export function normalizeRangeLoopStyle(code: string): string;
+export function normalizePlaceholderParamStyle(code: string): string;
+export function normalizeFunctionDeclarationStyle(code: string): string;
 export function lintSource(source: string, options?: LintOptions): LintResult;
 export function lintPhased(source: string, options?: LintOptions): LintResult;
 export function lintFile(filePath: string, options?: LintOptions): Promise<LintResult>;

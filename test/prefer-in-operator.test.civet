@@ -1,0 +1,29 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-in-operator"
+
+function fix(source: string)
+  lintSource(source, {
+    rules: { [RULE]: "error", "style/prefer-word-operators": "off" }
+    fix: true
+  })
+
+describe RULE, ->
+  it "rewrites includes calls to positive and negated membership syntax", ->
+    source := "x := values.includes(value)\ny := !values.includes(value)\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("x := value is in values\ny := value is not in values\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(compileSource(source)).toBe(compileSource(res.fixedSource!))
+
+  it "supports member expressions as receivers", ->
+    res := fix("found := state.values.includes(item)\n")
+    expect(res.fixedSource).toBe("found := item is in state.values\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "leaves optional chains, other methods, and multi-argument calls alone", ->
+    source := "a := values?.includes(value)\nb := values.indexOf(value)\nc := values.includes(a, b)\n"
+    res := fix(source)
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.isEquivalencePreserved).toBe(true)

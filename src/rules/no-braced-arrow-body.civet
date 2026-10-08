@@ -64,7 +64,10 @@ function objectLooksLikeStatements(node: any): boolean
   return false unless Array.isArray(properties) and properties.length > 0
   for property of properties
     continue unless property?
-    return true if property.callExpression?
+    // 0.11.16 marks the synthesized key directly. In 0.11.5 the same shape is
+    // represented by an implicit property whose value is the source call.
+    return true if property.callExpression? or
+      (property.implicitName and property.value?.type is "CallExpression")
   false
 
 export const noBracedArrowBodyRule: Rule = {

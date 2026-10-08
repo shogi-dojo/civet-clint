@@ -6,16 +6,57 @@ export const preferJsxAttrShorthandRule: Rule = {
     description: "Prefer JSX attribute shorthand (attr={attr} -> {attr}, prop={true} -> prop)"
     fixable: true
     defaultSeverity: "warn"
-    capabilities: {
-      requires: ["react"]
-    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
     tree := ctx.syntax
 
     tree.visit "JSXElement", (node) ->
-      for attr of tree.jsxAttributes(node)
+      attrs := tree.jsxAttributes(node)
+
+      // Two independent `{name}` attributes have the same JSX AST/emit as one
+      // comma-separated shorthand. Keep this local to the opening tag: children
+      // such as `{foo} {bar}` are text expressions and must remain separate.
+      var i = 0
+      while i + 1 < attrs.length
+        first := attrs[i]
+        firstExpr := first.expression
+        if first.name? and first.bracedRange? and not first.equals? and
+          firstExpr?.type is "Identifier" and firstExpr.name is first.name
+          var runEnd = i
+          while runEnd + 1 < attrs.length
+            left := attrs[runEnd]
+            right := attrs[runEnd + 1]
+            leftExpr := left.expression
+            rightExpr := right.expression
+            separator := left.bracedRange? and right.bracedRange?
+              ? source.slice(left.bracedRange.end, right.bracedRange.start)
+              : ""
+            consecutive := left.name? and right.name? and
+              left.bracedRange? and right.bracedRange? and
+              not left.equals? and not right.equals? and
+              leftExpr?.type is "Identifier" and leftExpr.name is left.name and
+              rightExpr?.type is "Identifier" and rightExpr.name is right.name and
+              /^\s+$/.test(separator) and not /[\r\n]/.test(separator)
+            break unless consecutive
+            runEnd++
+
+          if runEnd > i
+            firstRange := attrs[i].bracedRange!
+            lastRange := attrs[runEnd].bracedRange!
+            names := attrs.slice(i, runEnd + 1).map((attr) -> attr.name!)
+            replacement := `{${names.join(", ")}}`
+            ctx.report({
+              ruleId: "style/prefer-jsx-attr-shorthand"
+              message: `Combine adjacent JSX shorthands as '${replacement}'`
+              pos: firstRange.start
+              fix: { start: firstRange.start, end: lastRange.end, replacement }
+            })
+            i = runEnd + 1
+            continue
+        i++
+
+      for attr of attrs
         name := attr.name
         continue unless name?
         eqSpan := tree.range(attr.equals)

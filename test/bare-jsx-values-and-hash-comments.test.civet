@@ -52,13 +52,14 @@ describe "style/prefer-bare-jsx-values", ->
     expect(again.fixedSource).toBeUndefined()
     expect(again.diagnostics).toHaveLength(0)
 
-  it "is skipped when react dial is disabled", ->
+  it "runs when react dial is disabled", ->
     input := '<Button onClick={handleClick} />'
     res := lintSource(input, {
       rules: { "style/prefer-bare-jsx-values": "error" }
       civetOptions: {}
+      fix: true
     })
-    expect(res.diagnostics.filter((d) -> d.ruleId is "style/prefer-bare-jsx-values")).toHaveLength(0)
+    expect(res.fixedSource).toBe('<Button onClick=handleClick />')
 
 describe "style/prefer-hash-comments", ->
   it "rewrites // comments to # comments", ->

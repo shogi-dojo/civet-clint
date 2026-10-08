@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Civet 0.11.16 and project compiler resolution.** Clint now resolves
+  `@danielx/civet` from the linted project's config directory, reports the selected
+  version/path, warns outside the tested set (`0.11.5`, `0.11.15`, `0.11.16`), and
+  supports `"compiler": "bundled"` in base and per-file config. The raw JSX AST
+  shape change in 0.11.16 is normalized in `SyntaxTree`.
+- **Solid JSX support.** JSX syntax rules no longer require React; the class/id rule
+  uses `class` on the neutral dial and `className` when `react` is enabled. The
+  `civet-idiomatic` preset now uses `{}` and includes the arrow-body repair phase.
+  Adjacent `{foo} {bar}` JSX attribute shorthands combine to `{foo, bar}`.
+- **Syntax idioms.** Added `prefer-in-operator` (`includes` to `is in`),
+  `prefer-new-shorthand`, and `prefer-slice-shorthand`; extended typeof checks to
+  `!<?` and `prefer-unless` to `until`, `loop`, and whole-condition `is not` checks.
+- **Guarded behavior preferences.** Added `prefer-range-loop` with conservative
+  range guards and an equivalent C-style fallback, `prefer-function-declaration`
+  with lexical-binding and reassignment checks, and report-only `prefer-switch`.
+  Placeholder callback renames in `prefer-ampersand-shorthand` are autofixed only
+  when `autofixPlaceholders` is explicitly enabled.
+
+`0.7.0` remains unreleased; no npm release or tag is part of this work.
+
 ## [0.7.0] - 2026-08-24
 
 ### Added

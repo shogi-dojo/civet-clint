@@ -8,11 +8,11 @@ This document outlines the supported runtime environments, compiler dependencies
 
 | Dimension | Supported / Tested | Status & Notes |
 |---|---|---|
-| **Civet Compiler** | `@danielx/civet@0.11.15` | **Exact pin.** Clint relies on parser AST structures via `{ ast: "raw" }`. Other versions may alter raw AST shapes or compiler dial keys. |
+| **Civet Compiler** | Project `@danielx/civet` or bundled `0.11.16`; tested `0.11.5`, `0.11.15`, `0.11.16` | Clint resolves the compiler from the linted project by default, falls back to its bundled `0.11.16`, and supports forcing the bundled compiler with `"compiler": "bundled"`. Other versions produce a warning. |
 | **Node.js Runtime** | `>=20.0.0` | Tested in continuous integration across Node.js **20.x**, **22.x**, and **24.x**. |
 | **Operating Systems** | Linux (CI), macOS (consumer validation) | Windows-style paths and CRLF preservation have unit coverage, but native Windows execution is not yet CI-validated. |
 | **Presets** | `default`, `coffee-react`, `coffee-to-standard` | Neutral style, Coffee/React style, and a transitional CoffeeScript-to-standard migration path. |
-| **Frameworks** | React (JSX) | Validated on React codebases. Solid and other JSX dialects are currently **unvalidated**. |
+| **Frameworks** | React and Solid (JSX) | JSX attribute rewrites are dial-independent; the class shorthand follows the active `react` option. |
 | **Config Discovery** | `clint.config.json`, `.clintrc.json`, `.clint.json` | Auto-discovered in order from the repository root. Custom config paths supported via `--config <path>`. |
 | **Civet Config Adapter** | `civet.json`, `civetconfig.json`, `.civetconfig.json` | Clint auto-discovers these three static JSON names; broader Civet config formats are not yet supported. |
 | **Interfaces** | CLI (`clint`), Node.js ESM API, Plugin API | Full CLI suite, typed programmatic exports, and modular `RuleRegistry` / `Plugin` interfaces. |
@@ -21,9 +21,9 @@ This document outlines the supported runtime environments, compiler dependencies
 
 ## Compiler Dependency & Raw AST
 
-`civet-clint` uses `@danielx/civet` directly to parse Civet source files and compile candidates during safety verification.
+`civet-clint` uses `@danielx/civet` to parse Civet source files and compile candidates during safety verification. It resolves the project's dependency from the Clint config directory (or current working directory when no config is found), then falls back to the bundled compiler. Set top-level `"compiler": "bundled"` to force the bundled copy; per-file overrides accept the same setting.
 
-- **AST Shape:** Clint consumes the raw AST produced by `compile(source, { ast: "raw" })`. Because raw AST nodes (`$loc`, `children`, `parent`) are treated as internal compiler structures rather than a frozen public API, `civet-clint` strictly pins `@danielx/civet` to version `0.11.15`.
+- **AST Shape:** Clint consumes the raw AST produced by `compile(source, { ast: "raw" })`. Because raw AST shapes are not a frozen public API, the syntax adapter is tested against `0.11.5`, `0.11.15`, and `0.11.16`, including the JSX attribute shape change in `0.11.16`.
 - **Compiler Dials:** Rules declare required compiler features in `meta.capabilities` (e.g. `autoLet`, `react`, `coffeeRange`, `coffeeIsnt`). When a required dial flag is absent in the project's configuration, Clint automatically skips the rule instead of proposing invalid syntax.
 
 ---
@@ -56,7 +56,7 @@ Clint's current adapter auto-discovers and reads `civet.json`, `civetconfig.json
 | Preset | Purpose | Required Compiler Options | Default Rules |
 |---|---|---|---|
 | `default` | Standard, neutral Civet style | `{}` (none required) | `style/prefer-word-operators`<br>`style/prefer-concise-arrow`<br>`style/no-mixed-interpolation`<br>`style/no-trailing-semicolons` |
-| `civet-idiomatic` | Standard, modern Civet idioms (Erik Demaine guide) | `{ "react": true }` | 26 idiomatic Civet rules covering concise operators, walrus declarations, condition/loop style, and JSX shorthands. |
+| `civet-idiomatic` | Standard, modern Civet idioms (Erik Demaine guide) | `{}` | 31 rules covering concise operators, declarations, condition/loop style, JSX shorthands, and syntax forms. |
 | `coffee-react` | Idiomatic CoffeeScript-feel Civet + React | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | CoffeeScript-compatible syntax, `#` comments, and React JSX shorthands. |
 | `coffee-to-standard` | Migrate legacy CoffeeScript-compatible source toward neutral Civet | `{ "autoLet": true, "coffeeComment": true, "coffeeIsnt": true, "coffeeRange": true, "react": true }` | Neutral rules plus compiler-identical `#` → `//`, `isnt` → `is not`, `:=` → `const`, and exported auto-bindings → `export let`. |
 
@@ -85,3 +85,8 @@ By default, Clint enforces strict, byte-for-byte identity on compiled JS output 
 |---|---|---|
 | `quote-style` | `style/prefer-terse-imports` (opt-in `unquoteSingleQuotes`) | Module specifier quote character normalization (`'` ↔ `"`). |
 | `semicolon-style` | `style/no-trailing-semicolons` | Trailing statement semicolons and trailing line whitespace. Semicolons altering AST semantics (e.g. statement blocks reparsed as object literals) remain strictly rejected. |
+| `inequality-style` | `style/prefer-unless` | Whole-condition `!(a === b)` vs. `a !== b` output for `if a is not b`. |
+| `new-call-style` | `style/prefer-new-shorthand` | Empty constructor parentheses, retaining grouping for chained member/index access. |
+| `placeholder-param` | `style/prefer-ampersand-shorthand` | A single direct-property callback parameter and its reference canonicalized to `$`; disabled unless explicitly opted in. |
+| `range-loop` | `style/prefer-range-loop` | The hidden counter and per-iteration binding emitted for Civet ranges normalized to the equivalent guarded C-style loop. |
+| `function-declaration` | `style/prefer-function-declaration` | A guarded named const arrow block canonicalized to a function declaration. |

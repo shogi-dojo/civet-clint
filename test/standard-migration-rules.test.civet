@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { lintSource } from "../src/engine.civet"
-import { compileForOutput } from "../src/compiler.civet"
+import { compileForOutput, resolveCivetCompiler } from "../src/compiler.civet"
 import { PRESETS, computeSkippedRules } from "../src/config.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
@@ -140,8 +140,14 @@ describe "standard Civet migration rules", ->
       })
 
       expect(res.isEquivalencePreserved).toBe(true)
-      expect(res.fixedSource).toBe("const VALUE = 2\nexport let result = 3\n")
-      expect(res.appliedFixesCount).toBe(2)
+      // Civet 0.11.5 emits an exported autoLet assignment differently, so the
+      // equivalence gate must retain that binding instead of applying a lossy fix.
+      oldCompiler := resolveCivetCompiler(process.cwd()).version is "0.11.5"
+      expected := oldCompiler
+        ? "const VALUE = 2\nexport result = 3\n"
+        : "const VALUE = 2\nexport let result = 3\n"
+      expect(res.fixedSource).toBe(expected)
+      expect(res.appliedFixesCount).toBe(oldCompiler ? 1 : 2)
       expect(compileForOutput(input, { dial }).output)
         .toBe(compileForOutput(res.fixedSource!, { dial }).output)
 

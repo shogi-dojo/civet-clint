@@ -394,6 +394,8 @@ Options:
     console.error(`Configuration error: ${err.message or err}`)
     return 2
 
+  console.error(`clint: warning ${config.compilerWarning}`) if config.compilerWarning
+
   if options.printConfig
     // Report the options the adapter will actually pass to the compiler, not the
     // raw file contents: Clint strips execution-mode keys such as `sync` and `ast`,
@@ -409,6 +411,10 @@ Options:
         civetConfigPath: fileConfig.civetConfigPath
         civetOptions: fileConfig.civetOptions
         compileOptions: pipelineOptions(fileConfig.compileOptions)
+        compilerVersion: fileConfig.compilerVersion
+        compilerPath: fileConfig.compilerPath
+        compilerPreference: fileConfig.compilerPreference
+        compilerUsedBundled: fileConfig.compilerUsedBundled
         ignoredCompileOptions: ignored
         rules: fileConfig.rules
         ruleOptions: effectiveRuleOptions(fileConfig)
@@ -425,6 +431,10 @@ Options:
         civetConfigPath: config.civetConfigPath
         civetOptions: config.civetOptions
         compileOptions: pipelineOptions(config.compileOptions)
+        compilerVersion: config.compilerVersion
+        compilerPath: config.compilerPath
+        compilerPreference: config.compilerPreference
+        compilerUsedBundled: config.compilerUsedBundled
         ignoredCompileOptions: ignored
         rules: config.rules
         ruleOptions: effectiveRuleOptions(config)
@@ -457,6 +467,8 @@ Options:
     sample := resolveConfigForFile(config, files[0]!, process.cwd(), defaultRuleRegistry)
     console.error(`clint: config       ${config.configPath ?? "<defaults, none found>"}`)
     console.error(`clint: civet config ${config.civetConfigPath ?? "<defaults, none found>"}`)
+    console.error(`clint: compiler     @danielx/civet@${sample.compilerVersion} (${sample.compilerUsedBundled ? "bundled" : "project"}: ${sample.compilerPath})`)
+    console.error(`clint: warning      ${sample.compilerWarning}`) if sample.compilerWarning
     console.error(`clint: preset       ${sample.preset}`)
     console.error(`clint: civet options ${Object.keys(sample.civetOptions ?? {}).sort().join(", ") or "<none>"}`)
     if sample.matchingOverrides?.length

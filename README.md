@@ -12,7 +12,7 @@
 
 Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. By default, every autofix edit is compiled and verified to produce byte-for-byte identical output to the original source. For opt-in non-byte-identical transforms (such as unquoting single-quoted module paths in `style/prefer-terse-imports`), fixes are validated against a compiler reference source and bounded by engine-enforced output delta checks. Unsafe or semantics-altering edits are rejected by the safety gate.
 
-> **Release Status:** `0.7.0` published on npm `latest`. The tool targets `@danielx/civet` 0.11.15. As a pre-1.0 tool relying on Civet's parser and dialect options, compatibility is pinned to this compiler release. See the [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md).
+> **Release Status:** `0.7.0` is unreleased; npm `latest` remains `0.6.0`. Clint bundles Civet `0.11.16`, resolves a project's installed compiler by default, and supports tested versions `0.11.5`, `0.11.15`, and `0.11.16`. See the [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md).
 
 ---
 
@@ -20,10 +20,10 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Bidirectional Civet Style Rules**: 43 built-in rules covering idiomatic Civet style, Coffee/React conventions, and compiler-safe migration toward standard Civet.
+- 🎯 **Bidirectional Civet Style Rules**: 49 built-in rules covering idiomatic Civet style, Solid and React JSX, Coffee conventions, and compiler-safe migration toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
-- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `civet-idiomatic`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), and integration with project `civet.json` configs.
+- ⚙️ **Configurable & Extensible**: Support for presets (`default`, `civet-idiomatic`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), project compiler resolution, and integration with project `civet.json` configs.
 - 🧭 **Dial-Aware Capability Checks**: Rules declare the compiler options they require (e.g., `autoLet`, `react`, `coffeeRange`). Incompatible rules are skipped rather than emitting invalid autofixes.
 - 📊 **Flexible CLI**: Rich terminal diagnostics, `--check` exit codes for CI, `--write` in-place fixing, machine-readable `--format json`, parallel linting via `--concurrency`, and `clint --print-config [file]` for inspecting workspace and per-file resolved configurations.
 
@@ -139,6 +139,15 @@ a silently ignored setting. `clint --print-config` prints the effective options 
 every active rule, including defaults you did not set. Overrides accept the same array
 form, so options can be scoped to a glob.
 
+The top-level `compiler` setting selects the project's `@danielx/civet` dependency
+(`"project"`, the default) or Clint's bundled compiler (`"bundled"`). Overrides may
+also select a compiler per file pattern. `--print-config` and `--verbose` show the
+resolved compiler version and path; versions outside the tested set are reported.
+
+```json
+{ "compiler": "bundled", "preset": "civet-idiomatic" }
+```
+
 #### `style/prefer-terse-imports`
 
 | Option | Type | Default | Description |
@@ -163,7 +172,14 @@ Two checks replace that one, and a fix must pass both:
    `quote-style`. The engine independently verifies that the two compiled outputs are
    identical once string-literal quoting is normalized, so the change is provably
    confined to quote characters and cannot alter identifiers, structure, or string
-   contents.
+contents.
+
+#### `style/prefer-ampersand-shorthand`
+
+`autofixPlaceholders` defaults to `false`. Set it to `true` to rewrite a direct
+single-parameter property callback such as `(x) => x.id` to `&.id`. The compiler
+renames that one parameter to `$`, so Clint keeps the transformation opt-in and
+checks it with a narrow alpha-renaming output delta.
 
 The second check is what makes the first safe to trust. A reference source is supplied
 by the rule, so on its own it would let a rule authorize its own rewrite; the
@@ -193,13 +209,18 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-implicit-block-call`: `"error"` (fixable)
 - `style/prefer-implicit-call-args`: `"error"` (fixable)
 - `style/prefer-implicit-arrow-arg`: `"error"` (fixable)
-- `style/prefer-jsx-shorthand`: `"error"` (fixable, requires `react`)
-- `style/prefer-bare-jsx-values`: `"error"` (fixable, requires `react`)
-- `style/prefer-unclosed-jsx`: `"error"` (fixable, requires `react`)
+- `style/prefer-jsx-shorthand`: `"error"` (fixable; uses `class` on the neutral/Solid dial and `className` with `react`)
+- `style/prefer-bare-jsx-values`: `"error"` (fixable)
+- `style/prefer-unclosed-jsx`: `"error"` (fixable)
 - `style/prefer-unless`: `"error"` (fixable)
 - `style/prefer-at-shorthand`: `"error"` (fixable)
 - `style/prefer-length-shorthand`: `"error"` (fixable, forbids `coffeeComment`)
 - `style/prefer-typeof-shorthand`: `"error"` (fixable)
+- `style/prefer-in-operator`: `"error"` (fixable)
+- `style/prefer-new-shorthand`: `"error"` (fixable)
+- `style/prefer-slice-shorthand`: `"error"` (fixable)
+- `style/prefer-range-loop`: `"warn"` (fixable when guards hold; otherwise uses Civet's C-style loop header)
+- `style/prefer-switch`: `"warn"` (report-only)
 - `style/prefer-property-shorthand`: `"error"` (fixable)
 - `style/prefer-property-group-shorthand`: `"error"` (fixable)
 - `style/prefer-bare-for`: `"error"` (fixable)
@@ -208,8 +229,8 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-optional-type`: `"error"` (fixable)
 - `style/prefer-postfix-conditional`: `"error"` (fixable)
 - `style/prefer-ampersand-shorthand`: `"warn"` (diagnostic)
-- `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic, requires `react`)
-- Compiler options: `{ "react": true }`
+- `style/prefer-jsx-attr-shorthand`: `"warn"` (diagnostic/fixable; supports Solid and React JSX)
+- Compiler options: `{}`
 
 #### `coffee-react`
 Tailored for idiomatic Civet + React codebases:
@@ -290,7 +311,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 
 ## Rules Catalog
 
-`civet-clint` currently provides 43 built-in style, correctness, and migration rules.
+`civet-clint` currently provides 49 built-in style, correctness, and migration rules.
 
 ### Fixable Rules
 
@@ -299,28 +320,33 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-word-operators`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-word-operators.civet) | Convert `===`, `!==`, `&&`, `||`, `!` to `is`, `isnt`, `and`, `or`, `not`. | — |
 | [`style/prefer-concise-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-concise-arrow.civet) | Convert parameterless `() =>` to concise `=>`. | — |
 | [`style/no-trailing-semicolons`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-semicolons.civet) | **Phase `cleanup`.** Disallow unnecessary trailing semicolons at statement ends. Keeps any semicolon that suppresses an implicit return — see below. Verified via `semicolon-style` output delta. | — |
-| [`style/prefer-jsx-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-shorthand.civet) | Convert `className="btn"` and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | `react` |
+| [`style/prefer-jsx-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-shorthand.civet) | Convert `class="btn"` (or React `className="btn"`) and `id="main"` to `.btn` and `#main` shorthands. Only where the shorthand lowers in place — see below. | — |
 | [`style/prefer-bare-assignment`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-assignment.civet) | Prefer bare `x = 1` for `let` and `:=` for `CONST_CASE` bindings. | `autoLet` |
 | [`style/prefer-walrus-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-walrus-declarations.civet) | Convert `const x = …` to `x := …` and `let x = …` to `x .= …`, including destructuring patterns. Byte-identical output. Conflicts with `prefer-bare-assignment`. | — |
 | [`style/prefer-existential-check`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-existential-check.civet) | Convert `x != null`, `null != x`, `x !== undefined` to `x?`, and `x == null`, `x === undefined` to `not x?`. | — |
-| [`style/prefer-unless`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unless.civet) | Convert `if not a` and `if (!a)` to `unless a`. Bails on binary expressions and existential negations to guard operator precedence. | — |
+| [`style/prefer-unless`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unless.civet) | Convert negated `if` conditions and `while not` / `while true` loops to `unless`, `until`, and `loop`. Guards whole-condition precedence. | — |
 | [`style/prefer-at-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-at-shorthand.civet) | Convert `this.x`, `this?.x`, `this[k]`, `this.#p`, and `this` to `@x`, `@?.x`, `@[k]`, `@#p`, and `@`. | — |
 | [`style/prefer-length-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-length-shorthand.civet) | Convert `arr.length` and `arr?.length` to `arr#` and `arr?#`. Skipped under `coffeeComment`, where `#` opens a line comment and `arr#` would truncate the line. | not `coffeeComment` |
-| [`style/prefer-typeof-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-typeof-shorthand.civet) | Convert `typeof x is "type"` and `typeof x === "type"` to `x <? "type"`. | — |
+| [`style/prefer-typeof-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-typeof-shorthand.civet) | Convert positive `typeof x` checks to `x <? "type"` and negated checks to `x !<? "type"`. | — |
+| [`style/prefer-in-operator`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-in-operator.civet) | Convert `values.includes(x)` and its negation to `x is in values` / `x is not in values`. | — |
+| [`style/prefer-new-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-new-shorthand.civet) | Remove empty constructor-call parentheses (`new Foo()` → `new Foo`), preserving grouping before chained access. | — |
+| [`style/prefer-slice-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slice-shorthand.civet) | Convert exclusive `.slice` calls to Civet range-index syntax. Optional chains and unsupported forms are skipped. | — |
 | [`style/prefer-property-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-shorthand.civet) | Convert `{ b: a.b }` and `{ c: a.b.c }` to `{ a.b }` and `{ a.b.c }`. | — |
 | [`style/prefer-property-group-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-property-group-shorthand.civet) | Group a run of shorthand properties sharing a receiver: `{ a.b, a.c }` → `{ a.{b,c} }`. Plain-identifier receivers only — see below. | — |
 | [`style/prefer-postfix-conditional`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-postfix-conditional.civet) | Prefer postfix conditional `return if a` over one-liner `if (a) return`. Verified via the `block-brace-style` output delta. | — |
 | [`style/prefer-optional-type`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-optional-type.civet) | Prefer optional type shorthand `T?` over `T \| undefined`. Verified via the `type-paren-style` output delta. | — |
 | [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, loops, valueless `return`, and any `return` that is not textually last. **Not in any preset** — see below. | — |
 | [`style/prefer-bare-for`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-for.civet) | Convert `for const x of xs` and `for (const x of xs)` to `for x of xs`. | — |
+| [`style/prefer-range-loop`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-range-loop.civet) | Convert guarded numeric C-style loops to range loops; otherwise rewrite the head to Civet's equivalent `for i .= start; test; i++` form. Guards index mutation, bound mutation/effects, captures, and later reads. | — |
+| [`style/prefer-function-declaration`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-function-declaration.civet) | Convert a named `const` arrow with a block body to a function declaration when it has no earlier uses, reassignment, or lexical `this`/`arguments`/`super`/`new.target`. Unsafe sites are reported without a fix. | — |
 | [`style/prefer-bare-conditions`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-conditions.civet) | Omit outer parentheses around `if`, `unless`, `while`, and `switch` condition expressions. Verified via `whitespace-style` output delta. | — |
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
 | [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on trailing calls when the argument list is unambiguous. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
 | [`style/prefer-implicit-arrow-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-arrow-arg.civet) | Drop call parens when the sole argument is a zero-parameter arrow (`vi.fn => x`, `lazy => import(…)`). Never fires on an object property followed by more properties — the arrow would absorb them. | — |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
-| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}`. The `prop={true}` form is reported but not fixed — see below. | `react` |
-| [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | `react` |
-| [`style/prefer-unclosed-jsx`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unclosed-jsx.civet) | Drop a redundant closing tag (`<span>hi</span>` → `<span>hi`) and the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`), where indentation already delimits the element. `<pre>`/`<textarea>` keep their closers — see below. | `react` |
+| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}` and combine adjacent `{foo} {bar}` into `{foo, bar}`. `prop={true}` is reported but not fixed — see below. | — |
+| [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | — |
+| [`style/prefer-unclosed-jsx`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-unclosed-jsx.civet) | Drop a redundant closing tag (`<span>hi</span>` → `<span>hi`) and the `/` from a self-closing tag (`<Foo a=1 />` → `<Foo a=1>`), where indentation already delimits the element. `<pre>`/`<textarea>` keep their closers — see below. | — |
 | [`style/prefer-hash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-hash-comments.civet) | Convert `//` line comments to CoffeeScript `#` comments. | `coffeeComment` |
 | [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
 | [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
@@ -328,8 +354,8 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove a comma before a closing bracket, brace or paren — object literals, arrays, argument lists, destructuring patterns and import clauses. Never edits regex literals, array elisions, or a comma after a rest element. Verified via `trailing-comma-style` output delta. | — |
 | [`style/prefer-indented-object`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-object.civet) | Drop the braces from a multi-line object literal bound to a declaration, letting indentation delimit it. | — |
 | [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces from a JS-style block, letting indentation delimit the body: statement blocks (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` / `finally`, with or without head parens) and declaration bodies (`function` / `class` / method). Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
-| [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--rewrite`; not by `--write`. | — |
-| [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--rewrite`; not by `--write`. | — |
+| [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--write` and `--rewrite`. | — |
+| [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--write` and `--rewrite`. | — |
 
 #### `style/prefer-implicit-return` — why it is opt-in
 
@@ -525,8 +551,9 @@ That last one is a behaviour change, not a layout one, so the rule leaves it alo
 
 | Rule ID | Description | Required Dial |
 |---|---|---|
-| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable `prop={prop}` form is listed above. | `react` |
-| [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` block shorthand for single-parameter callbacks (`.map &.id`). | — |
+| [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable forms are listed above. | — |
+| [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` shorthand for single-parameter callbacks. Placeholder parameter renames are autofixed only with `autofixPlaceholders: true`. | — |
+| [`style/prefer-switch`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-switch.civet) | Suggest `switch` for chains of strict equality checks on the same variable. Report-only. | — |
 | [`style/no-single-param-arrow-without-parens`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
 | [`style/prefer-named-export-default`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
 | [`style/no-thin-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-thin-arrow.civet) | Disallow thin arrows `->` in favor of fat arrows `=>`. | — |

@@ -19,20 +19,20 @@ export const preferTypeofShorthandRule: Rule = {
       return unless Array.isArray(node) and node.length >= 3
 
       opIdx := node.findIndex (c: any) ->
-        c? and typeof c is "object" and (c.token is "===" or c.token is "is")
+        c? and typeof c is "object" and (c.token is "===" or c.token is "!==" or c.token is "is")
       return if opIdx < 0
 
       var left: any = null
       for let i = opIdx - 1; i >= 0; i--
         item := node[i]
-        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token is not " "))
           left = item
           break
 
       var right: any = null
       for let i = opIdx + 1; i < node.length; i++
         item := node[i]
-        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token !== " "))
+        if item? and (not Array.isArray(item) or (item.length > 0 and (item[0] as any)?.token is not " "))
           right = item
           break
 
@@ -64,7 +64,8 @@ export const preferTypeofShorthandRule: Rule = {
       return if intersectsRange(ignoredRanges, start, leftSpan.end)
       seen.add(start)
 
-      replacement := `${operandText} <? ${rightText}`
+      isNegated := node[opIdx]?.token is "!=="
+      replacement := `${operandText} ${isNegated ? "!<?" : "<?"} ${rightText}`
       ctx.report({
         ruleId: "style/prefer-typeof-shorthand"
         message: `Use '${replacement}' instead of '${source.slice(start, end)}'`

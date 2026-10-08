@@ -1,0 +1,63 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferSliceShorthandRule: Rule = {
+  id: "style/prefer-slice-shorthand"
+  meta: {
+    description: "Prefer Civet slice syntax over slice() calls"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    tree.visit "CallExpression", (node) ->
+      parts := tree.children(node).filter (part: any) -> part?.type?
+      return unless parts.length is 2
+      member := parts[0]
+      call := parts[1]
+      return unless member?.type is "MemberExpression" and call?.type is "Call"
+
+      memberParts := tree.children(member).filter (part: any) -> part?.type?
+      return unless memberParts.length is 2
+      receiver := memberParts[0]
+      property := memberParts[1]
+      return unless property?.type is "PropertyAccess" and property.name is "slice"
+      // Optional chains need an optional slice form to preserve null handling.
+      return if property.dot?.optional
+
+      args := (call.args or []).filter (arg: any) -> arg?.type is "Argument"
+      return unless args.length is 1 or args.length is 2
+      return if args.some (arg: any) -> arg.spread
+      return if args.some (arg: any) -> not arg.expression?
+
+      receiverText := tree.text(receiver).trim()
+      firstText := tree.text(args[0].expression).trim()
+      return unless receiverText.length > 0 and firstText.length > 0
+      replacement := if args.length is 1
+        `${receiverText}[>=${firstText}]`
+      else
+        lastText := tree.text(args[1].expression).trim()
+        return unless lastText.length > 0
+        if firstText is "0"
+          `${receiverText}[<${lastText}]`
+        else
+          `${receiverText}[${firstText}..<${lastText}]`
+
+      memberRange := tree.range(member)
+      callRange := tree.range(call)
+      return unless memberRange? and callRange?
+      start := memberRange.start
+      end := callRange.end
+      return if seen.has(start) or intersectsRange(ignoredRanges, start, end)
+      seen.add(start)
+      ctx.report({
+        ruleId: "style/prefer-slice-shorthand"
+        message: `Use '${replacement}' instead of '${source.slice(start, end)}'`
+        pos: start
+        fix: { start, end, replacement }
+      })
+}

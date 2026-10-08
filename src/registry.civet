@@ -43,6 +43,12 @@ import { preferBareForRule } from "./rules/prefer-bare-for.civet"
 import { preferBareConditionsRule } from "./rules/prefer-bare-conditions.civet"
 import { preferOptionalTypeRule } from "./rules/prefer-optional-type.civet"
 import { preferPostfixConditionalRule } from "./rules/prefer-postfix-conditional.civet"
+import { preferInOperatorRule } from "./rules/prefer-in-operator.civet"
+import { preferNewShorthandRule } from "./rules/prefer-new-shorthand.civet"
+import { preferSliceShorthandRule } from "./rules/prefer-slice-shorthand.civet"
+import { preferRangeLoopRule } from "./rules/prefer-range-loop.civet"
+import { preferSwitchRule } from "./rules/prefer-switch.civet"
+import { preferFunctionDeclarationRule } from "./rules/prefer-function-declaration.civet"
 
 export class RuleRegistry
   private rules: Map<string, Rule>
@@ -144,6 +150,12 @@ export function createDefaultRuleRegistry(): RuleRegistry
   registry.register(preferBareConditionsRule)
   registry.register(preferOptionalTypeRule)
   registry.register(preferPostfixConditionalRule)
+  registry.register(preferInOperatorRule)
+  registry.register(preferNewShorthandRule)
+  registry.register(preferSliceShorthandRule)
+  registry.register(preferRangeLoopRule)
+  registry.register(preferSwitchRule)
+  registry.register(preferFunctionDeclarationRule)
   registry
 
 export const defaultRuleRegistry: RuleRegistry = createDefaultRuleRegistry()

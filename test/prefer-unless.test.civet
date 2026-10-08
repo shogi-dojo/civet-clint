@@ -47,6 +47,19 @@ describe "style/prefer-unless", ->
   it "rewrites function call in condition", ->
     expect(expectUnlessEquivalent("if not fn(1, 2)\n  b()\n")).toBe("unless fn(1, 2)\n  b()\n")
 
+  it "rewrites a whole 'is not' comparison to unless", ->
+    res := fix("if a is not b\n  act()\n")
+    expect(res.fixedSource).toBe("unless a is b\n  act()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rewrites a negated while condition to until", ->
+    expect(expectUnlessEquivalent("while not ready\n  wait()\n")).toBe("until ready\n  wait()\n")
+
+  it "rewrites while true to loop", ->
+    res := fix("while true\n  tick()\n")
+    expect(res.fixedSource).toBe("loop\n  tick()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
   it "rewrites parenthesized binary expression in condition", ->
     expect(expectUnlessEquivalent("if not (a + b)\n  b()\n")).toBe("unless (a + b)\n  b()\n")
 
@@ -126,6 +139,9 @@ describe "style/prefer-unless guards (negative cases)", ->
 
   it "bails on 'if not a == b' because precedence changes emit", ->
     unchanged("if not a == b\n  c()\n")
+
+  it "leaves a mixed comparison condition unchanged", ->
+    unchanged("if a is not b and c\n  act()\n")
 
   it "bails on 'if not a?' because existential negation changes emit", ->
     // `if not a?` compiles to `a == null`, whereas `unless a?` compiles to `!(a != null)`.
