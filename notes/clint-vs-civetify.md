@@ -87,26 +87,41 @@ this is noisier than the in-rule timers, so the benchmark now reports both.
 
 ## Coverage matrix
 
-| Civetify construct | Clint coverage | Limits and safety |
+| Civetify form | Clint rule | Coverage and limits |
 | --- | --- | --- |
-| Imports without `import` and quotes | `prefer-terse-imports` | Preserves type-only imports and unsupported module names. |
-| `const` / `let` to Civet declarations | `prefer-walrus-declarations`, `prefer-bare-assignment` | Competing styles cannot both be enabled; projects choose one. |
-| `&&`, `||`, `!`, strict equality, and negated equality | `prefer-word-operators`, `no-is-not`, `prefer-is-not`, `prefer-unless` | `unless`/`until` applies only when the whole condition is negated. |
-| Array membership and `typeof` | `prefer-in-operator`, `prefer-typeof-shorthand` | Narrow expression shapes; the equivalence gate checks each fix. |
-| Null checks and optional types | `prefer-existential-check`, `prefer-optional-type`, `no-null-equality` | Existential suggestions that conflate `undefined` and `null` remain report-only. |
-| `this` and `.length` | `prefer-at-shorthand`, `prefer-length-shorthand` | Syntax-only rewrites. |
-| Semicolons, commas, braces, and indented blocks | `no-trailing-semicolons`, `no-trailing-commas`, `no-braced-arrow-body`, `prefer-indented-blocks`, `prefer-indented-object` | Semicolon scanning is the measured hotspot. Repair rules run before style rules. |
-| Braced object property shorthand and grouping | `prefer-property-shorthand`, `prefer-property-group-shorthand` | Only safe braced-object shapes are changed. |
-| Named functions, concise arrows, implicit return | `prefer-function-declaration`, `prefer-concise-arrow`, `prefer-implicit-return` | Function conversion guards hoisting, reassignment, and lexical bindings; implicit return is opt-in. |
-| Implicit calls, block calls, callback arguments | `prefer-implicit-call-args`, `prefer-implicit-block-call`, `prefer-implicit-arrow-arg` | Limited to unambiguous call and statement positions. |
-| Placeholder callbacks | `prefer-ampersand-shorthand` | Parameter-renaming autofixes require `autofixPlaceholders: true`. |
-| `new X()` | `prefer-new-shorthand` | Keeps grouping where chained access needs it. |
-| `if` / `unless`, postfix conditions, `while` / `until`, `loop` | `prefer-unless`, `prefer-postfix-conditional` | Whole-condition and precedence checks apply. |
-| Numeric C-style loops and `switch` | `prefer-range-loop`, `prefer-bare-for`, `prefer-switch` | Range loop autofixes require guards for mutation, captures, bound effects, and later reads. `prefer-switch` is report-only. `for each` array-index substitution is not implemented. |
-| Exclusive `.slice` forms | `prefer-slice-shorthand` | Optional chains, `.slice()`, and unsupported bounds are skipped. |
-| JSX class/id, attribute values, shorthand attributes | `prefer-jsx-shorthand`, `prefer-bare-jsx-values`, `prefer-jsx-attr-shorthand` | Works without React mode, including Solid's `class`; `prop={true}` is reported without a fix. |
-| JSX closing tags and self-closing slash | `prefer-unclosed-jsx` | Indentation, same-name ancestors, text nodes, `<pre>`, and `<textarea>` are guarded. |
-| Equality chains, `for each`, general CoffeeScript compatibility | No native-style rule added here | These need separate behavior-preserving analysis or remain Coffee-mode migrations. |
+| `const` / `let` to Civet declarations | `prefer-walrus-declarations`, `prefer-bare-assignment` | Autofix; these opposing styles cannot both be enabled, so a project chooses one. |
+| `&&`, `||`, and `!` to word operators | `prefer-word-operators` | Autofix with the output gate. |
+| `===` / `!==` to `is` / `is not` | `prefer-word-operators`, `no-is-not`, `prefer-is-not` | Autofix; dial-specific rules are skipped when their CoffeeScript mode is absent. |
+| `foo != null` / `foo == null` existential shorthand | `prefer-existential-check`, `no-null-equality` | Partial: strict `undefined` and `null` checks that would become loose are reported without a fix. |
+| `T \| undefined` to `T?` | `prefer-optional-type` | Autofix for supported union shapes. |
+| `.length` to `#` | `prefer-length-shorthand` | Autofix for supported member expressions. |
+| `typeof x` comparisons to `<?` / `!<?` | `prefer-typeof-shorthand` | Autofix when the tested string and operator shape are supported. |
+| `this` / `this.x` to `@` / `@x` | `prefer-at-shorthand` | Autofix. |
+| Trailing statement semicolons | `no-trailing-semicolons` | Autofix, but 658 findings took 253.8 seconds on this sample; target projects can disable it while it is refactored. |
+| Braced blocks to indentation | `no-braced-arrow-body`, `prefer-indented-blocks`, `prefer-indented-object` | Autofix or repair; object-like and expression-position braces stay guarded. |
+| `b: a.b` to `a.b` in braced objects | `prefer-property-shorthand` | Autofix only for safe object-literal shapes. |
+| Adjacent object property grouping | `prefer-property-group-shorthand` | Autofix only for adjacent compatible shorthand properties. |
+| Trailing commas | `no-trailing-commas` | Autofix outside regex quantifiers, array elisions, and invalid rest-element forms. |
+| `() => work()` to `=> work()` | `prefer-concise-arrow` | Autofix where the zero-argument arrow is unambiguous. |
+| One-parameter arrows and implicit callback arguments | `prefer-implicit-arrow-arg`, `no-single-param-arrow-without-parens` | Partial: zero-argument call ambiguity and object-property argument capture are guarded. |
+| Final explicit `return` | `prefer-implicit-return` | Available as an opt-in rule; deliberately absent from presets. |
+| Call parentheses and block-call syntax | `prefer-implicit-call-args`, `prefer-implicit-block-call` | Partial: only unambiguous trailing or statement-ending forms; empty calls keep `()`. |
+| `(x) => x.p` and related callback placeholders | `prefer-ampersand-shorthand` | Reports all supported sites; parameter-renaming fixes require `autofixPlaceholders: true`. |
+| Named const arrows to function declarations | `prefer-function-declaration` | Guarded autofix; skips earlier uses, reassignment, and lexical `this` / `arguments` / `super` / `new.target`. |
+| `new X()` to `new X` | `prefer-new-shorthand` | Autofix; retains grouping when a member or index access follows. |
+| Parentheses on `if` / `switch` headers | `prefer-indented-blocks`, `prefer-switch` | Header cleanup is partial; `prefer-switch` only reports equality chains and does not autofix them. |
+| One-line `if (...) return` to postfix conditional | `prefer-postfix-conditional` | Autofix when the compiler's block-brace output delta matches. |
+| `if not`, `while not`, `while true` to `unless`, `until`, `loop` | `prefer-unless` | Autofix only when the whole condition is negated and precedence is preserved. |
+| `for const ...` to `for ...` | `prefer-bare-for` | Autofix. |
+| Numeric C-style loops to range loops | `prefer-range-loop` | Guarded autofix checks index writes, later reads, closure capture, and bound mutation/effects. Dynamic loops keep a C-style header. |
+| `x.includes(y)` to `y is in x` | `prefer-in-operator` | Autofix for the supported member-call form; the equivalence gate rejects semantic drift. |
+| Exclusive `.slice` calls to range indexing | `prefer-slice-shorthand` | Partial: `.slice()`, optional chains, and unsupported bounds are skipped. |
+| Imports without the `import` keyword or module quotes | `prefer-terse-imports` | Autofix for supported module specifiers; type-only imports are preserved. |
+| JSX closing tags and self-closing slash | `prefer-unclosed-jsx` | Partial: indentation, nesting, same-name ancestors, text nodes, `<pre>`, and `<textarea>` are guarded. |
+| Simple JSX attribute braces and adjacent shorthand attrs | `prefer-jsx-attr-shorthand` | Autofix for safe forms; `prop={true}` is reported without a fix. |
+| JSX `class` / `id` to `.class` / `#id` | `prefer-jsx-shorthand` | Works without React mode, using `class` for Solid and `className` when React mode is enabled. |
+| JSX bare boolean values | `prefer-bare-jsx-values` | Autofix for supported static boolean attributes. |
+| `for each` array-index substitution, CoffeeScript compatibility modes | No rule added here | Kept out of this native-style work; these require separate scope, capture, and iteration-semantics checks. |
 
 ## Compiler regression
 
