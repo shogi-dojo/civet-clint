@@ -118,6 +118,7 @@ for (const [ruleId, fn] of originals) {
 const perRule = activeRules
   .map((ruleId) => ({ ruleId, ms: spent.get(ruleId) / runs }))
   .sort((a, b) => b.ms - a.ms)
+const ruleWorkMs = perRule.reduce((sum, rule) => sum + rule.ms, 0)
 
 const report = {
   corpus: { dir: corpusDir, files: files.length, bytes: totalBytes },
@@ -125,7 +126,11 @@ const report = {
   cpus: os.availableParallelism?.() ?? os.cpus().length,
   floorMs: floor,
   totalMs: full,
-  ruleWorkMs: Math.max(0, full - floor),
+  // Timers inside each rule are collected during the full pass. Summing them
+  // avoids subtracting independently sampled medians, which can invert by a
+  // few hundred milliseconds when parse/emit dominates the run.
+  ruleWorkMs,
+  observedWallDeltaMs: full - floor,
   rules: perRule,
 }
 
@@ -135,7 +140,8 @@ if (asJson) {
   const fmt = (n) => `${n.toFixed(0)}ms`.padStart(8)
   console.log(`\ncivet-clint bench — ${files.length} files, ${(totalBytes / 1024).toFixed(0)} KiB, median of ${runs}\n`)
   console.log(`  ${fmt(floor)}  parse + emit floor (all rules off)`)
-  console.log(`  ${fmt(report.ruleWorkMs)}  rule work`)
+  console.log(`  ${fmt(report.ruleWorkMs)}  rule work (sum of per-rule timers)`)
+  console.log(`  ${fmt(report.observedWallDeltaMs)}  observed wall delta (full minus floor medians)`)
   console.log(`  ${fmt(full)}  total (single-threaded)\n`)
   console.log(`  per-rule cost (time inside each rule's check):\n`)
   for (const { ruleId, ms } of perRule) {
