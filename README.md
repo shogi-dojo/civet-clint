@@ -284,6 +284,30 @@ Use it as a staged migration rather than turning compiler options off immediatel
 Opposing rules cannot be enabled together. Clint rejects those configurations before
 linting, preventing repeated autofix runs from oscillating between styles.
 
+### Exceptions File
+
+Findings the project has decided to live with go in `clint.exceptions.json`, beside
+`clint.config.json`. It is discovered automatically; set `"exceptions": "<path>"` in
+the config to use another file.
+
+```json
+{
+  "exceptions": [
+    { "file": "src/pages/Admin.civet", "line": 120, "rule": "style/prefer-switch", "reason": "reads better as an if-chain" },
+    { "file": "src/legacy/parser.civet", "rule": "style/prefer-range-loop" }
+  ]
+}
+```
+
+- `file` is relative to the exceptions file. `rule` is the full rule id.
+- `line` is the line clint reports. Without it the entry covers the whole file.
+- `reason` is free text for the next reader; clint ignores it.
+
+A suppressed finding is not reported and does not affect the exit code. Clint prints
+the number suppressed on stderr, and warns about an entry that matched nothing, so a
+stale line number is noticed. Under `--write`, a rule with an exception in a file is
+not autofixed anywhere in that file. Compiler and syntax errors cannot be suppressed.
+
 ### Per-file Configuration Overrides
 
 The `overrides` array allows configuring rules, presets, compiler options, or separate `civet.json` configurations for subsets of files matching glob patterns. Overrides apply in declaration order on top of the base configuration.
@@ -338,7 +362,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-implicit-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-return.civet) | Drop explicit `return` at trailing position of functions, methods, and arrows. Bails on generators, object returns, loops, valueless `return`, and any `return` that is not textually last. **Not in any preset** — see below. | — |
 | [`style/prefer-bare-for`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-for.civet) | Convert `for const x of xs` and `for (const x of xs)` to `for x of xs`. | — |
 | [`style/prefer-range-loop`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-range-loop.civet) | Convert guarded numeric C-style loops to range loops; otherwise rewrite the head to Civet's equivalent `for i .= start; test; i++` form. Guards index mutation, bound mutation/effects, captures, and later reads. | — |
-| [`style/prefer-function-declaration`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-function-declaration.civet) | Convert a named `const` arrow with a block body to a function declaration when it has no earlier uses, reassignment, or lexical `this`/`arguments`/`super`/`new.target`. Unsafe sites are reported without a fix. | — |
+| [`style/prefer-function-declaration`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-function-declaration.civet) | Convert a named `const` arrow with a block body to a function declaration when it has no earlier uses, reassignment, or lexical `this`/`arguments`/`super`/`new.target`. Unsafe sites are reported without a fix. Warn-level in `civet-idiomatic`. | — |
 | [`style/prefer-bare-conditions`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-conditions.civet) | Omit outer parentheses around `if`, `unless`, `while`, and `switch` condition expressions. Verified via `whitespace-style` output delta. | — |
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
 | [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on trailing calls when the argument list is unambiguous. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
@@ -351,9 +375,9 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-slash-comments`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-slash-comments.civet) | Convert CoffeeScript `#` comments to standard Civet `//` comments while preserving directives, shebangs, block comments, and JSX text. | `coffeeComment` |
 | [`style/prefer-is-not`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-is-not.civet) | Convert CoffeeScript `isnt` to standard Civet `is not`. | `coffeeIsnt` |
 | [`style/prefer-explicit-declarations`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-explicit-declarations.civet) | Convert `:=` and exported auto-bindings to explicit `const`/`let` declarations. Bare `autoLet` requires scope/hoisting analysis and remains untouched. | `autoLet` |
-| [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove a comma before a closing bracket, brace or paren — object literals, arrays, argument lists, destructuring patterns and import clauses. Never edits regex literals, array elisions, or a comma after a rest element. Verified via `trailing-comma-style` output delta. | — |
+| [`style/no-trailing-commas`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-trailing-commas.civet) | Remove commas before a closing bracket, brace or paren. With `lineEndings: true` (on in `civet-idiomatic`), also remove commas at the end of lines in multiline lists, compiler-checking ambiguous cases; never edits regex literals, array elisions, or a comma after a rest element. Trailing commas use the `trailing-comma-style` output delta. | — |
 | [`style/prefer-indented-object`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-object.civet) | Drop the braces from a multi-line object literal bound to a declaration, letting indentation delimit it. | — |
-| [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces from a JS-style block, letting indentation delimit the body: statement blocks (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` / `finally`, with or without head parens) and declaration bodies (`function` / `class` / method). Verified via `whitespace-style` output delta. Two shapes are reported without a fix — see below. | — |
+| [`style/prefer-indented-blocks`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-indented-blocks.civet) | Drop the braces from a JS-style block, letting indentation delimit the body: statement blocks (`if` / `unless` / `for` / `while` / `switch` / `try` / `catch` / `finally`, with or without head parens), declaration bodies (`function` / `class` / method), and compiler-equivalent arrow bodies. Arrow candidates are compiled in a batch and unsafe candidates are skipped. Verified via `whitespace-style` output delta. Two other shapes are reported without a fix — see below. | — |
 | [`style/no-braced-arrow-body`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-braced-arrow-body.civet) | **Phase `repair`.** De-brace a `=> { ... }` body that Civet parses as an object literal. Applied by `--write` and `--rewrite`. | — |
 | [`style/no-discarded-arrow-return`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-discarded-arrow-return.civet) | **Phase `repair`.** Remove a trailing `;` that collapses a concise arrow into a block discarding its return value. Applied by `--write` and `--rewrite`. | — |
 
@@ -459,10 +483,26 @@ useEffect =>
                      # treats a non-function return value as a cleanup callback.
 ```
 
-The rule verifies each candidate by compiling with and without the semicolon and
-comparing normalized output, so it reports only removals that provably do not change
-the emitted program. Candidates are bisected rather than tested one at a time, which
-keeps a file with hundreds of semicolons to a handful of compiles.
+That position is decided from syntax: a `;` ending the last statement of a
+value-returning function is left alone without compiling anything. A function
+declared `: void` and a constructor have no implicit return, and a statement that
+already exits (`return`, `throw`, `break`, `continue`) cannot be suppressed, so
+their semicolons stay candidates.
+
+The same goes for a JS-style braced callback made only of bare calls
+(`batch(=> { setA(1); setB(2); })`): without its semicolons Civet reads the body as
+an object literal, so they are kept until the braces are gone.
+
+Every other trailing `;` in a file is verified together, with one compile compared
+against the engine's baseline. Only when that fails are the candidates bisected to
+find the one that matters, within a fixed budget of compiles per file.
+
+To also remove a function-tail semicolon wherever the emit proves it redundant, at
+the cost of extra compiles, enable `verifyFunctionTails`:
+
+```json
+{ "rules": { "style/no-trailing-semicolons": ["error", { "verifyFunctionTails": true }] } }
+```
 
 Note this is the opposite of `style/no-discarded-arrow-return`, where the semicolon
 *must* go. The two never overlap: that rule fires only when the body is not a real
@@ -632,6 +672,7 @@ so a later phase sees the text earlier phases produced:
 | phase | purpose | gate |
 | --- | --- | --- |
 | `repair` | Fixes a mis-compilation. Emitted output changes **by design**. | The targeted defect must be present before and absent after. |
+| `declaration` | Converts a guarded named arrow to a function declaration before body-style rewrites. | Emitted output must match modulo that rule's declared delta. |
 | `idiom` | The default. Output-preserving style fixes. | Emitted output must be byte-identical (modulo a declared delta). |
 | `cleanup` | Fixes that only become correct once earlier phases have run. | Same as `idiom`. |
 
@@ -640,6 +681,10 @@ semicolon is what stops Civet reparsing the block as an object literal, so
 `style/no-trailing-semicolons` (phase `cleanup`) must not judge the body until
 `style/no-braced-arrow-body` (phase `repair`) has de-braced it. Running them in one
 pass would have each rule judging text the other is about to replace.
+
+`style/prefer-function-declaration` runs in `declaration` so it can convert a
+named arrow first; the `idiom` phase then sees and de-indents the resulting
+function body without competing for the same source range.
 
 Because a `repair` changes emitted output on purpose, the byte-equality gate cannot
 verify it. Its gate is defect-specific instead — the mis-compilation must be present

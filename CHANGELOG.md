@@ -5,7 +5,8 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-10-09
+
 
 ### Added
 
@@ -26,12 +27,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with lexical-binding and reassignment checks, and report-only `prefer-switch`.
   Placeholder callback renames in `prefer-ampersand-shorthand` are autofixed only
   when `autofixPlaceholders` is explicitly enabled.
-
-`0.7.0` remains unreleased; no npm release or tag is part of this work.
-
-## [0.7.0] - 2026-08-24
-
-### Added
+- **Exceptions file.** `clint.exceptions.json` (auto-discovered beside the config, or
+  named by `"exceptions"`) lists findings to suppress by `file`, `rule`, and an
+  optional `line`. Suppressed findings do not affect the exit code; the count and
+  any entry that matched nothing are reported on stderr. A rule with an exception in
+  a file is not autofixed in that file.
+- **Compiler-verified arrow de-bracing.** `style/prefer-indented-blocks` now removes
+  braces from ordinary arrow bodies when a grouped compile proves the emitted code
+  unchanged. It preserves callback suffixes and leaves Civet's object-literal repair
+  to the earlier `style/no-braced-arrow-body` phase.
+- **Line-ending commas, opt-in.** `style/no-trailing-commas` takes a `lineEndings`
+  option that also removes commas between multiline list entries, using a compiler
+  check to keep ambiguous forms such as comma-separated declarations intact. It is
+  off by default (on a comma-separated 585-file codebase it reported 3,602 new
+  sites) and on in the `civet-idiomatic` preset. Presets can now carry rule options.
+- **`style/prefer-function-declaration` handles Civet-style declarations.** It
+  matched only `const f = (…) => { … }`; it now also converts `f := (…) =>` with an
+  indented body, which is what the other rules leave behind, keeping the body text.
+- **`style/prefer-postfix-conditional` covers any short statement.** `if (a) continue`
+  and `if (a) f(x)` become `continue if a` and `f(x) if a`, not just `return`. Where
+  the postfix form is refused (braces, JSX, a line past 100 columns) the rule falls
+  back to the byte-identical `if a then stmt`.
+- **`style/prefer-walrus-declarations` handles type annotations.** `const x: T = v`
+  becomes `x: T := v`. Function-typed annotations are left alone.
+- **Named function declarations in the idiomatic preset.** The guarded rule runs in
+  its own phase before block de-indentation, so the two rewrites cannot compete for
+  the same arrow body. Non-fixable cases remain warnings.
 
 - **`style/no-redundant-jsx-parens`** -- drops the parens left wrapping a JSX
   element when a `return` becomes implicit, and dedents what they held:
@@ -74,6 +95,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exported `noDiscardedArrowReturnRule` and `preferIndentedBlocksRule` alongside all new rules in `src/rules/index.civet`.
 
 ### Changed
+
+- **Skip empty autofix phases.** Phased fixes no longer parse and emit a file for phases without enabled rules; a stable file uses one preflight as its final report instead of running every phase. Repair findings and fixable findings still enter the verified pipeline.
+
+- **Avoid repeated verification compiles.** `prefer-unless` and line-ending comma checks reuse results for identical edit sets. Block de-bracing reuses the first proven group instead of recompiling it. Known unprovable `prefer-unless` shapes skip verification entirely. Compiler equivalence gates remain in place.
+
+- **`style/no-trailing-semicolons` is about 7x cheaper.** A `;` ending the last
+  statement of a value-returning function is the one that suppresses an implicit
+  return; the rule now recognises that position from syntax and leaves it alone,
+  where it used to prove each one unsafe by compiling (a full bisection tree per
+  file, on every run). The remaining candidates of a file are verified with one
+  compile. On a 585-file corpus the rule went from 38.5s to 5.3s single-threaded
+  with identical findings. The old exhaustive behaviour is available as
+  `verifyFunctionTails: true`.
 
 - **New `type-paren-style` output delta.** Strips parentheses around single union types `(T | undefined)` emitted by Civet's lowering of `T?`, while preserving intersection types `(a | b) & c` and array types `(a | b)[]`. Consulted only for rules declaring `type-paren-style`.
 
@@ -124,6 +158,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Widened `style/prefer-walrus-declarations`**: added `let x = …` → `x .= …` support and removed the `autoLet` dialect requirement since both `.=` and `:=` compile byte-identically under standard Civet.
 
 ### Fixed
+
+- **Arrow repairs preserve property shorthand keys.** A valid `{ p.userId }` object return is no longer mistaken for a broken statement body on a later fix pass.
+
+- **Corpus guards for membership, slices, and constructors.** Membership rewrites preserve an `unless` condition, conditional slice bounds stay explicit, and constructor shorthand accepts Civet’s equivalent grouping in conditional branches.
+
+- **Implicit returns keep their value when a tail semicolon is present.** The rule removes the suppressing semicolon with the `return` keyword, including multiline calls and inline function bodies, under compiler verification.
+
+- **`style/prefer-function-declaration` no longer rewrites an arrow that uses `@`.**
+  The guard looked for the word `this`, so `const f = (x) => { @v + x }` became a
+  `function` with a different `this`, and the `function-declaration` delta accepted
+  it.
+
+- **Rejected autofixes are reported under `--write`.** When repair rules are
+  enabled, fixes run in phases and the final report came from a re-lint without
+  `fix`, so a fix the equivalence gate rejected showed up as merely "fixable" on
+  every run. The rejection is now an error in the report.
+- **`function-declaration` output delta misread parenthesised initialisers.**
+  `const x = (a as T).b` was taken for a parameter list and joined to the next
+  arrow in the file, which rejected every function-declaration fix in that file.
+- **`style/prefer-postfix-conditional` skips a statement followed by `;`.** The
+  semicolon ended up after the condition, where `f() if a;` parses as a call.
+- **Verification compiles are bounded.** The grouped checks in
+  `style/prefer-indented-blocks` and `style/no-trailing-commas` could fall back to
+  one compile per candidate; both now stop at a fixed budget per file.
+
 
 - **`style/prefer-existential-check` no longer advertises fixes the gate rejects.**
   `x?` lowers to the *loose* `x != null`, so only `x != null` -> `x?` and

@@ -85,6 +85,66 @@ three runs) measured 15,616 ms parse/emit floor, 17,968 ms full run, and 556 ms
 summed rule timers. The independently sampled wall-clock delta was 2,352 ms;
 this is noisier than the in-rule timers, so the benchmark now reports both.
 
+## Graph-orientation-visualizer fork measurement
+
+The fork's starting point was shogi-dojo/graph-orientation-visualizer at
+8d90f54, with Civet 0.11.5 and the civet-idiomatic preset. Pattern counts below
+cover the seven direct .civet files under src/ and test/; the closing-tag count
+also includes HTML markup embedded in strings.
+
+| Source pattern | Before | After |
+| --- | ---: | ---: |
+| Braced arrow bodies (=> {) | 132 | 13 |
+| Lines containing only closing delimiters | 305 | 152 |
+| Explicit return lines | 88 | 88 |
+| if ( headers | 73 | 45 |
+| for ( headers | 25 | 1 |
+| Named const arrows | 49 | 0 |
+| Line-ending commas | 397 | 0 |
+| Trailing semicolons | 127 | 86 |
+| Closing JSX tags / markup strings | 47 | 47 |
+| class="…" attributes | 9 | 0 |
+
+The nine Solid class attributes were hand-converted because the shorthand rule
+skips multiline JSX attributes. The 88 returns remain because
+prefer-implicit-return is opt-in. The closing tags remain where the compiler
+and text layout make removal unsafe.
+
+The source-only benchmark uses
+node scripts/bench.mjs --target notes/graph-orientation-visualizer/src --config ../clint.config.json --runs 3 --json.
+It compares the pre-fix measurement from the same five-file source corpus with
+the final post-fix corpus:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Source bytes | 70,341 | 68,762 |
+| Parse/emit floor | 5,399.67 ms | 4,046.79 ms |
+| Full lint time | 40,047.77 ms | 8,421.75 ms |
+| Sum of rule timers | 38,630.67 ms | 4,409.54 ms |
+| no-trailing-semicolons | 22,609.57 ms | 84.42 ms |
+| prefer-unless | 5,349.65 ms | 3,748.87 ms |
+| no-trailing-commas | 5,110.78 ms | 3.13 ms |
+| prefer-indented-blocks | 4,813.39 ms | 0.75 ms |
+
+During migration, prefer-indented-blocks peaked at 22.7 seconds in a
+single-run benchmark while it verified many candidate rewrites. The grouped
+fallback reduced that from 32.9 seconds, and the clean final corpus now costs
+under 1 ms for the rule. This is a migration-time optimization target, not a
+reason to remove the rule. prefer-unless now accounts for about 85% of the
+remaining rule work and is the next refactor candidate. A project that needs a
+temporary latency tradeoff can disable it locally; this sample does not support
+global deprecation. The semicolon and comma rules became inexpensive after
+their candidate sets were cleaned up.
+
+The final --fix src test pass converged to zero errors and 13 non-fixable
+warnings (12 strict null/undefined comparisons and one callback placeholder).
+The project passed Civet typecheck, all 45 Vitest tests, and the Vite build.
+Normalized TypeScript ASTs matched in six of seven files. The only difference
+is the reviewed allowedEdgeIds conditional: Civet had emitted its loop body
+as an object expression, so the manual indentation fix restores the intended
+loop. A browser smoke test confirmed edge orientation, undo/redo, and example
+switching.
+
 ## Coverage matrix
 
 | Civetify form | Clint rule | Coverage and limits |
