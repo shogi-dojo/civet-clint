@@ -199,3 +199,9 @@ describe "verification cost", ->
     result := lintSource(source, { rules: { [RULE]: "error" }, compiler })
     expect(result.diagnostics).toHaveLength(0)
     expect(calls).toBe(2)
+
+describe "style/prefer-unless on `while a is not b`", ->
+  it "rewrites it to `until a is b`", ->
+    res := lintSource("while a is not b\n  step()\n", { rules: { "style/prefer-unless": "error" }, fix: true })
+    expect(res.fixedSource).toBe("until a is b\n  step()\n")
+    expect(res.isEquivalencePreserved).toBe(true)

@@ -445,6 +445,17 @@ export function normalizeWhitespaceStyle(code: string): string
     i++
   out
 
+// `x?` lowers to `(x != null)` where the comparison it replaces was written bare:
+// `a := foo != null` emits `foo != null`, `a := foo?` emits `(foo != null)`. Strip
+// that pair, but only where nothing outside it can bind tighter than `!=` -- so
+// `b + (x != null)` and `y == (x != null)` keep theirs, and a rewrite that changed
+// the grouping still fails the gate.
+export function normalizeExistentialParenStyle(code: string): string
+  code.replace(
+    /(^|[(\[{,:?;]|&&|\|\||\?\?|[^=!<>]=|=>|\breturn)(\s*)\(([^()\n]+?) (!=|==) null\)(?=\s*(?:$|[)\]},;:?]|&&|\|\||\?\?))/gm
+    (_whole, before, space, operand, operator) -> `${before}${space}${operand} ${operator} null`
+  )
+
 // Canonicalize the equivalent JS spellings `a !== b` and `!(a === b)`. This
 // bounded delta is used only by prefer-unless for a whole-condition rewrite.
 export function normalizeInequalityStyle(code: string): string
@@ -464,9 +475,11 @@ export function normalizePlaceholderParamStyle(code: string): string
 
 // Civet range loops lower to a hidden counter plus a per-iteration binding. This
 // narrow normalizer maps that generated wrapper back to the equivalent C-style
-// loop header so guarded range rewrites can pass the compiler-output gate.
+// loop header so guarded range rewrites can pass the compiler-output gate. The
+// `;` after the alias is optional because `semicolon-style` runs first when
+// several rules' deltas are combined, and has already removed it.
 export function normalizeRangeLoopStyle(code: string): string
-  code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;/g, (_whole, _counter, start, operator, bound, name) ->
+  code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;?/g, (_whole, _counter, start, operator, bound, name) ->
     canonicalStart := start.trim().replace(/^\((.+) \+ 1\) \+ -1$/, "$1")
     step := if operator is "<" or operator is "<=" then "++" else "--"
     `for (let ${name} = ${canonicalStart}; ${name} ${operator} ${bound.trim()}; ${name}${step}) {`

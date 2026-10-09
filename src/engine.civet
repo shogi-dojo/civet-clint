@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
@@ -49,6 +49,7 @@ export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "placeholder-param"
   "range-loop"
   "function-declaration"
+  "existential-paren-style"
   "whitespace-style"
 ]
 
@@ -397,6 +398,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeRangeLoopStyle(code)
       when "function-declaration"
         normalizeFunctionDeclarationStyle(code)
+      when "existential-paren-style"
+        normalizeExistentialParenStyle(code)
       else
         code
 
@@ -877,8 +880,12 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   exceptions := (fileConfig.exceptions or [])
     .map((entry, index) -> { entry.rule, entry.line, index, entry.file })
     .filter (entry) -> entry.file is absolutePath
+  // A plain `--write` promises unchanged emit. A `repair` changes it by design,
+  // so that phase runs only when the caller asks for it, as `--rewrite` does;
+  // here the mis-compilation is reported and its fix withheld.
+  phases := options.phases or RULE_PHASE_ORDER.filter (phase) -> phase isnt "repair"
   res := shouldRunPhases
-    ? lintPhased(content, { ...options, config: fileConfig, filename: filePath, registry, exceptions })
+    ? lintPhased(content, { ...options, phases, config: fileConfig, filename: filePath, registry, exceptions })
     : lintSource(content, { ...options, config: fileConfig, filename: filePath, registry, exceptions })
 
   if options.fix and res.fixedSource and res.fixedSource isnt content

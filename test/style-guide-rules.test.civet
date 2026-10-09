@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
+import { normalizeExistentialParenStyle } from "../src/utils.civet"
 import { defaultRuleRegistry } from "../src/registry.civet"
 import { SyntaxTree } from "../src/syntax.civet"
 
@@ -630,3 +631,25 @@ describe "style/prefer-walrus-declarations with type annotations", ->
   it "leaves function-typed and uninitialised declarations alone", ->
     for source of ["const cb: (x: number) => void = noop\n", "let name: string | undefined\n"]
       expect(run(source).fixedSource).toBeUndefined()
+
+describe "existential shorthand in a position where Civet parenthesises it", ->
+  it "rewrites `a := foo != null` and its negation", ->
+    res := lintSource("a := foo != null\nb := foo == null\n", { rules: { "style/prefer-existential-check": "error" }, fix: true })
+    expect(res.fixedSource).toBe("a := foo?\nb := not foo?\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+describe "normalizeExistentialParenStyle", ->
+  it "strips the pair only where nothing outside binds tighter", ->
+    expect(normalizeExistentialParenStyle("const a = (foo != null)")).toBe("const a = foo != null")
+    expect(normalizeExistentialParenStyle("f(x, (foo == null))")).toBe("f(x, foo == null)")
+    for kept of ["const a = b + (foo != null)", "const a = y == (foo != null)", "const a = !(foo != null)", "const a = (foo != null).toString()"]
+      expect(normalizeExistentialParenStyle(kept)).toBe(kept)
+
+describe "JSX member shorthand", ->
+  it "rewrites `foo={props.foo}` to `{props.foo}`", ->
+    res := lintSource("<Other foo={props.foo} bar={props.baz}>\n", {
+      rules: { "style/prefer-jsx-attr-shorthand": "error", "style/prefer-bare-jsx-values": "error" }
+      fix: true
+    })
+    expect(res.fixedSource).toBe("<Other {props.foo} bar=props.baz>\n")
+    expect(res.isEquivalencePreserved).toBe(true)

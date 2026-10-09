@@ -21,7 +21,7 @@ describe RULE, ->
   it "rewrites descending exclusive and inclusive loops to ranges", ->
     for [source, expected] of [
       ["for (let i = n; i > 0; i--) {\n  visit(i)\n}\n", "for i of [n..>0] {\n  visit(i)\n}\n"]
-      ["for (let i = n; i >= 0; i--) {\n  visit(i)\n}\n", "for i of [n + 1>..0] {\n  visit(i)\n}\n"]
+      ["for (let i = n; i >= 0; i--) {\n  visit(i)\n}\n", "for i of [n..>=0] {\n  visit(i)\n}\n"]
     ]
       res := fix(source)
       expect(res.fixedSource).toBe(expected)
@@ -29,7 +29,6 @@ describe RULE, ->
 
   it "falls back to an assignment-style C loop when range guards fail", ->
     for source of [
-      "for (let i = 0; i < n; i++) {\n  visit(i)\n}\nuse(i)\n"
       "for (let i = 0; i < n; i++) {\n  i += 2\n}\n"
       "for (let i = 0; i < n; i++) {\n  visit(i)\n  n++\n}\n"
       "for (let i = 0; i < getLimit(); i++) {\n  visit(i)\n}\n"
@@ -38,3 +37,28 @@ describe RULE, ->
       res := fix(source)
       expect(res.fixedSource).toContain("for i .= ")
       expect(res.isEquivalencePreserved).toBe(true)
+
+describe "style/prefer-range-loop on Civet-style heads", ->
+  it "reads a head whose parens are already gone", ->
+    res := fix("for let i = 1; i <= 5; i++\n  visit(i)\n")
+    expect(res.fixedSource).toBe("for i of [1..5]\n  visit(i)\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "treats a `let` index as scoped to its loop", ->
+    res := fix("for (let i = 0; i < n; i++) {\n  visit(i)\n}\nfor (let i = 0; i < m; i++) {\n  visit(i)\n}\n")
+    expect(res.fixedSource).toBe("for i of [0..<n] {\n  visit(i)\n}\nfor i of [0..<m] {\n  visit(i)\n}\n")
+
+  it "leaves a head that is already in assignment form and cannot be a range", ->
+    res := fix("for i .= 0; i < items#; i++\n  visit(i)\n")
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.diagnostics.filter (d) -> d.ruleId is "style/prefer-range-loop").toHaveLength(0)
+
+  it "leaves a `var` index that is read after the loop", ->
+    res := fix("for (var i = 0; i < n; i++) {\n  visit(i)\n}\nuse(i)\n")
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.isEquivalencePreserved).toBe(true)
+
+describe "normalizeRangeLoopStyle after semicolon normalization", ->
+  it "still recognises the generated alias once its `;` is gone", ->
+    lowered := "for (let i1 = 1; i1 <= 5; ++i1) {const i = i1\n  visit(i)\n}"
+    expect(normalizeRangeLoopStyle(lowered)).toBe("for (let i = 1; i <= 5; i++) {\n  visit(i)\n}")

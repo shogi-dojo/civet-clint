@@ -271,7 +271,21 @@ export const preferUnlessRule: Rule = {
       else if expr?.type is "Literal" and expr.raw is "true"
         replacement = "loop"
       else
-        return
+        // `while a is not b` -> `until a is b`, under the same limits as the
+        // `if a is not b` case above: one top-level comparison, plain operands.
+        parts := tree.children(cond)
+        comparisons := parts.filter (part: any) ->
+          part?.token and ["!==", "===", "==", "!=", "<", ">", "<=", ">=", "&&", "||"].includes(part.token)
+        opIndex := parts.findIndex (part: any) ->
+          part?.token is "!==" and tree.text(part).trim() is "is not"
+        return unless opIndex >= 0 and comparisons.length is 1
+        operands := parts.filter (part: any) -> part?.type?
+        return unless operands.length is 2
+        leftText := tree.text(operands[0]).trim()
+        rightText := tree.text(operands[1]).trim()
+        return unless leftText.length > 0 and rightText.length > 0
+        return if /[()]/.test(leftText) or /[()]/.test(rightText)
+        replacement = `until ${leftText} is ${rightText}`
 
       candidates.push({ pos: start, fix: { start, end, replacement } })
 
