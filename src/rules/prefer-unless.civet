@@ -49,12 +49,20 @@ function safeBodies(
     return [] unless base.ok
     normalize(base.output!)
 
+  // Bisection may revisit its accepted union. Cache each edit set so the
+  // common all-safe case costs one compile, and never retry a rejected set.
+  verified := new Map<string, boolean>()
   groupIsSafe := (group: Candidate[]): boolean ->
     return true if group.length is 0
+    key := group.map((c) -> c.pos).sort((a, b) -> a - b).join(",")
+    cached := verified.get(key)
+    return cached if cached?
     { output } := applyEdits(source, group.map((c) -> c.fix))
     return false if output is source
     res := compileForOutput(output, { dial, compiler })
-    res.ok and normalize(res.output!) is baseline
+    safe := res.ok and normalize(res.output!) is baseline
+    verified.set(key, safe)
+    safe
 
   accepted: Candidate[] := []
   partition := (group: Candidate[], depth: number): void ->
@@ -161,6 +169,10 @@ export const preferUnlessRule: Rule = {
         leftText := tree.text(operands[0]).trim()
         rightText := tree.text(operands[1]).trim()
         return unless leftText.length > 0 and rightText.length > 0
+        // The inequality delta only proves operands without nested parentheses.
+        // These groups always fail verification; avoid compiling the whole file
+        // to rediscover that limit (e.g. `zone is not edgeZone(fraction)`).
+        return if /[()]/.test(leftText) or /[()]/.test(rightText)
         conditionText = `${leftText} is ${rightText}`
 
       start := ifTok.range.start
@@ -201,6 +213,14 @@ export const preferUnlessRule: Rule = {
         return if /[{}<>]|\b(?:then|else|if|unless)\b|=>|(?:^|[^\\])#|\/\/|\/\*/.test(guardedBody)
         var core = bodyText
         if core.endsWith(";")
+          // Dropping a function-tail terminator on a non-exit statement enables
+          // an implicit return. Keep it in place rather than compiling an edit
+          // that the equivalence gate will always reject.
+          if not POSTFIXABLE_BODY.test(core)
+            owner := tree.nearestAncestor(node, ["FunctionExpression", "FunctionDeclaration", "ArrowFunction", "MethodDefinition"])
+            ownerSpan := tree.range(owner) if owner?
+            bodyEnd := end + bodyRaw.trimEnd().length
+            return if ownerSpan? and /^[\s;}]*$/.test(source.slice(bodyEnd, ownerSpan.end))
           core = core.slice(0, -1).trimEnd()
         return if core.includes(";")
         // The trailing `;` is dropped with the rewrite, and the semicolon-style

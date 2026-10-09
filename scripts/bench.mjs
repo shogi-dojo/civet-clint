@@ -34,7 +34,7 @@ const configPath = flag("--config")
 
 const { lintSource } = await import(path.join(repoRoot, "dist/engine.js"))
 const { defaultRuleRegistry } = await import(path.join(repoRoot, "dist/registry.js"))
-const { loadConfig } = await import(path.join(repoRoot, "dist/config.js"))
+const { loadConfig, resolveConfigForFile } = await import(path.join(repoRoot, "dist/config.js"))
 
 // Corpus: either a real codebase or this repo's own sources, which are the most
 // representative Civet available without a external dependency.
@@ -60,9 +60,11 @@ const sources = await Promise.all(
 )
 const totalBytes = sources.reduce((a, s) => a + s.text.length, 0)
 
-const baseConfig = loadConfig(configPath, corpusDir, defaultRuleRegistry)
-const civetOptions = baseConfig.civetOptions ?? {}
-const activeRules = Object.keys(baseConfig.rules).filter((r) => baseConfig.rules[r] !== "off")
+const baseConfig = loadConfig(configPath ? path.resolve(configPath) : undefined, corpusDir, defaultRuleRegistry)
+const fileConfigs = new Map(files.map((file) => [file, resolveConfigForFile(baseConfig, file, corpusDir, defaultRuleRegistry)]))
+const activeRules = [...new Set([...fileConfigs.values()].flatMap((config) =>
+  Object.keys(config.rules).filter((r) => config.rules[r] !== "off"),
+))]
 
 // Median of N runs: less startup-sensitive than a mean, and this workload has a
 // long tail from GC.
@@ -77,7 +79,16 @@ function timeCorpus(rules) {
   for (let r = 0; r < runs; r++) {
     const t0 = performance.now()
     for (const { file, text } of sources) {
-      lintSource(text, { civetOptions, rules, filename: file, registry: defaultRuleRegistry })
+      const config = fileConfigs.get(file)
+      lintSource(text, {
+        civetOptions: config.civetOptions,
+        compileOptions: config.compileOptions,
+        compiler: config.compiler,
+        ruleOptions: config.ruleOptions,
+        rules: rules === allOff ? Object.fromEntries(Object.keys(config.rules).map((id) => [id, "off"])) : config.rules,
+        filename: file,
+        registry: defaultRuleRegistry,
+      })
     }
     samples.push(performance.now() - t0)
   }
@@ -121,7 +132,9 @@ const perRule = activeRules
 const ruleWorkMs = perRule.reduce((sum, rule) => sum + rule.ms, 0)
 
 const report = {
-  corpus: { dir: corpusDir, files: files.length, bytes: totalBytes },
+  corpus: { dir: corpusDir, files: files.length, bytes: totalBytes,
+    compilerVersions: [...new Set([...fileConfigs.values()].map((config) => config.compilerVersion))],
+  },
   runs,
   cpus: os.availableParallelism?.() ?? os.cpus().length,
   floorMs: floor,

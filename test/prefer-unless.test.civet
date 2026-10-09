@@ -1,3 +1,4 @@
+import civet from "@danielx/civet"
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource, normalizeBlockBraceStyle } from "../src/engine.civet"
 
@@ -170,3 +171,31 @@ describe "style/prefer-unless guards (negative cases)", ->
     unreported("if (not a) return { x: 1 }\n")
     unreported("if (not a) return <X y />\n")
     unreported("if (not a) f() # keep going\n")
+
+
+describe "verification cost", ->
+  it "compiles an all-safe candidate set only once", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    source := "if not a\n  f()\nif not b\n  g()\n"
+    result := lintSource(source, { rules: { [RULE]: "error" }, compiler })
+    expect(result.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(2)
+    // Engine parse + baseline, then one grouped rule verification.
+    expect(calls).toBe(3)
+
+
+  it "does not compile known-unprovable call comparisons or suppressed tail returns", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    source := "f := => {\n  if (not a) g();\n}\ncontinue if zone is not edgeZone(x)\n"
+    result := lintSource(source, { rules: { [RULE]: "error" }, compiler })
+    expect(result.diagnostics).toHaveLength(0)
+    expect(calls).toBe(2)
