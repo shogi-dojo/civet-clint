@@ -4,21 +4,21 @@ import { compileForOutput } from "../src/compiler.civet"
 
 describe "style/prefer-bare-jsx-values", ->
   it "rewrites differing identifiers, non-string literals, and member expressions to bare values", ->
-    input := '<Button onClick={handleClick} size={16} disabled={false} cancelText={null} value={option.value} />'
+    input := '<Button onClick={handleClick} size={16} disabled={false} cancelText={null} value={option.current} count={total()} />'
     res := lintSource(input, {
       rules: { "style/prefer-bare-jsx-values": "error" }
       civetOptions: { react: true }
       fix: true
     })
     expect(res.isEquivalencePreserved).toBe(true)
-    expect(res.fixedSource).toBe('<Button onClick=handleClick size=16 disabled=false cancelText=null value=option.value />')
+    expect(res.fixedSource).toBe('<Button onClick=handleClick size=16 disabled=false cancelText=null value=option.current count=total() />')
 
     origOut := compileForOutput(input, { dial: { react: true } })
     fixedOut := compileForOutput(res.fixedSource!, { dial: { react: true } })
     expect(origOut.output).toBe(fixedOut.output)
 
-  it "skips same-name identifiers, boolean true, string literals, calls, objects, arrays, arrows, and templates", ->
-    input := '<C name={name} disabled={true} label={"hello"} call={f()} t={`s`} obj={{a: 1}} arr={[1]} arrow={() => 1} header={<H />} />'
+  it "skips same-name identifiers and members, boolean true, string literals, spaced calls, objects, arrays, arrows, and templates", ->
+    input := '<C name={name} value={option.value} disabled={true} label={"hello"} call={f(a, b)} t={`s`} obj={{a: 1}} arr={[1]} arrow={() => 1} header={<H />} />'
     res := lintSource(input, {
       rules: { "style/prefer-bare-jsx-values": "error" }
       civetOptions: { react: true }

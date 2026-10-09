@@ -92,3 +92,14 @@ describe "exceptions file", ->
     res := lintSource(SOURCE, { rules: { [RULE]: "error" } })
     expect(res.diagnostics).toHaveLength(2)
     expect(res.suppressedCount).toBe(0)
+
+describe "plain --write and output-changing repairs", ->
+  it "reports a mis-parsed arrow body without applying its repair", async ->
+    dir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-repair-"))
+    source := "it 'x', => {\n  f()\n  g()\n}\n"
+    file := path.join(dir, "a.civet")
+    await fs.writeFile(path.join(dir, "clint.config.json"), JSON.stringify({ rules: { "style/no-braced-arrow-body": "error" } }))
+    await fs.writeFile(file, source)
+    res := await lintFile(file, { config: loadConfig(undefined, dir), fix: true })
+    expect(await fs.readFile(file, "utf8")).toBe(source)
+    expect(res.diagnostics.some (d) -> d.ruleId is "style/no-braced-arrow-body").toBe(true)

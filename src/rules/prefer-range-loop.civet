@@ -35,36 +35,57 @@ export const preferRangeLoopRule: Rule = {
       tokens := tree.tokens(node)
       forTok := tokens.find (token) -> token.raw.trim() is "for" and not token.synthetic
       return unless forTok?
-      openIndex := tokens.findIndex (token) -> token.raw is "(" and token.range.start >= forTok.range.end and not token.synthetic
-      return if openIndex < 0
-
-      var depth = 0
-      var closeIndex = -1
-      for let i = openIndex; i < tokens.length; i++
-        token := tokens[i]
-        continue if token.synthetic
-        if token.raw is "("
-          depth++
-        else if token.raw is ")"
-          depth--
-          if depth is 0
-            closeIndex = i
-            break
-      return if closeIndex < 0
-      openTok := tokens[openIndex]!
-      closeTok := tokens[closeIndex]!
-      semicolons := tokens.filter (token) ->
-        not token.synthetic and token.raw is ";" and token.range.start > openTok.range.end and token.range.end < closeTok.range.start
-      return unless semicolons.length is 2
-      firstSemi := semicolons[0]!
-      secondSemi := semicolons[1]!
-      initText := source.slice(openTok.range.end, firstSemi.range.start).trim()
-      conditionText := source.slice(firstSemi.range.end, secondSemi.range.start).trim()
-      updateText := source.slice(secondSemi.range.end, closeTok.range.start).trim()
-      initMatch := /^(?:let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/.exec(initText)
+      // The head is either JS-style `for (init; cond; update)` or, once the parens
+      // are gone, the rest of the `for` line.
+      var initText = ""
+      var conditionText = ""
+      var updateText = ""
+      var headEnd = -1
+      parenthesized := /^\s*\(/.test(source.slice(forTok.range.end))
+      if parenthesized
+        openIndex := tokens.findIndex (token) -> token.raw is "(" and token.range.start >= forTok.range.end and not token.synthetic
+        return if openIndex < 0
+        var depth = 0
+        var closeIndex = -1
+        for let i = openIndex; i < tokens.length; i++
+          token := tokens[i]
+          continue if token.synthetic
+          if token.raw is "("
+            depth++
+          else if token.raw is ")"
+            depth--
+            if depth is 0
+              closeIndex = i
+              break
+        return if closeIndex < 0
+        openTok := tokens[openIndex]!
+        closeTok := tokens[closeIndex]!
+        semicolons := tokens.filter (token) ->
+          not token.synthetic and token.raw is ";" and token.range.start > openTok.range.end and token.range.end < closeTok.range.start
+        return unless semicolons.length is 2
+        firstSemi := semicolons[0]!
+        secondSemi := semicolons[1]!
+        initText = source.slice(openTok.range.end, firstSemi.range.start).trim()
+        conditionText = source.slice(firstSemi.range.end, secondSemi.range.start).trim()
+        updateText = source.slice(secondSemi.range.end, closeTok.range.start).trim()
+        headEnd = closeTok.range.end
+      else
+        lineEndCandidate := source.indexOf("\n", forTok.range.end)
+        lineEnd := lineEndCandidate < 0 ? source.length : lineEndCandidate
+        headText := source.slice(forTok.range.end, lineEnd)
+        // A brace would be an inline body; a string or comment could hide a `;`.
+        return if /[{}]/.test(headText) or intersectsRange(ignoredRanges, forTok.range.end, lineEnd)
+        parts := headText.split(";")
+        return unless parts.length is 3
+        initText = parts[0].trim()
+        conditionText = parts[1].trim()
+        updateText = parts[2].trim()
+        headEnd = forTok.range.end + headText.trimEnd().length
+      initMatch := /^(?:(let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=|([A-Za-z_$][A-Za-z0-9_$]*)\s*\.=)\s*(.+)$/.exec(initText)
       return unless initMatch
-      name := initMatch[1]!
-      initialValue := initMatch[2]!.trim()
+      name := (initMatch[2] or initMatch[3])!
+      initialValue := initMatch[4]!.trim()
+      functionScoped := initMatch[1] is "var"
       condMatch := new RegExp(`^${name}\\s*(<=|>=|<|>)\\s*(.+)$`).exec(conditionText)
       return unless condMatch
       operator := condMatch[1]!
@@ -73,7 +94,7 @@ export const preferRangeLoopRule: Rule = {
       decrementMatches := updateText is `${name}--`
       return unless updateMatches or decrementMatches
 
-      headRange := { start: forTok.range.start, end: closeTok.range.end }
+      headRange := { start: forTok.range.start, end: headEnd }
       if intersectsRange(ignoredRanges, headRange.start, headRange.end)
         ctx.report({
           ruleId: "style/prefer-range-loop"
@@ -97,7 +118,9 @@ export const preferRangeLoopRule: Rule = {
         return unless fnRange? and blockRange.start <= fnRange.start and fnRange.end <= blockRange.end
         captured = true if tree.tokens(fn).some (token) -> not token.synthetic and token.raw.trim() is name
 
-      usedAfter := tree.tokens().some (token) ->
+      // A `let` (or `.=`) index is scoped to the loop, so a later `i` is another
+      // binding. Only a `var` index can be read after the loop.
+      usedAfter := functionScoped and tree.tokens().some (token) ->
         token.range.start >= loopRange.end and not token.synthetic and token.raw.trim() is name and
           not intersectsRange(ignoredRanges, token.range.start, token.range.end)
 
@@ -112,17 +135,28 @@ export const preferRangeLoopRule: Rule = {
           when "<" then "..<"
           when "<=" then ".."
           when ">" then "..>"
-          when ">=" then ">.."
+          when ">=" then "..>="
           else ""
-        rangeStart := if operator is ">=" then `${initialValue} + 1` else initialValue
-        replacement = `for ${name} of [${rangeStart}${rangeOperator}${bound}]`
+        replacement = `for ${name} of [${initialValue}${rangeOperator}${bound}]`
       else
+        // `.=` declares with `let`; a `var` index that outlives the loop has no
+        // equivalent head.
+        return if functionScoped
         // The C-style head still has a fully equivalent Civet spelling. This is
         // the conservative fallback whenever a range would alter scope, capture,
         // mutation, or bound-evaluation behavior.
         replacement = `for ${name} .= ${initialValue}; ${conditionText}; ${updateText}`
 
-      fix: Fix := { start: headRange.start, end: headRange.end, replacement: replacement! }
+      // Already in the form this rule would write.
+      return if replacement is source.slice(headRange.start, headRange.end)
+      // The fallback only swaps the declaration, so on a paren-less head it edits
+      // just `let i =`. Replacing the whole head would overlap other rules' edits
+      // inside it (`items.length` -> `items#`) and sink the combined fix.
+      declaration := /^\s*let\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=/.exec(source.slice(forTok.range.end, headRange.end))
+      fix: Fix := if not rangeSafe and not parenthesized and declaration?
+        { start: forTok.range.end, end: forTok.range.end + declaration[0].length, replacement: ` ${name} .=` }
+      else
+        { start: headRange.start, end: headRange.end, replacement: replacement! }
       fixes.push(fix)
       ctx.report({
         ruleId: "style/prefer-range-loop"

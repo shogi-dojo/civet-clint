@@ -94,6 +94,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`civet-idiomatic` preset**: bundles neutral-dial idiom rules covering standard modern Civet style without legacy CoffeeScript options.
 - Exported `noDiscardedArrowReturnRule` and `preferIndentedBlocksRule` alongside all new rules in `src/rules/index.civet`.
 
+- **More of the Civetify guide is autofixed.** `while a is not b` becomes
+  `until a is b` (`style/prefer-unless`); `foo={bar()}` becomes `foo=bar()`
+  (`style/prefer-bare-jsx-values`); `foo={props.foo}` becomes `{props.foo}`
+  (`style/prefer-jsx-attr-shorthand`).
+- **`style/prefer-range-loop` reads Civet-style heads.** It required `for (…)`, so
+  once another rule had removed the parens it never fired. It now also reads
+  `for let i = a; i < b; i++` and `for i .= a; …`, treats a `let` index as scoped
+  to its loop, and writes a descending inclusive range as `[a..>=b]`.
+
 ### Changed
 
 - **Skip empty autofix phases.** Phased fixes no longer parse and emit a file for phases without enabled rules; a stable file uses one preflight as its final report instead of running every phase. Repair findings and fixable findings still enter the verified pipeline.
@@ -170,6 +179,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `function` with a different `this`, and the `function-declaration` delta accepted
   it.
 
+- **`style/prefer-existential-check` fixes were rejected outside conditions.**
+  `a := foo != null` → `a := foo?` emits `(foo != null)`, and the extra parentheses
+  failed the gate on every run. A new `existential-paren-style` delta accepts them
+  where nothing outside can bind tighter than `!=`.
+- **Plain `--write` no longer applies `repair` fixes.** Enabling a repair rule made
+  `--write` run every phase, so it rewrote mis-parsed arrow bodies and changed the
+  emitted program, against the documented contract. Repairs are applied by
+  `--rewrite` again; `--write` reports them.
+- **Range-loop fixes were rejected when combined with other rules.** The
+  `range-loop` delta expected a `;` that `semicolon-style` had already removed.
+- **`style/prefer-bare-jsx-values` no longer rewrites an existing `{props.foo}`
+  shorthand** into a bare `props.foo`.
 - **Rejected autofixes are reported under `--write`.** When repair rules are
   enabled, fixes run in phases and the final report came from a re-lint without
   `fix`, so a fix the equivalence gate rejected showed up as merely "fixable" on

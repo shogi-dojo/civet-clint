@@ -59,7 +59,7 @@ export type RuleOptions = Record<string, any>;
 export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions];
 export type EquivalenceReference = (source: string) => string | undefined;
 export type CompilerPreference = 'project' | 'bundled';
-export type OutputDelta = 'quote-style' | 'semicolon-style' | 'declaration-style' | 'trailing-comma-style' | 'whitespace-style' | 'block-brace-style' | 'type-paren-style' | 'return-paren-style' | 'inequality-style' | 'new-call-style' | 'placeholder-param' | 'range-loop' | 'function-declaration';
+export type OutputDelta = 'quote-style' | 'semicolon-style' | 'declaration-style' | 'trailing-comma-style' | 'whitespace-style' | 'block-brace-style' | 'type-paren-style' | 'return-paren-style' | 'inequality-style' | 'new-call-style' | 'placeholder-param' | 'range-loop' | 'function-declaration' | 'existential-paren-style';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
 export interface CivetCompiler { compile(source: string, options?: Record<string, any>): any; }

@@ -1,5 +1,8 @@
 import type { Rule, RuleContext } from "../types.civet"
 
+const SIMPLE_MEMBER = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/
+const SIMPLE_CALL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([\w$.,]*\)$/
+
 export const preferBareJsxValuesRule: Rule = {
   id: "style/prefer-bare-jsx-values"
   meta: {
@@ -14,6 +17,8 @@ export const preferBareJsxValuesRule: Rule = {
     tree.visit "JSXElement", (node) ->
       for attr of tree.jsxAttributes(node)
         continue unless attr.name? and attr.expression? and attr.bracedRange?
+        // `{props.foo}` is already the shorthand; it has no `=` to keep a value after.
+        continue unless attr.equals?
 
         span := attr.bracedRange
         bracedText := source.slice(span.start, span.end)
@@ -37,6 +42,13 @@ export const preferBareJsxValuesRule: Rule = {
             replacement = tree.text(expr)
           when "MemberExpression"
             replacement = tree.text(expr)
+            // `foo={props.foo}` has a shorter form, `{props.foo}`, which belongs
+            // to style/prefer-jsx-attr-shorthand.
+            continue if SIMPLE_MEMBER.test(replacement) and replacement.endsWith(`.${attr.name}`)
+          when "CallExpression"
+            // `foo={bar()}` -> `foo=bar()`, for values without spaces.
+            replacement = tree.text(expr)
+            continue unless SIMPLE_CALL.test(replacement)
           else
             continue
 

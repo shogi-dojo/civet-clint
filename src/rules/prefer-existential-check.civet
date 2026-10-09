@@ -1,5 +1,5 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { Fix, Rule, RuleContext } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
 
 // `x?` lowers to `x != null` -- a LOOSE check that is true for a defined, non-null
 // value and false for both `null` and `undefined`. That makes only two source
@@ -34,6 +34,11 @@ export const preferExistentialCheckRule: Rule = {
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+    fixes: Fix[] := []
+    ctx.declareEquivalenceReference?.("existential-paren-style", (input: string) ->
+      return undefined if fixes.length is 0
+      applyEdits(input, fixes).output
+    )
 
     // A rewrite to `x?` is only sound when the comparison is loose AND against
     // `null`. `undefined` is never safe: `x?` cannot distinguish it from `null`.
@@ -57,11 +62,13 @@ export const preferExistentialCheckRule: Rule = {
       original := source.slice(start, fullEnd)
 
       if isFixable(op, literal)
+        fix := { start, end: fullEnd, replacement }
+        fixes.push(fix)
         ctx.report({
           ruleId: "style/prefer-existential-check"
           message: `Use existential postfix '${replacement}' instead of '${original}'`
           pos: start
-          fix: { start, end: fullEnd, replacement }
+          fix
         })
       else
         ctx.report({

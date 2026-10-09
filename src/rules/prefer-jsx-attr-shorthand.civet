@@ -1,5 +1,7 @@
 import type { Rule, RuleContext } from "../types.civet"
 
+const SIMPLE_MEMBER = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/
+
 export const preferJsxAttrShorthandRule: Rule = {
   id: "style/prefer-jsx-attr-shorthand"
   meta: {
@@ -72,6 +74,20 @@ export const preferJsxAttrShorthandRule: Rule = {
             ruleId: "style/prefer-jsx-attr-shorthand"
             message: `Use boolean prop shorthand '${name}' instead of '${name}={true}'`
             pos: start
+          })
+          continue
+
+        // `foo={props.foo}` -> `{props.foo}`: the attribute takes the name of the
+        // last property.
+        if inner?.type is "MemberExpression"
+          text := tree.text(inner).trim()
+          continue unless SIMPLE_MEMBER.test(text) and text.endsWith(`.${name}`)
+          continue unless source.slice(start, end) is `${name}={${text}}`
+          ctx.report({
+            ruleId: "style/prefer-jsx-attr-shorthand"
+            message: `Use JSX attribute shorthand '{${text}}' instead of '${name}={${text}}'`
+            pos: start
+            fix: { start, end, replacement: `{${text}}` }
           })
           continue
 
