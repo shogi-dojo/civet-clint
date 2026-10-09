@@ -1,0 +1,201 @@
+import civet from "@danielx/civet"
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource, normalizeBlockBraceStyle } from "../src/engine.civet"
+
+RULE := "style/prefer-unless"
+DIAL := { react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectUnlessEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+// Postfix one-liner rewrites emit `{ return x }` where the prefix emitted
+// `return x`, so their equivalence is brace-style-only.
+function expectUnlessBraceEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeBlockBraceStyle(compileSource(fixed, DIAL))).toBe(normalizeBlockBraceStyle(compileSource(source, DIAL)))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+function unreported(source: string)
+  res := fix(source)
+  expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-unless", ->
+  it "rewrites 'if not a' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if not a\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites 'if (!a)' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if (!a)\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites 'if !a' to 'unless a'", ->
+    expect(expectUnlessEquivalent("if !a\n  b()\n")).toBe("unless a\n  b()\n")
+
+  it "rewrites member access in condition", ->
+    expect(expectUnlessEquivalent("if not a.b.c\n  b()\n")).toBe("unless a.b.c\n  b()\n")
+
+  it "rewrites function call in condition", ->
+    expect(expectUnlessEquivalent("if not fn(1, 2)\n  b()\n")).toBe("unless fn(1, 2)\n  b()\n")
+
+  it "rewrites a whole 'is not' comparison to unless", ->
+    res := fix("if a is not b\n  act()\n")
+    expect(res.fixedSource).toBe("unless a is b\n  act()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rewrites a negated while condition to until", ->
+    expect(expectUnlessEquivalent("while not ready\n  wait()\n")).toBe("until ready\n  wait()\n")
+
+  it "rewrites while true to loop", ->
+    res := fix("while true\n  tick()\n")
+    expect(res.fixedSource).toBe("loop\n  tick()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rewrites parenthesized binary expression in condition", ->
+    expect(expectUnlessEquivalent("if not (a + b)\n  b()\n")).toBe("unless (a + b)\n  b()\n")
+
+  it "rewrites 'if !(a + b)' in condition", ->
+    expect(expectUnlessEquivalent("if !(a + b)\n  b()\n")).toBe("unless (a + b)\n  b()\n")
+
+  it "rewrites postfix 'g() if not a' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if not a\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix 'g() if (!a)' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if (!a)\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix 'g() if !a' to 'g() unless a'", ->
+    expect(expectUnlessEquivalent("g() if !a\n")).toBe("g() unless a\n")
+
+  it "rewrites postfix member access 'g() if not a.b'", ->
+    expect(expectUnlessEquivalent("g() if not a.b\n")).toBe("g() unless a.b\n")
+
+  it "rewrites one-liner bare return to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (not a) return\n")).toBe("return unless a\n")
+
+  it "rewrites one-liner 'if (!a) return' to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (!a) return\n")).toBe("return unless a\n")
+
+  it "rewrites one-liner value return to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (not a) return []\n")).toBe("return [] unless a\n")
+
+  it "rewrites a semicolon-terminated one-liner including the `;`", ->
+    // The `;` must not survive the rewrite: on Civet 0.11.5 `return null unless a;`
+    // mis-compiles into a call. The rule declares block-brace-style AND
+    // semicolon-style deltas, so the composed gate proves both dimensions.
+    res := lintSource("if (not a) return null;\n", {
+      rules: { [RULE]: "error" }
+      fix: true
+      civetOptions: DIAL
+    })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("return null unless a\n")
+
+  it "rewrites one-liner throw to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (not a) throw new Error('m')\n")).toBe("throw new Error('m') unless a\n")
+
+  it "rewrites one-liner throw of a template literal to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (not a) throw new Error(`m ${a.b}`)\n")).toBe("throw new Error(`m ${a.b}`) unless a\n")
+
+  it "rewrites one-liner continue to postfix", ->
+    expect(expectUnlessBraceEquivalent("for const x of xs\n  if (not x) continue\n")).toBe("for const x of xs\n  continue unless x\n")
+
+  it "rewrites one-liner expression statement to postfix", ->
+    expect(expectUnlessBraceEquivalent("if (not a) f()\n")).toBe("f() unless a\n")
+
+  it "is idempotent on the postfix form", ->
+    once := fix("if (not a) return []\n").fixedSource!
+    expect(once).toBe("return [] unless a\n")
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "is idempotent", ->
+    once := fix("if not a\n  b()\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-unless guards (negative cases)", ->
+  it "bails on 'if not a and b' because precedence changes emit", ->
+    // `if not a and b` is `(!a) && b`, whereas `unless a and b` is `!(a && b)`.
+    unchanged("if not a and b\n  c()\n")
+
+  it "bails on 'if not a or b' because precedence changes emit", ->
+    // `if not a or b` is `(!a) || b`, whereas `unless a or b` is `!(a || b)`.
+    unchanged("if not a or b\n  c()\n")
+
+  it "bails on 'if not a is b' because precedence changes emit", ->
+    // `if not a is b` is `(!a) === b`, whereas `unless a is b` is `!(a === b)`.
+    unchanged("if not a is b\n  c()\n")
+
+  it "bails on 'if not a == b' because precedence changes emit", ->
+    unchanged("if not a == b\n  c()\n")
+
+  it "leaves a mixed comparison condition unchanged", ->
+    unchanged("if a is not b and c\n  act()\n")
+
+  it "bails on 'if not a?' because existential negation changes emit", ->
+    // `if not a?` compiles to `a == null`, whereas `unless a?` compiles to `!(a != null)`.
+    unchanged("if not a?\n  b()\n")
+
+  it "leaves positive 'if a' unchanged", ->
+    unchanged("if a\n  b()\n")
+
+  it "leaves already-idiomatic 'unless a' unchanged", ->
+    unchanged("unless a\n  b()\n")
+
+  it "leaves a braced head to style/prefer-indented-blocks", ->
+    // prefer-indented-blocks only recognizes a head that still has its parens.
+    // Rewriting `if (!a) {` to `unless a {` here would strand the braces: no rule
+    // can de-brace a bare head, so the file would keep them forever.
+    unchanged("if (not a) {\n  g()\n}\n")
+
+  it "leaves a braced 'if not' head alone too", ->
+    unchanged("if not a {\n  g()\n}\n")
+
+  it "reports nothing for a one-liner body it cannot prove", ->
+    // A returned object literal or JSX element would need more than the
+    // block-brace-style delta to verify, and a comment in the body would swallow
+    // the appended ` unless a`. Skipping the site beats reporting a fix the gate
+    // would then reject.
+    unreported("if (not a) return { x: 1 }\n")
+    unreported("if (not a) return <X y />\n")
+    unreported("if (not a) f() # keep going\n")
+
+
+describe "verification cost", ->
+  it "compiles an all-safe candidate set only once", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    source := "if not a\n  f()\nif not b\n  g()\n"
+    result := lintSource(source, { rules: { [RULE]: "error" }, compiler })
+    expect(result.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(2)
+    // Engine parse + baseline, then one grouped rule verification.
+    expect(calls).toBe(3)
+
+
+  it "does not compile known-unprovable call comparisons or suppressed tail returns", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    source := "f := => {\n  if (not a) g();\n}\ncontinue if zone is not edgeZone(x)\n"
+    result := lintSource(source, { rules: { [RULE]: "error" }, compiler })
+    expect(result.diagnostics).toHaveLength(0)
+    expect(calls).toBe(2)

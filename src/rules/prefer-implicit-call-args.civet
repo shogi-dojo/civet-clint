@@ -6,23 +6,84 @@ import { intersectsRange } from "../utils.civet"
 //
 //   expect(path).toBe('/a/Foo.civet')   ->  expect(path).toBe '/a/Foo.civet'
 //   render(<Panel {rules} />)           ->  render <Panel {rules} />
+//   g(x)                                ->  g x
+//   a.b(x, y)                           ->  a.b x, y
 //
-// Emitted JS is byte-identical, so no OutputDelta is involved. The rewrite is
-// deliberately conservative -- see the guards in `check`.
-const IMPLICIT_CALLEES = new Set<string>([
-  "render"
-  "rerender"
-])
+// Emitted JS is byte-identical, so no OutputDelta is involved.
+//
+// Guards:
+// 1. The call is the entire statement (only indentation or preceding implicit
+//    call names before it on the line; only whitespace/comment after).
+// 2. No top-level binary operator, `?`, or `:` appears between the parens.
+// 3. The argument list is non-empty.
+function hasTopLevelBinaryOpOrTernary(inner: string): boolean
+  trimmed := inner.trim()
+  if trimmed.startsWith("<") and (trimmed.endsWith("/>") or trimmed.endsWith(">"))
+    return false
 
-// Trailing matcher names whose argument list can be unwrapped. `expect(…)` itself
-// keeps its parens: it is the subject of the assertion, not the tail of the line.
-function isMatcherName(name: string): boolean
-  /^(?:to|resolves|rejects)/.test(name)
+  var depthParen = 0
+  var depthBrace = 0
+  var depthBracket = 0
+  var inString = false
+  var quoteChar = ""
+  var i = 0
+
+  while i < inner.length
+    ch := inner[i]
+    if inString
+      if ch is "\\"
+        i += 2
+        continue
+      if ch is quoteChar
+        inString = false
+      i++
+      continue
+    if ch is '"' or ch is "'" or ch is "`"
+      inString = true
+      quoteChar = ch
+      i++
+      continue
+    if ch is "("
+      depthParen++
+      i++
+      continue
+    if ch is ")"
+      depthParen = Math.max(0, depthParen - 1)
+      i++
+      continue
+    if ch is "{"
+      depthBrace++
+      i++
+      continue
+    if ch is "}"
+      depthBrace = Math.max(0, depthBrace - 1)
+      i++
+      continue
+    if ch is "["
+      depthBracket++
+      i++
+      continue
+    if ch is "]"
+      depthBracket = Math.max(0, depthBracket - 1)
+      i++
+      continue
+
+    if depthParen is 0 and depthBrace is 0 and depthBracket is 0
+      return true if ch is "?" or ch is ":"
+      return true if ch is "+" or ch is "*" or ch is "/" or ch is "%" or ch is "^" or ch is "="
+      return true if ch is "&" or ch is "|" or ch is "<" or ch is ">"
+      if /[a-zA-Z]/.test(ch)
+        rest := inner.slice(i)
+        return true if /^(?:is|isnt|and|or|in|instanceof)\b/.test(rest)
+    i++
+  false
+
+LINE_PREFIX := /^[ \t]*(?:(?!(?:if|for|while|unless|until|return|throw|yield|await|export|import|case|default|let|const|var)\b)[A-Za-z_$][\w$.]*\s+)*$/
 
 export const preferImplicitCallArgsRule: Rule = {
   id: "style/prefer-implicit-call-args"
   meta: {
-    description: "Drop call parens on trailing matcher and render calls, letting the argument list close the line"
+    description: "Drop call parens on trailing calls when the argument list is unambiguous"
     fixable: true
     defaultSeverity: "warn"
     phase: "idiom"
@@ -39,23 +100,15 @@ export const preferImplicitCallArgsRule: Rule = {
       last := children[children.length - 1]
       return unless last?.type is "Call"
 
-      // `expect(a).toBe('x')` is one CallExpression whose children are
-      // [Identifier, Call, PropertyAccess, Call]: the matcher name lives on the
-      // trailing PropertyAccess, and the final Call carries its parens. A plain
-      // `render(<X />)` is [Identifier, Call].
       before := children[children.length - 2]
       var name: string | undefined = undefined
 
-      if before?.type is "PropertyAccess"
-        propName := before.name
-        return unless typeof propName is "string" and isMatcherName(propName)
-        name = propName
-      else if before?.type is "Identifier" and children.length is 2
-        calleeName := before.name
-        return unless typeof calleeName is "string" and IMPLICIT_CALLEES.has(calleeName)
-        name = calleeName
-      else
-        return
+      if before?.type is "PropertyAccess" or before?.type is "Identifier"
+        name = before.name
+      else if before?
+        name = tree.text(before).trim()
+
+      return unless typeof name is "string" and name.length > 0
 
       // An empty argument list must keep its parens: `toBeNull()` is the call,
       // while `toBeNull` alone is a property read.
@@ -83,20 +136,29 @@ export const preferImplicitCallArgsRule: Rule = {
       // Single-line only. A wrapped argument list already closes on its own line.
       return if source.slice(openSpan.start, closeSpan.end).includes("\n")
 
-      // The call must end its statement. A further `.chain`, an operator, or another
-      // argument after the closer all mean the parens are load-bearing.
+      // The call must be the entire statement.
+      nodeSpan := tree.range(node)
+      return unless nodeSpan?
+
+      lineStart := source.lastIndexOf("\n", nodeSpan.start - 1) + 1
+      linePrefix := source.slice(lineStart, nodeSpan.start)
+      return unless LINE_PREFIX.test(linePrefix)
+
       lineEnd := source.indexOf("\n", closeSpan.start)
       trailing := source.slice(closeSpan.start + 1, lineEnd < 0 ? source.length : lineEnd)
-      return unless /^[)\s]*$/.test(trailing)
+      return unless /^[)\s]*(?:\/\/|#.*)?$/.test(trailing)
 
       // An argument starting with an operator, a paren, or whitespace becomes
       // ambiguous once the call parens are gone (`f(-1)` -> `f -1` is a subtraction).
       // A JSX element is exempt: `<` only reads as "less than" when it follows a
       // value, and here it opens the argument.
       inner := source.slice(openSpan.end, closeSpan.start)
-      return if inner.length is 0
-      isJsxArgument := /^<[A-Za-z]/.test(inner)
+      return if inner.trim().length is 0
+      isJsxArgument := /^<[A-Za-z]/.test(inner.trimStart())
       return if not isJsxArgument and /^[\s(+\-*/%<>=!&|^~?:,]/.test(inner)
+
+      // Guard 2: No top-level binary operator, `?`, or `:` appears between the parens.
+      return if hasTopLevelBinaryOpOrTernary(inner)
 
       ctx.report({
         ruleId: "style/prefer-implicit-call-args"

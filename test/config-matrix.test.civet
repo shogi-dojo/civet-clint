@@ -5,7 +5,7 @@ import os from "node:os"
 import { lintSource } from "../src/engine.civet"
 import { loadConfig, loadCivetConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts, findConfigFile, findCivetConfigFile, PRESETS } from "../src/config.civet"
 import { defaultRuleRegistry } from "../src/registry.civet"
-import { parseSyntax, compileForOutput } from "../src/compiler.civet"
+import { parseSyntax, compileForOutput, resolveCivetCompiler } from "../src/compiler.civet"
 import type { ResolvedConfig } from "../src/types.civet"
 
 // Configuration matrix: every supported dial × rule interaction must be covered. The
@@ -15,6 +15,46 @@ import type { ResolvedConfig } from "../src/types.civet"
 // incompatible rule/config combinations.
 
 describe "Configuration matrix", ->
+  describe "compiler resolution", ->
+    it "resolves a project's compiler and supports forcing the bundled compiler", async ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-project-compiler-"))
+      packageDir := path.join(tmpDir, "node_modules", "@danielx", "civet")
+      await fs.mkdir(packageDir, { recursive: true })
+      await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({
+        name: "@danielx/civet"
+        version: "0.11.15"
+        main: "index.cjs"
+      }))
+      await fs.writeFile(path.join(packageDir, "index.cjs"), "exports.compile = (source) => source\n")
+
+      project := resolveCivetCompiler(tmpDir)
+      expect(project.version).toBe("0.11.15")
+      expect(project.usedBundled).toBe(false)
+      expect(project.compiler.compile("project output")).toBe("project output")
+
+      bundled := resolveCivetCompiler(tmpDir, "bundled")
+      expect(bundled.usedBundled).toBe(true)
+      expect(bundled.compiler).not.toBe(project.compiler)
+      expect(bundled.warning).toBeUndefined()
+
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "resolves compiler preference overrides per file", async ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-compiler-override-"))
+      await fs.writeFile(path.join(tmpDir, "clint.config.json"), JSON.stringify({
+        compiler: "bundled"
+        overrides: [{ files: "src/**/*.civet", compiler: "project" }]
+      }))
+
+      base := loadConfig(undefined, tmpDir)
+      srcFile := resolveConfigForFile(base, path.join(tmpDir, "src", "app.civet"), tmpDir)
+      otherFile := resolveConfigForFile(base, path.join(tmpDir, "test.civet"), tmpDir)
+      expect(srcFile.compilerPreference).toBe("project")
+      expect(srcFile.compilerUsedBundled).toBe(true)
+      expect(otherFile.compilerPreference).toBe("bundled")
+
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
   describe "opposing rule directions", ->
     it "rejects conflicting rules before linting", ->
       registry := defaultRuleRegistry.clone()
@@ -118,6 +158,37 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-bare-assignment"]).toBeUndefined()
       expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
 
+    it "provides a standard Civet idiomatic preset without legacy Coffee options", ->
+      preset := PRESETS["civet-idiomatic"]
+      expect(preset.civetOptions).toEqual({})
+      expect(preset.compileOptions).toEqual({})
+      expect(preset.rules["style/no-braced-arrow-body"]).toBe("error")
+      expect(preset.rules["style/prefer-in-operator"]).toBe("error")
+      expect(preset.rules["style/prefer-new-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-slice-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-range-loop"]).toBe("warn")
+      expect(preset.rules["style/prefer-switch"]).toBe("warn")
+      expect(preset.rules["style/prefer-function-declaration"]).toBe("warn")
+      expect(preset.rules["style/prefer-unless"]).toBe("error")
+      expect(preset.rules["style/prefer-at-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-length-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-typeof-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-property-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-property-group-shorthand"]).toBe("error")
+      expect(preset.rules["style/prefer-unclosed-jsx"]).toBe("error")
+      // Deliberately absent: the rule still proposes gate-rejected fixes on real
+      // code, which would make --check exit non-zero on conformant sources.
+      expect(preset.rules["style/prefer-implicit-return"]).toBeUndefined()
+      expect(preset.rules["style/prefer-bare-for"]).toBe("error")
+      expect(preset.rules["style/prefer-bare-conditions"]).toBe("error")
+      expect(preset.rules["style/prefer-walrus-declarations"]).toBe("error")
+      expect(preset.rules["style/prefer-existential-check"]).toBe("warn")
+      expect(preset.rules["style/prefer-optional-type"]).toBe("error")
+      // Autofixable since 0.7.0 via the block-brace-style delta, so it moves to
+      // `error` under the preset's "error only for autofixable rewrites" policy.
+      expect(preset.rules["style/prefer-postfix-conditional"]).toBe("error")
+      expect(() -> validateRuleConflicts(preset.rules)).not.toThrow()
+
     it "uses the neutral preset when no Clint config exists", async ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-default-"))
       config := loadConfig(undefined, tmpDir)
@@ -146,12 +217,15 @@ describe "Configuration matrix", ->
       expect(res.isEquivalencePreserved).toBe(true)
 
     it "keeps safe default-dial edits when an unsafe spelling shares the file", ->
-      res := lintSource("a === b\nc !== d", {
+      // `!=` is the spelling that stays put without the Coffee dial (its emit,
+      // loose `!=`, differs from any word operator). `!==` is strict, so it can
+      // safely become `is not` even under the default dial.
+      res := lintSource("a === b\nc != d", {
         config: neutralConfig()
         fix: true
       })
       expect(res.isEquivalencePreserved).toBe(true)
-      expect(res.fixedSource).toBe("a is b\nc !== d")
+      expect(res.fixedSource).toBe("a is b\nc != d")
 
   describe "Coffee options dial", ->
     it "rewrites == to is when coffeeEq is enabled", ->
@@ -194,16 +268,15 @@ describe "Configuration matrix", ->
         reason: "incompatible with coffeeNot in the compiler dial"
       }])
 
-  describe "React on/off", ->
-    it "skips prefer-jsx-shorthand when react is off, runs it when react is on", ->
-      off := lintSource('<div className="btn">hi</div>', {
+  describe "Solid / React JSX", ->
+    it "uses class without react and className with react", ->
+      off := lintSource('<div class="btn">hi</div>', {
         config: neutralConfig()
         rules: { "style/prefer-jsx-shorthand": "error" }
         fix: true
       })
-      // React is not in the dial, so the rule is skipped and reports nothing.
-      expect(off.diagnostics.filter((d) -> d.ruleId is "style/prefer-jsx-shorthand")).toHaveLength(0)
-      expect(off.fixedSource).toBeUndefined()
+      expect(off.isEquivalencePreserved).toBe(true)
+      expect(off.fixedSource).toBe('<div .btn>hi</div>')
 
       onn := lintSource('<div className="btn">hi</div>', {
         civetOptions: { react: true }
@@ -262,14 +335,12 @@ describe "Configuration matrix", ->
       expect(output.output).toBe("const x = 1")
 
   describe "incompatible rule/config combinations", ->
-    it "computeSkippedRules flags JSX rule without react", ->
+    it "does not require react for JSX syntax rules", ->
       skipped := computeSkippedRules(
         { "style/prefer-jsx-shorthand": "error" }
         {}
       )
-      expect(skipped).toHaveLength(1)
-      expect(skipped[0].ruleId).toBe("style/prefer-jsx-shorthand")
-      expect(skipped[0].reason).toContain("react")
+      expect(skipped).toEqual([])
 
     it "computeSkippedRules flags no-is-not without coffeeIsnt", ->
       skipped := computeSkippedRules(
@@ -301,7 +372,7 @@ describe "Configuration matrix", ->
       )
       expect(skipped).toEqual([])
 
-    it "loadConfig populates skippedRules for an incompatible default-preset override", ->
+    it "does not skip JSX syntax rules in the default preset", ->
       tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-matrix-"))
       await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
         preset: "default"
@@ -311,7 +382,7 @@ describe "Configuration matrix", ->
       config := loadConfig("civet-clint.config.json", tmpDir)
       expect(config.preset).toBe("default")
       expect(config.civetOptions).toEqual({})
-      expect(config.skippedRules.map (s) -> s.ruleId).toContain("style/prefer-jsx-shorthand")
+      expect(config.skippedRules.map (s) -> s.ruleId).not.toContain("style/prefer-jsx-shorthand")
 
       await fs.rm(tmpDir, { recursive: true, force: true })
 

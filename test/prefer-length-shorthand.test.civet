@@ -1,0 +1,66 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-length-shorthand"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectLengthEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-length-shorthand", ->
+  it "rewrites 'arr.length' to 'arr#'", ->
+    expect(expectLengthEquivalent("arr.length\n")).toBe("arr#\n")
+
+  it "rewrites member access 'a.b.c.length' to 'a.b.c#'", ->
+    expect(expectLengthEquivalent("a.b.c.length\n")).toBe("a.b.c#\n")
+
+  it "rewrites index access 'xs[0].length' to 'xs[0]#'", ->
+    expect(expectLengthEquivalent("xs[0].length\n")).toBe("xs[0]#\n")
+
+  it "rewrites call result 'fn().length' to 'fn()#'", ->
+    expect(expectLengthEquivalent("fn().length\n")).toBe("fn()#\n")
+
+  it "rewrites template literal '`str`.length' to '`str`#'", ->
+    expect(expectLengthEquivalent("`str`.length\n")).toBe("`str`#\n")
+
+  it "rewrites parenthesized '(a + b).length' to '(a + b)#'", ->
+    expect(expectLengthEquivalent("(a + b).length\n")).toBe("(a + b)#\n")
+
+  it "rewrites write target 'obj.length = 0' to 'obj# = 0'", ->
+    expect(expectLengthEquivalent("obj.length = 0\n")).toBe("obj# = 0\n")
+
+  it "rewrites compound assignment 'obj.length += 1' to 'obj# += 1'", ->
+    expect(expectLengthEquivalent("obj.length += 1\n")).toBe("obj# += 1\n")
+
+  it "rewrites optional length 'arr?.length' to 'arr?#'", ->
+    expect(expectLengthEquivalent("arr?.length\n")).toBe("arr?#\n")
+
+  it "is idempotent", ->
+    once := fix("arr.length\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-length-shorthand guards", ->
+  it "leaves comments alone", ->
+    unchanged("// arr.length in comment\n")
+
+  it "leaves strings alone", ->
+    unchanged("s := \"arr.length in string\"\n")
+
+  it "leaves type annotations with length properties alone", ->
+    unchanged("type Foo = { length: number }\n")
+
+  it "leaves already-shorthand arr# alone", ->
+    unchanged("arr#\n")

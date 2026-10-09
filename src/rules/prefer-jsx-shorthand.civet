@@ -3,22 +3,19 @@ import type { JsxAttribute } from "../syntax.civet"
 
 const VALID_IDENTIFIER = /^[a-zA-Z_-][a-zA-Z0-9_-]*$/
 
-function leadingShorthandRunEnd(attrs: JsxAttribute[]): number
+function leadingShorthandRunEnd(attrs: JsxAttribute[], classAttribute: string): number
   var end = -1
   for attr, i of attrs
-    break unless attr.name is "className" or attr.name is "id"
+    break unless attr.name is classAttribute or attr.name is "id"
     end = i
   end
 
 export const preferJsxShorthandRule: Rule = {
   id: "style/prefer-jsx-shorthand"
   meta: {
-    description: "Prefer JSX class and id shorthands (.class and #id) over className and id attributes"
+    description: "Prefer JSX class and id shorthands (.class and #id) over class/className and id attributes"
     fixable: true
     defaultSeverity: "error"
-    capabilities: {
-      requires: ["react"]
-    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -27,12 +24,13 @@ export const preferJsxShorthandRule: Rule = {
 
     tree.visit "JSXElement", (node) ->
       attrs := tree.jsxAttributes(node, { requireOpeningAtStart: true })
-      runEnd := leadingShorthandRunEnd(attrs)
+      classAttribute := ctx.parseOptions.react ? "className" : "class"
+      runEnd := leadingShorthandRunEnd(attrs, classAttribute)
 
       for attr, attrIndex of attrs
         continue unless attrIndex <= runEnd
         attrName := attr.name
-        continue unless attrName is "className" or attrName is "id"
+        continue unless attrName is classAttribute or attrName is "id"
         val := attr.quotedValue
         continue unless val?
 
@@ -41,7 +39,7 @@ export const preferJsxShorthandRule: Rule = {
         continue if rawVal.includes("#{") or rawVal.includes("${")
 
         var shorthand: string | undefined = undefined
-        if attrName is "className"
+        if attrName is classAttribute
           classes := rawVal.split(/\s+/)
           allValid := classes.every (c) -> VALID_IDENTIFIER.test(c)
           continue unless allValid and classes.length > 0
@@ -56,8 +54,8 @@ export const preferJsxShorthandRule: Rule = {
         continue if startPos is undefined or reportedStarts.has(startPos)
 
         slice := source.slice(startPos)
-        regex := attrName is "className"
-          ? /^\s*className\s*=\s*(?:"[^"]*"|'[^']*')/
+        regex := attrName is classAttribute
+          ? new RegExp(`^\\s*${classAttribute}\\s*=\\s*(?:"[^"]*"|'[^']*')`)
           : /^\s*id\s*=\s*(?:"[^"]*"|'[^']*')/
 
         match := slice.match(regex)

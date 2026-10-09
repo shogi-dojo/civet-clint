@@ -1,0 +1,60 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-at-shorthand"
+DIAL := { autoLet: true, react: true }
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+
+function expectAtEquivalent(source: string)
+  res := fix(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
+  fixed
+
+function unchanged(source: string)
+  res := fix(source)
+  expect(res.fixedSource ?? source).toBe(source)
+
+describe "style/prefer-at-shorthand", ->
+  it "rewrites 'this.x' to '@x'", ->
+    expect(expectAtEquivalent("this.x = 1\n")).toBe("@x = 1\n")
+
+  it "rewrites 'this?.x' to '@?.x'", ->
+    expect(expectAtEquivalent("this?.x\n")).toBe("@?.x\n")
+
+  it "rewrites 'this[k]' to '@[k]'", ->
+    expect(expectAtEquivalent("this[k] = 2\n")).toBe("@[k] = 2\n")
+
+  it "rewrites 'this.x++' to '@x++'", ->
+    expect(expectAtEquivalent("this.x++\n")).toBe("@x++\n")
+
+  it "rewrites 'this.#p' to '@#p'", ->
+    expect(expectAtEquivalent("this.#p = 3\n")).toBe("@#p = 3\n")
+
+  it "rewrites 'return this' to 'return @'", ->
+    expect(expectAtEquivalent("return this\n")).toBe("return @\n")
+
+  it "rewrites 'fn(this)' to 'fn(@)'", ->
+    expect(expectAtEquivalent("fn(this)\n")).toBe("fn(@)\n")
+
+  it "is idempotent", ->
+    once := fix("this.x = 1\n").fixedSource!
+    twice := fix(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "style/prefer-at-shorthand guards", ->
+  it "leaves comments alone", ->
+    unchanged("// this.x in comment\n")
+
+  it "leaves string literals alone", ->
+    unchanged("s := \"this.x in string\"\n")
+
+  it "leaves variable names starting with this alone", ->
+    unchanged("thisIsAVar := 1\n")
+
+  it "leaves already-shorthand @x alone", ->
+    unchanged("@x = 1\n")

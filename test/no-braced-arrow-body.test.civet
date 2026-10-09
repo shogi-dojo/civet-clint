@@ -126,3 +126,19 @@ describe "the mis-parse this rule detects", ->
     out := compileSource("it 'x', =>\n  expect(a).toBe(1)\n", DIAL)
     expect(out).toContain("return expect(a).toBe(1)")
     expect(out).not.toContain("toBe:")
+
+
+describe "property shorthand stays an object", ->
+  it "does not repair a legitimate shorthand key on a later fix pass", ->
+    source := "f := (p) => {\n  userId: p.userId\n  points: p.score\n}\n"
+    options := {
+      rules: { [RULE]: "error", "style/prefer-property-shorthand": "error" }
+      fix: true
+      civetOptions: DIAL
+    }
+    first := lintPhased(source, options)
+    fixed := first.fixedSource ?? source
+    second := lintPhased(fixed, options)
+    expect(second.fixedSource).toBeUndefined()
+    expect(second.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+    expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))

@@ -183,6 +183,51 @@ export class SyntaxTree
 
     rawList := @extractRawAttributes(jsxElementNode, options.requireOpeningAtStart is true)
     for attr of rawList
+      // Civet 0.11.5 can leave whitespace strings between sibling shorthand
+      // attribute tuples. They are separators, not attributes or spread barriers.
+      continue if typeof attr is "string" and attr.trim() is ""
+      if attr?.type is "JSXAttribute"
+        attrs.push(@normalizeJsxAttribute(attr))
+        continue
+      // Civet 0.11.5 wraps each shorthand tuple in a leading-whitespace pair,
+      // unlike named attributes. Preserve that wrapper's start while exposing
+      // the identifier and braced source range to the JSX shorthand rules.
+      if Array.isArray(attr) and attr[0]?.token? and Array.isArray(attr[1]) and
+        attr[1].length is 1 and Array.isArray(attr[1][0]) and
+        attr[1][0][0]?.type is "Identifier" and attr[1][0][1] is "={"
+        shorthand := attr[1][0]
+        exprSpan := @range(shorthand[2])
+        attrSpan := @range(attr)
+        var bracedRange: SourceRange | undefined = undefined
+        if exprSpan and @source[exprSpan.start - 1] is "{" and @source[exprSpan.end] is "}"
+          bracedRange = { start: exprSpan.start - 1, end: exprSpan.end + 1 }
+        attrs.push({
+          name: shorthand[0].name
+          expression: shorthand[2]
+          range: attrSpan
+          start: attrSpan?.start
+          bracedRange
+          isSpread: false
+        })
+        continue
+      // Civet 0.11.5 lowers `<C {name} />` to a tuple of the identifier, a
+      // synthetic `={` marker, the identifier value, and a closing brace.
+      if Array.isArray(attr) and attr[0]?.type is "Identifier" and attr[1] is "={"
+        shorthandName := attr[0].name
+        shorthandExpr := attr[2]
+        exprSpan := @range(shorthandExpr)
+        var shorthandRange: SourceRange | undefined = undefined
+        if exprSpan and @source[exprSpan.start - 1] is "{" and @source[exprSpan.end] is "}"
+          shorthandRange = { start: exprSpan.start - 1, end: exprSpan.end + 1 }
+        attrs.push({
+          name: shorthandName
+          expression: shorthandExpr
+          range: @range(attr)
+          start: shorthandRange?.start
+          bracedRange: shorthandRange
+          isSpread: false
+        })
+        continue
       name := @extractAttributeName(attr)
       range := @range(attr)
       body := if Array.isArray(attr) then attr[1] else undefined
@@ -201,6 +246,10 @@ export class SyntaxTree
       var expression: any = undefined
       if Array.isArray(braced)
         expression = braced.slice(1, -1).find (part: any) -> part? and part isnt "" and typeof part isnt "string"
+      // Civet 0.11.5 represents `{name}` as an identifier in the attribute-name
+      // slot and synthetic `={` / `}` strings in the value slot.
+      oldShorthand := Array.isArray(body) and body[0]?.type is "Identifier"
+      expression ?= body[0] if oldShorthand
       openBrace := if Array.isArray(braced) then braced[0] else undefined
       closeBrace := if Array.isArray(braced) then braced[braced.length - 1] else undefined
       openSpan := @range(openBrace)
@@ -208,6 +257,10 @@ export class SyntaxTree
       var bracedRange: SourceRange | undefined = undefined
       if openSpan and closeSpan
         bracedRange = { start: openSpan.start, end: closeSpan.end }
+      else if oldShorthand and expression?
+        exprSpan := @range(expression)
+        if exprSpan and @source[exprSpan.start - 1] is "{" and @source[exprSpan.end] is "}"
+          bracedRange = { start: exprSpan.start - 1, end: exprSpan.end + 1 }
       leadingSpan := if Array.isArray(attr) then @range(attr[0]) else undefined
       equalsSpan := @range(equals)
       var start: number | undefined = leadingSpan?.start
@@ -217,9 +270,67 @@ export class SyntaxTree
       attrs.push({ name, value, range, start, equals, quotedValue, expression, bracedRange, isSpread })
     attrs
 
+  private normalizeJsxAttribute(attr: any): JsxAttribute
+    name := @extractAttributeName(attr)
+    hasExplicitName := Array.isArray(attr.name) or typeof attr.name is "string"
+    attrSpan := @range(attr)
+    rawTokens := @tokens(attr)
+    eqToken := rawTokens.find (token) -> token.value is "=" and token.raw is "="
+    equals := if eqToken then { token: "=", $loc: { pos: eqToken.range.start, length: 1 } } else undefined
+    equalsSpan := if eqToken then eqToken.range else undefined
+    value := attr.value
+
+    var expression: any = undefined
+    if value? and typeof value is "object"
+      walkAst value, (node) ->
+        return unless node? and typeof node is "object" and typeof node.type is "string"
+        // The first typed node is the actual expression in both Civet 0.11.15's
+        // tuple-based representation and 0.11.16's JSXAttribute node.
+        expression ?= node
+
+    quotedValue := if typeof value is "string" and (
+      (value.startsWith('"') and value.endsWith('"')) or
+      (value.startsWith("'") and value.endsWith("'"))
+    ) then value else undefined
+
+    openToken := rawTokens.find (token) -> token.value is "{" and token.raw is "{"
+    closeToken := [...rawTokens].reverse().find (token) -> token.value is "}" and token.raw is "}"
+    var bracedRange: SourceRange | undefined = undefined
+    if openToken and closeToken
+      bracedRange = { start: openToken.range.start, end: closeToken.range.end }
+    else if not hasExplicitName and expression?
+      exprSpan := @range(expression)
+      if exprSpan and @source[exprSpan.start - 1] is "{" and @source[exprSpan.end] is "}"
+        bracedRange = { start: exprSpan.start - 1, end: exprSpan.end + 1 }
+
+    var start: number | undefined = undefined
+    if hasExplicitName and name? and equalsSpan
+      start = equalsSpan.start - name.length
+      while start > 0 and /\s/.test(@source[start - 1])
+        start--
+    else if bracedRange
+      start = bracedRange.start
+    else if attrSpan
+      start = attrSpan.start
+
+    isSpread := not name? and rawTokens.some (token) -> token.value is "..."
+    { name, value, range: attrSpan, start, equals, quotedValue, expression, bracedRange, isSpread }
+
   private extractRawAttributes(jsxElement: any, requireOpeningAtStart: boolean): any[]
+    tree := this
     children := jsxElement?.children
     return [] unless Array.isArray(children)
+
+    // Civet 0.11.16 exposes JSX attributes as named nodes. Collect only nodes
+    // whose direct parent is this element, so nested JSX children cannot leak
+    // their attributes into the opening tag.
+    normalized: any[] := []
+    walkAst children, (node) ->
+      normalized.push(node) if node?.type is "JSXAttribute" and node.parent is jsxElement
+    if normalized.length > 0
+      normalized.sort (left, right) ->
+        (tree.range(left)?.start ?? 0) - (tree.range(right)?.start ?? 0)
+      return normalized
 
     isOpenAngle := (c: any) -> c is "<" or c?.token is "<"
     extractName := @extractAttributeName.bind(this)
@@ -232,6 +343,20 @@ export class SyntaxTree
         // Keep non-named entries. They are ordering barriers for `.class`/`#id`
         // lowering even though another rule may not inspect them directly.
         return value
+      // The 0.11.5 JSX shape adds an array layer around each attribute and then
+      // another around the attribute list. Flatten that wrapper while preserving
+      // source order; leave spread entries intact as barriers between attributes.
+      flattened: any[] := []
+      for item of value
+        if isAttr item
+          flattened.push(item)
+        else if Array.isArray(item)
+          nested := asAttributeList(item)
+          if nested
+            flattened.push(...nested)
+          else if tree.tokens(item).some((token) -> token.value is "...")
+            flattened.push(item)
+      return flattened if flattened.length > 0
       undefined
 
     var opening: any[] | undefined = undefined
@@ -240,7 +365,11 @@ export class SyntaxTree
     else if Array.isArray(children[0]) and children[0].some(isOpenAngle)
       opening = children[0]
     else
-      return [] if requireOpeningAtStart
+      if requireOpeningAtStart
+        elementSpan := @range(jsxElement)
+        openPos := if elementSpan then @source.indexOf("<", elementSpan.start) else -1
+        return [] unless elementSpan and openPos >= 0 and
+          @source.slice(elementSpan.start, openPos).trim() is ""
       if children.some(isOpenAngle)
         opening = children
       else
@@ -254,12 +383,26 @@ export class SyntaxTree
     []
 
   private extractAttributeName(attr: any): string | undefined
+    if attr?.type is "JSXAttribute"
+      rawName := attr.name
+      if Array.isArray(rawName) and typeof rawName[0] is "string"
+        return rawName[0]
+      if typeof rawName is "string"
+        return rawName
+      var shorthand: string | undefined = undefined
+      if attr.value? and typeof attr.value is "object"
+        walkAst attr.value, (node) ->
+          shorthand ?= node.name if node?.type is "Identifier" and typeof node.name is "string"
+      return shorthand
+    return attr[0].name if Array.isArray(attr) and attr[0]?.type is "Identifier" and attr[1] is "={"
     return undefined unless Array.isArray(attr) and attr.length >= 2
     attrBody := attr[1]
     return undefined unless Array.isArray(attrBody) and attrBody.length >= 2
     namePart := attrBody[0]
     if Array.isArray(namePart) and typeof namePart[0] is "string"
       namePart[0]
+    else if namePart?.type is "Identifier" and typeof namePart.name is "string"
+      namePart.name
     else if typeof namePart is "string"
       namePart
     else
@@ -274,15 +417,18 @@ export class SyntaxTree
 
   // Whether a raw node is nested under one of the requested normalized node types.
   // Rules use this helper instead of depending on Civet's parent layout directly.
-  hasAncestorType(node: any, types: string | string[]): boolean
+  nearestAncestor(node: any, types: string | string[]): any
     wanted := new Set(if Array.isArray(types) then types else [types])
     seen := new Set<any>()
     var current = node?.parent
     while current? and typeof current is "object" and not seen.has(current)
-      return true if wanted.has(current.type)
+      return current if wanted.has(current.type)
       seen.add(current)
       current = current.parent
-    false
+    undefined
+
+  hasAncestorType(node: any, types: string | string[]): boolean
+    @nearestAncestor(node, types)?
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import civet from "@danielx/civet"
 import { lintSource, compileSource } from "../src/engine.civet"
 
 RULE := "style/no-trailing-semicolons"
@@ -77,3 +78,41 @@ describe "style/no-trailing-semicolons never proposes a rejected fix", ->
     source := "it 'x', =>\n  f()\n  g();\n"
     once := fix(source)
     expect(once.fixedSource ?? source).toBe(source)
+
+describe "style/no-trailing-semicolons decides function tails from syntax", ->
+  check := (source: string, options?: Record<string, any>) ->
+    lintSource(source, {
+      rules: { [RULE]: "error" }
+      ruleOptions: options ? { [RULE]: options } : undefined
+    }).diagnostics.filter (d) -> d.ruleId is RULE
+
+  it "never compiles to learn that a function's last `;` is load-bearing", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    source := "f = =>\n  g()\n  h();\n"
+    res := lintSource(source, { rules: { [RULE]: "error" }, compiler })
+    expect(res.diagnostics).toHaveLength(0)
+    // One parse and one baseline compile by the engine; none by the rule.
+    expect(calls).toBe(2)
+
+  it "reports a semicolon in the middle of a function body", ->
+    expect(check("f = =>\n  g();\n  h()\n").map (d) -> d.line).toEqual([2])
+
+  it "reports the last semicolon of a void function and of a constructor", ->
+    expect(check("function f(): void\n  g()\n  h();\n")).toHaveLength(1)
+    expect(check("class A\n  constructor()\n    g()\n    h();\n")).toHaveLength(1)
+
+  it "looks past closers and comments to find the function's end", ->
+    expect(check("f = =>\n  if a\n    g();\n  // done\n")).toHaveLength(0)
+    expect(check("f = =>\n  if a\n    g();\n  h()\n")).toHaveLength(1)
+
+  it "treats both arms of a branch as the tail", ->
+    expect(check("f = =>\n  if a\n    g();\n  else\n    h()\n")).toHaveLength(0)
+
+  it "verifyFunctionTails compile-checks the tail as well", ->
+    expect(check("f = =>\n  g()\n  h();\n", { verifyFunctionTails: true })).toHaveLength(0)
+    expect(check("for x of xs\n  g(x);\n")).toHaveLength(1)

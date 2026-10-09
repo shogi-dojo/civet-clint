@@ -1,0 +1,40 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferAtShorthandRule: Rule = {
+  id: "style/prefer-at-shorthand"
+  meta: {
+    description: "Prefer '@' shorthand over 'this.' and bare 'this'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    for tok of tree.tokens()
+      continue unless tok.value is "this" and tok.raw is "this" and not tok.synthetic
+      pos := tok.range.start
+      end := tok.range.end
+      continue if seen.has(pos)
+      continue if intersectsRange(ignoredRanges, pos, end)
+      continue unless source.slice(pos, end) is "this"
+      seen.add(pos)
+
+      isDot := source.slice(pos, end + 1) is "this."
+      fixEnd := isDot ? end + 1 : end
+
+      ctx.report({
+        ruleId: "style/prefer-at-shorthand"
+        message: isDot ? "Use '@' instead of 'this.'" : "Use '@' instead of 'this'"
+        pos
+        fix: {
+          start: pos
+          end: fixEnd
+          replacement: "@"
+        }
+      })
+}

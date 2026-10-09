@@ -1,0 +1,286 @@
+import type { CivetCompiler, Rule, RuleContext, Fix } from "../types.civet"
+import type { SyntaxTree } from "../syntax.civet"
+import { intersectsRange, applyEdits, normalizeBlockBraceStyle, normalizeSemicolonStyle, normalizeWhitespaceStyle, normalizeInequalityStyle } from "../utils.civet"
+import { compileForOutput } from "../compiler.civet"
+
+const DISALLOWED_OPERAND_TYPES = new Set([
+  "Existence"
+  "BinaryExpression"
+  "CompareOp"
+  "LogicOp"
+])
+
+// A one-liner head whose body starts with one of these is rewritten to the postfix
+// form (`if (not a) return x` -> `return x unless a`). The prefix spelling
+// (`unless a return x`, `unless a throw x`) is not an option: bare `unless a f()`
+// parses as a call `a(f())`, and a value-bearing `unless a return x` appends a
+// stray `return` to the emitted block. Erik's style guide asks for the postfix
+// form anyway ("For one-liners like `if (...) return`, prefer `return if ...`").
+const POSTFIXABLE_BODY = /^(?:return\b|throw\b|continue\b|break\b)/
+
+// A one-liner body led by a bare identifier (`f()`, `x = 1`) also moves to the
+// postfix form; anything with less conventional shape is left alone.
+const EXPRESSION_BODY = /^[A-Za-z_$][A-Za-z0-9_$.]*\s*(?:[=(]|$)/
+
+type Candidate = { pos: number, fix: Fix }
+
+// Postfix rewrites can flip how Civet parses the *surrounding* braced arrow body:
+// rewriting the only statement of `() => { if (!a) setHovered(null); }` yields
+// `() => { setHovered(null) unless a; }`, whose body now reads as an object
+// literal method. Each candidate is therefore verified by compiling with and
+// without it and comparing brace-normalized output; the set is bisected so a
+// file where every site is provable costs two compiles.
+function safeBodies(
+  source: string,
+  dial: Record<string, any>,
+  baselineOutput: string | undefined,
+  candidates: Candidate[],
+  compiler?: CivetCompiler
+): Candidate[]
+  return candidates if candidates.length is 0
+
+  normalize := (code: string): string ->
+    normalizeWhitespaceStyle(normalizeSemicolonStyle(normalizeBlockBraceStyle(normalizeInequalityStyle(code))))
+
+  baseline := if baselineOutput?
+    normalize(baselineOutput)
+  else
+    base := compileForOutput(source, { dial, compiler })
+    return [] unless base.ok
+    normalize(base.output!)
+
+  // Bisection may revisit its accepted union. Cache each edit set so the
+  // common all-safe case costs one compile, and never retry a rejected set.
+  verified := new Map<string, boolean>()
+  groupIsSafe := (group: Candidate[]): boolean ->
+    return true if group.length is 0
+    key := group.map((c) -> c.pos).sort((a, b) -> a - b).join(",")
+    cached := verified.get(key)
+    return cached if cached?
+    { output } := applyEdits(source, group.map((c) -> c.fix))
+    return false if output is source
+    res := compileForOutput(output, { dial, compiler })
+    safe := res.ok and normalize(res.output!) is baseline
+    verified.set(key, safe)
+    safe
+
+  accepted: Candidate[] := []
+  partition := (group: Candidate[], depth: number): void ->
+    return if group.length is 0
+    if groupIsSafe(group)
+      accepted.push(...group)
+      return
+    return if group.length is 1 or depth > 24
+    mid := Math.floor(group.length / 2)
+    partition(group.slice(0, mid), depth + 1)
+    partition(group.slice(mid), depth + 1)
+
+  partition(candidates, 0)
+  accepted.sort (a, b) -> a.fix.start - b.fix.start
+
+  // Two removals that are each safe alone can still interact; re-verify the union
+  // and shrink it until it holds, mirroring style/no-trailing-semicolons.
+  var result = accepted
+  while result.length > 0 and not groupIsSafe(result)
+    result = result.slice(0, Math.floor(result.length / 2))
+  result
+
+export const preferUnlessRule: Rule = {
+  id: "style/prefer-unless"
+  meta: {
+    description: "Prefer unless/until and loop for negated conditions and infinite while loops"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+    // Index source keywords once. Calling tree.tokens(node) for every nested if
+    // repeatedly walks overlapping subtrees and scales quadratically.
+    sourceKeywords := tree.tokens().filter (token) ->
+      not token.synthetic and ["if", "while"].includes(token.raw.trim())
+
+    findHeadKeyword := (word: string, node: any, conditionEnd: number) ->
+      nodeSpan := tree.range(node)
+      return undefined unless nodeSpan?
+      sourceKeywords.find (token) ->
+        token.value.trim() is word and
+        token.range.start >= nodeSpan.start and token.range.end <= conditionEnd
+
+    // Postfix rewrites reorder a whole one-liner, so the emitted `if (!a) { ... }`
+    // gains a block around the statement and any trailing `;` changes position.
+    // The declared deltas prove both dimensions are the only differences. Prefix
+    // rewrites (block heads, postfix conditions) stay byte-identical and never
+    // consult the builder: the engine accepts them on the byte-identical fast
+    // path before reaching it.
+    edits: Fix[] := []
+    ctx.declareEquivalenceReference?.(["block-brace-style", "semicolon-style", "whitespace-style", "inequality-style"], (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    candidates: Candidate[] := []
+
+    tree.visit "IfStatement", (node) ->
+      return if node.negated
+
+      cond := node.condition
+      return unless cond?
+
+      condSpan := tree.range(cond)
+      return unless condSpan?
+
+      ifTok := findHeadKeyword("if", node, condSpan.start)
+      return unless ifTok?
+
+      expr := cond.expression
+      var conditionText: string | undefined = undefined
+      if expr?.type is "UnaryExpression"
+        pre := expr.pre
+        return unless Array.isArray(pre) and pre.length > 0
+        preFlat := pre.flat(2).filter(Boolean)
+        opToken := preFlat.find (p: any) ->
+          p.token is "!" or p.token is "not" or p.token is "not "
+        return unless opToken?
+
+        operand := expr.expression
+        return unless operand? and not Array.isArray(operand)
+        return if DISALLOWED_OPERAND_TYPES.has(operand.type)
+        conditionText = tree.text(operand).trim()
+      else
+        // `if a is not b` is the same whole-condition negation as `unless a is b`.
+        // Only accept a direct comparison token in the condition's top-level
+        // children; an `is not` nested in a call or mixed with `and`/`or` is not
+        // the whole condition and must keep its precedence.
+        parts := tree.children(cond)
+        comparisons := parts.filter (part: any) ->
+          part?.token and ["!==", "===", "==", "!=", "<", ">", "<=", ">=", "&&", "||"].includes(part.token)
+        opIndex := parts.findIndex (part: any) ->
+          part?.token is "!==" and tree.text(part).trim() is "is not"
+        return unless opIndex >= 0 and comparisons.length is 1
+        operands := parts.filter (part: any) -> part?.type?
+        return unless operands.length is 2
+        leftText := tree.text(operands[0]).trim()
+        rightText := tree.text(operands[1]).trim()
+        return unless leftText.length > 0 and rightText.length > 0
+        // The inequality delta only proves operands without nested parentheses.
+        // These groups always fail verification; avoid compiling the whole file
+        // to rediscover that limit (e.g. `zone is not edgeZone(fraction)`).
+        return if /[()]/.test(leftText) or /[()]/.test(rightText)
+        conditionText = `${leftText} is ${rightText}`
+
+      start := ifTok.range.start
+      end := condSpan.end
+
+      // A braced head belongs to style/prefer-indented-blocks first. That rule only
+      // recognizes a head that still has its parens, so rewriting `if (!a) {` into
+      // `unless a {` here would strand the braces with no rule able to remove them.
+      headLineEnd := source.indexOf("\n", start)
+      headLine := source.slice(start, headLineEnd < 0 ? source.length : headLineEnd)
+      return if headLine.trim().endsWith("{")
+
+      return if seen.has(start)
+      return if intersectsRange(ignoredRanges, start, end)
+      seen.add(start)
+
+      operandText := conditionText!
+      bodyRaw := headLine.slice(end - start)
+      bodyText := bodyRaw.trim()
+
+      if bodyText.length > 0
+        // One-liner with a same-line statement: `unless a <stmt>` mis-parses, so
+        // the statement moves to the postfix form instead. The statement is moved
+        // verbatim, so only the condition region needed the string/comment check
+        // above; the body itself must simply contain nothing that changes meaning
+        // when ` unless a` is appended after it. String contents are blanked out
+        // first so a brace inside a template literal is not mistaken for an object
+        // literal.
+        guardedChars := bodyRaw.split("")
+        for range of tree.stringRanges()
+          s := Math.max(range.start, end) - end
+          e := Math.min(range.end, end + bodyRaw.length) - end
+          continue if e <= 0 or s >= bodyRaw.length
+          for let k = s; k < e; k++
+            guardedChars[k] = " "
+        guardedBody := guardedChars.join("").trim()
+        return unless POSTFIXABLE_BODY.test(bodyText) or EXPRESSION_BODY.test(bodyText)
+        return if /[{}<>]|\b(?:then|else|if|unless)\b|=>|(?:^|[^\\])#|\/\/|\/\*/.test(guardedBody)
+        var core = bodyText
+        if core.endsWith(";")
+          // Dropping a function-tail terminator on a non-exit statement enables
+          // an implicit return. Keep it in place rather than compiling an edit
+          // that the equivalence gate will always reject.
+          if not POSTFIXABLE_BODY.test(core)
+            owner := tree.nearestAncestor(node, ["FunctionExpression", "FunctionDeclaration", "ArrowFunction", "MethodDefinition"])
+            ownerSpan := tree.range(owner) if owner?
+            bodyEnd := end + bodyRaw.trimEnd().length
+            return if ownerSpan? and /^[\s;}]*$/.test(source.slice(bodyEnd, ownerSpan.end))
+          core = core.slice(0, -1).trimEnd()
+        return if core.includes(";")
+        // The trailing `;` is dropped with the rewrite, and the semicolon-style
+        // delta covers its loss: on Civet 0.11.5 a postfix statement followed by
+        // `;` (`return null unless a;`) mis-compiles into a call, so the `;` must
+        // not survive the rewrite even on compilers where it merely relocates.
+        bodyEnd := end + bodyRaw.trimEnd().length
+        replacement := `${core} unless ${operandText}`
+        candidates.push({
+          pos: start
+          fix: { start, end: bodyEnd, replacement }
+        })
+        return
+
+      replacement := `unless ${operandText}`
+      candidates.push({
+        pos: start
+        fix: { start, end, replacement }
+      })
+
+    tree.visit "IterationStatement", (node) ->
+      return unless node.subtype is "while"
+      cond := node.condition
+      return unless cond?
+      condSpan := tree.range(cond)
+      return unless condSpan?
+      whileTok := findHeadKeyword("while", node, condSpan.start)
+      return unless whileTok?
+
+      start := whileTok.range.start
+      end := condSpan.end
+      headLineEnd := source.indexOf("\n", start)
+      headLine := source.slice(start, headLineEnd < 0 ? source.length : headLineEnd)
+      return if headLine.trim().endsWith("{")
+      return if headLine.slice(end - start).trim().length > 0
+      return if intersectsRange(ignoredRanges, start, end) or seen.has(start)
+      seen.add(start)
+
+      expr := cond.expression
+      var replacement: string = ""
+      if expr?.type is "UnaryExpression"
+        pre := (expr.pre or []).flat(2).filter(Boolean)
+        opToken := pre.find (part: any) -> part.token is "!" or part.token is "not" or part.token is "not "
+        operand := expr.expression
+        return unless opToken? and operand? and not Array.isArray(operand)
+        return if DISALLOWED_OPERAND_TYPES.has(operand.type)
+        replacement = `until ${tree.text(operand).trim()}`
+      else if expr?.type is "Literal" and expr.raw is "true"
+        replacement = "loop"
+      else
+        return
+
+      candidates.push({ pos: start, fix: { start, end, replacement } })
+
+    for candidate of safeBodies(source, ctx.parseOptions, ctx.baselineOutput, candidates, ctx.compiler)
+      edits.push(candidate.fix)
+      ctx.report({
+        ruleId: "style/prefer-unless"
+        message: `Use '${candidate.fix.replacement}' instead of '${source.slice(candidate.fix.start, candidate.fix.end)}'`
+        pos: candidate.pos
+        fix: candidate.fix
+      })
+}

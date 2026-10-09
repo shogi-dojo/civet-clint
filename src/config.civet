@@ -1,7 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ClintConfig, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleEntry, RuleLevel, RuleOptions, SkippedRule } from "./types.civet"
+import type { ClintConfig, CompilerPreference, ExceptionEntry, CompileDial, CompileOptions, ConfigOverride, ResolvedConfig, RuleEntry, RuleLevel, RuleOptions, SkippedRule } from "./types.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
+import { resolveCivetCompiler } from "./compiler.civet"
 
 const TOP_LEVEL_COMPILE_OPTIONS = new Set([
   "filename"
@@ -27,7 +28,7 @@ const TOP_LEVEL_COMPILE_OPTIONS = new Set([
 // `civet.json` always overrides it, so a `default`-preset user with a Coffee-flavored
 // `civet.json` still gets Coffee parsing.
 export interface PresetDefinition
-  rules: Record<string, RuleLevel>
+  rules: Record<string, RuleEntry>
   civetOptions: CompileDial
   compileOptions: CompileOptions
 
@@ -44,6 +45,11 @@ export const PRESETS: Record<string, PresetDefinition> = {
   }
   "coffee-react": {
     rules: {
+      // Cleanup of this tool's own artifact rather than a taste call: parens
+      // orphaned by prefer-implicit-return. It cannot fire unless that rule ran,
+      // so it costs nothing to carry here and means the cleanup does not depend
+      // on which preset you started from.
+      "style/no-redundant-jsx-parens": "error"
       "style/prefer-word-operators": "error"
       "style/prefer-concise-arrow": "error"
       "style/prefer-jsx-shorthand": "error"
@@ -59,6 +65,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/no-pipe-operator": "error"
       "style/prefer-existential-check": "warn"
       "style/prefer-jsx-attr-shorthand": "warn"
+      "style/no-braced-arrow-body": "error"
       "style/prefer-ampersand-shorthand": "warn"
       "style/no-single-param-arrow-without-parens": "warn"
       "style/prefer-named-export-default": "warn"
@@ -99,6 +106,58 @@ export const PRESETS: Record<string, PresetDefinition> = {
     }
     compileOptions: {}
   }
+  // Idiomatic Civet preset: bundles neutral-dial idiom rules covering standard
+  // Civet style without legacy CoffeeScript options.
+  "civet-idiomatic": {
+    rules: {
+      "style/prefer-word-operators": "error"
+      "style/prefer-concise-arrow": "error"
+      "style/prefer-walrus-declarations": "error"
+      "style/prefer-terse-imports": "error"
+      "style/no-trailing-commas": ["error", { lineEndings: true }]
+      "style/prefer-indented-object": "error"
+      "style/prefer-indented-blocks": "error"
+      // Fixes the binding-safe named arrows, while non-fixable lexical/scope cases
+      // remain advisory and must not turn a clean --check into a failure.
+      "style/prefer-function-declaration": "warn"
+      "style/no-trailing-semicolons": "error"
+      "style/prefer-implicit-block-call": "error"
+      "style/prefer-implicit-call-args": "error"
+      "style/prefer-implicit-arrow-arg": "error"
+      "style/no-braced-arrow-body": "error"
+      "style/prefer-jsx-shorthand": "error"
+      "style/prefer-bare-jsx-values": "error"
+      "style/prefer-unclosed-jsx": "error"
+      "style/no-redundant-jsx-parens": "error"
+      "style/prefer-unless": "error"
+      "style/prefer-at-shorthand": "error"
+      "style/prefer-length-shorthand": "error"
+      "style/prefer-typeof-shorthand": "error"
+      "style/prefer-in-operator": "error"
+      "style/prefer-new-shorthand": "error"
+      "style/prefer-slice-shorthand": "error"
+      "style/prefer-range-loop": "warn"
+      "style/prefer-switch": "warn"
+      "style/prefer-property-shorthand": "error"
+      "style/prefer-property-group-shorthand": "error"
+      // style/prefer-implicit-return is deliberately NOT in this preset. Civet's
+      // implicit-return semantics are subtle enough that the rule still proposes
+      // fixes the equivalence gate rejects -- 22 sites on a 441-file production
+      // codebase, each one making `clint --write` non-convergent and `--check`
+      // exit non-zero on conformant code. The rule is correct for the shapes it
+      // does handle and stays available opt-in; it should not gate CI by default
+      // until that number is zero.
+      "style/prefer-bare-for": "error"
+      "style/prefer-bare-conditions": "error"
+      "style/prefer-existential-check": "warn"
+      "style/prefer-optional-type": "error"
+      "style/prefer-postfix-conditional": "error"
+      "style/prefer-ampersand-shorthand": "warn"
+      "style/prefer-jsx-attr-shorthand": "warn"
+    }
+    civetOptions: {}
+    compileOptions: {}
+  }
 }
 
 export function findConfigFile(cwd: string = process.cwd()): string | undefined
@@ -114,6 +173,44 @@ export function findConfigFile(cwd: string = process.cwd()): string | undefined
     if fs.existsSync(p)
       return p
   undefined
+
+export const EXCEPTIONS_FILE = "clint.exceptions.json"
+
+// Load the exceptions file: findings the project has decided to live with.
+//
+//   { "exceptions": [
+//       { "file": "src/a.civet", "line": 12, "rule": "style/prefer-switch", "reason": "..." }
+//   ] }
+//
+// Auto-discovered beside the config; `exceptions` in the config names another
+// path. A configured file that is missing is fatal, like `civetConfig`: silently
+// linting without it would turn every suppressed finding back into a failure.
+export function loadExceptions(explicitPath: string | undefined, baseDir: string): { path?: string, entries: ExceptionEntry[] }
+  resolved := path.resolve(baseDir, explicitPath or EXCEPTIONS_FILE)
+  unless fs.existsSync(resolved)
+    throw new Error(`Exceptions file not found: ${resolved}`) if explicitPath
+    return { entries: [] }
+
+  var parsed: any
+  try
+    parsed = JSON.parse(fs.readFileSync(resolved, "utf8"))
+  catch err
+    throw new Error(`Failed to parse exceptions file at ${resolved}: ${(err as Error).message}`)
+  unless Array.isArray(parsed?.exceptions)
+    throw new Error(`Exceptions file ${resolved} must contain an "exceptions" array`)
+
+  dir := path.dirname(resolved)
+  entries: ExceptionEntry[] := []
+  for each item, index of parsed.exceptions as any[]
+    where := `${resolved}: exceptions[${index}]`
+    unless typeof item?.file is "string" and item.file.length > 0
+      throw new Error(`${where} needs a "file" path`)
+    unless typeof item.rule is "string" and item.rule.length > 0
+      throw new Error(`${where} needs a "rule" id`)
+    if item.line? and not (Number.isInteger(item.line) and item.line > 0)
+      throw new Error(`${where} has an invalid "line": expected a positive integer`)
+    entries.push({ file: path.resolve(dir, item.file), item.rule, item.line, item.reason })
+  { path: resolved, entries }
 
 export function findCivetConfigFile(cwd: string = process.cwd()): string | undefined
   candidates := [
@@ -382,6 +479,8 @@ export function loadConfig(
         throw new Error("Each override must have a 'files' string or array of strings")
       if override.preset? and not PRESETS[override.preset]
         throw new Error(`Unknown preset in override: "${override.preset}". Available presets: ${Object.keys(PRESETS).join(", ")}`)
+      if override.compiler? and override.compiler isnt "project" and override.compiler isnt "bundled"
+        throw new Error(`Invalid compiler preference "${override.compiler}": expected "project" or "bundled"`)
       if override.rules?
         for ruleId of Object.keys(override.rules)
           normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
@@ -393,6 +492,12 @@ export function loadConfig(
   { dial: userDial, compileOptions: userCompileOptions, resolvedPath: resolvedCivetConfigPath } := loadCivetConfig(explicitCivetConfigPath, cwd)
   civetOptions := { ...presetDef.civetOptions, ...userDial }
   compileOptions := { ...presetDef.compileOptions, ...userCompileOptions }
+  var compilerPreference: CompilerPreference = userConfig.compiler or "project"
+  unless compilerPreference is "project" or compilerPreference is "bundled"
+    throw new Error(`Invalid compiler preference "${compilerPreference}": expected "project" or "bundled"`)
+  compilerRoot := configPath ? path.dirname(configPath) : cwd
+  exceptions := loadExceptions(userConfig.exceptions, compilerRoot)
+  compilerResolution := resolveCivetCompiler(compilerRoot, compilerPreference)
 
   skippedRules := computeSkippedRules(mergedRules, civetOptions, registry)
   validateRuleConflicts(mergedRules, registry)
@@ -404,7 +509,15 @@ export function loadConfig(
     civetConfigPath: resolvedCivetConfigPath
     civetOptions
     compileOptions
+    compiler: compilerResolution.compiler
+    compilerVersion: compilerResolution.version
+    compilerPath: compilerResolution.path
+    compilerPreference
+    compilerUsedBundled: compilerResolution.usedBundled
+    compilerWarning: compilerResolution.warning
     configPath
+    exceptionsPath: exceptions.path
+    exceptions: exceptions.entries
     skippedRules
     overrides: userConfig.overrides
     matchingOverrides: []
@@ -423,6 +536,7 @@ export function resolveConfigForFile(
   var effectiveCivetConfigPath = baseConfig.civetConfigPath
   var effectiveCivetOptions: CompileDial = { ...baseConfig.civetOptions }
   var effectiveCompileOptions: CompileOptions = { ...baseConfig.compileOptions }
+  var compilerPreference: CompilerPreference = baseConfig.compilerPreference
   var effectiveRules: Record<string, RuleLevel> = { ...baseConfig.rules }
   var effectiveRuleOptions: Record<string, RuleOptions> = { ...(baseConfig.ruleOptions or {}) }
   matchingOverrides: string[] := []
@@ -456,6 +570,9 @@ export function resolveConfigForFile(
     if override.compileOptions
       effectiveCompileOptions = { ...effectiveCompileOptions, ...override.compileOptions }
 
+    if override.compiler?
+      compilerPreference = override.compiler
+
     if override.rules
       for ruleId of Object.keys(override.rules)
         { level, options } := normalizeRuleEntry(ruleId, override.rules[ruleId], "override rule", registry)
@@ -469,6 +586,7 @@ export function resolveConfigForFile(
 
   skippedRules := computeSkippedRules(effectiveRules, effectiveCivetOptions, registry)
   validateRuleConflicts(effectiveRules, registry)
+  compilerResolution := resolveCivetCompiler(configBase, compilerPreference)
 
   {
     preset: effectivePreset
@@ -477,7 +595,15 @@ export function resolveConfigForFile(
     civetConfigPath: effectiveCivetConfigPath
     civetOptions: effectiveCivetOptions
     compileOptions: effectiveCompileOptions
+    compiler: compilerResolution.compiler
+    compilerVersion: compilerResolution.version
+    compilerPath: compilerResolution.path
+    compilerPreference
+    compilerUsedBundled: compilerResolution.usedBundled
+    compilerWarning: compilerResolution.warning
     configPath: baseConfig.configPath
+    exceptionsPath: baseConfig.exceptionsPath
+    exceptions: baseConfig.exceptions
     skippedRules
     overrides: baseConfig.overrides
     matchingOverrides

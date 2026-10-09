@@ -1,0 +1,24 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, compileSource } from "../src/engine.civet"
+
+RULE := "style/prefer-slice-shorthand"
+
+function fix(source: string)
+  lintSource(source, { rules: { [RULE]: "error" }, fix: true })
+
+describe RULE, ->
+  it "rewrites exclusive slice forms", ->
+    source := "a := xs.slice(start)\nb := xs.slice(0, end)\nc := xs.slice(start, end)\n"
+    res := fix(source)
+    expect(res.fixedSource).toBe("a := xs[>=start]\nb := xs[<end]\nc := xs[start..<end]\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(compileSource(res.fixedSource!)).toBe(compileSource(source))
+
+  it "leaves no-argument and optional-chain calls alone", ->
+    source := "a := xs.slice()\nb := xs?.slice(start)\n"
+    expect(fix(source).fixedSource).toBeUndefined()
+
+
+  it "keeps conditional slice bounds explicit", ->
+    source := "x := xs.slice(0, if count is 3 then 3 else 4)\n"
+    expect(fix(source).fixedSource).toBeUndefined()

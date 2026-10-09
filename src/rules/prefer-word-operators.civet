@@ -56,9 +56,16 @@ export const preferWordOperatorsRule: Rule = {
         wordOp := REPLACEMENT_MAP.get(actualSlice)
 
         if wordOp and not reportedStarts.has(pos)
-          continue if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
-          continue if actualSlice is "==" and not ctx.parseOptions.coffeeEq
-          continue if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
+          // Standard Civet has no `isnt`: without the CoffeeScript dial the strict
+          // inequality spells `is not` ("Use `is not` over `!==`"). With
+          // coffeeIsnt the shorter CoffeeScript form stays.
+          var replacement = wordOp
+          if actualSlice is "!==" and not ctx.parseOptions.coffeeIsnt
+            replacement = "is not"
+          else if actualSlice is "==" and not ctx.parseOptions.coffeeEq
+            continue
+          else if actualSlice is "!=" and not (ctx.parseOptions.coffeeEq and ctx.parseOptions.coffeeIsnt)
+            continue
 
           normalizedOp := REPLACEMENT_MAP.get(tok.value)
           if normalizedOp
@@ -75,12 +82,12 @@ export const preferWordOperatorsRule: Rule = {
             reportedStarts.add(pos)
             ctx.report({
               ruleId: "style/prefer-word-operators"
-              message: `Use '${wordOp}' instead of '${actualSlice}'`
+              message: `Use '${replacement}' instead of '${actualSlice}'`
               pos
               fix: {
                 start: pos
                 end: pos + len
-                replacement: wordOp
+                replacement
               }
             })
 }

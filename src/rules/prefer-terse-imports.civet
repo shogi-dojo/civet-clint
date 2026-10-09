@@ -37,6 +37,12 @@ function collectParts(node: any, tree: SyntaxTree)
         if not specifierNode?
           specifierNode = value
 
+  // Civet 0.11.5 represents keywords as plain source tokens rather than named
+  // Keyword nodes. Keep the typed-node path for newer ASTs and fall back to the
+  // syntax adapter's token view for the older layout.
+  if not importKeywordTok?
+    importKeywordTok = tree.findToken(node, "import")
+
   { importKeywordTok, specifierNode, hasBindings }
 
 function parseSpecifierSpans(input: string, dial: Record<string, any>): { pos: number, length: number }[]
@@ -112,7 +118,7 @@ export const preferTerseImportsRule: Rule = {
         return if /^\s*(?:with|assert)\b/.test trailing
 
       if importKeywordTok?
-        kwSpan := tree.range(importKeywordTok)
+        kwSpan := importKeywordTok.range ?? tree.range(importKeywordTok)
         if kwSpan
           kwPos := kwSpan.start
           return unless source.slice(kwPos, kwPos + 6) is "import"

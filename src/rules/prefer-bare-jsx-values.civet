@@ -6,9 +6,6 @@ export const preferBareJsxValuesRule: Rule = {
     description: "Prefer bare JSX attribute values (attr=value) over braced values (attr={value})"
     fixable: true
     defaultSeverity: "error"
-    capabilities: {
-      requires: ["react"]
-    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source

@@ -9,6 +9,13 @@ describe "Parity Test Suite (0.1.1 baseline)", ->
       expect(res.isEquivalencePreserved).toBe(true)
       expect(res.fixedSource).toBe("a is b and c isnt d or (e and f) or not flag")
 
+    it "rewrites ' !== ' to ' is not ' without the CoffeeScript dial", ->
+      input := "a === b and c !== d or (e && f) || !flag"
+      res := lintSource(input, { rules: { "style/prefer-word-operators": "error" }, civetOptions: { react: true }, fix: true })
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.fixedSource).toBe("a is b and c is not d or (e and f) or not flag")
+      expect(compileSource(res.fixedSource!, { react: true })).toBe(compileSource(input, { react: true }))
+
     it "negative and comment cases", ->
       input := '// a === b\ns := "=== && !"\nfoo(null)'
       res := lintSource(input, { rules: { "style/prefer-word-operators": "error" }, civetOptions: { react: true } })

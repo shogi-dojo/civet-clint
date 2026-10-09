@@ -1,0 +1,135 @@
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
+
+const SAFE_BOUND = /^(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?)$/
+export const preferRangeLoopRule: Rule = {
+  id: "style/prefer-range-loop"
+  meta: {
+    description: "Prefer Civet range loops over simple C-style for loops"
+    fixable: true
+    defaultSeverity: "warn"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    var fixes: Fix[] = []
+    ctx.declareEquivalenceReference?.("range-loop", (input: string) ->
+      return undefined if fixes.length is 0
+      applyEdits(input, fixes).output
+    )
+
+    isAssigned := (tokens: any[], name: string): boolean ->
+      significant := tokens.filter (token) -> not token.synthetic
+      for token of significant
+        continue unless token.raw.trim() is name
+        continue if intersectsRange(ignoredRanges, token.range.start, token.range.end)
+        next := source.slice(token.range.end).match(/^\s*(?:\+\+|--|\+=|-=|\*=|\/=|%=|=(?!=|>))/)
+        previous := source.slice(0, token.range.start).match(/(?:\+\+|--)\s*$/)
+        return true if next? or previous?
+      false
+
+    tree.visit "ForStatement", (node) ->
+      loopRange := tree.range(node)
+      return unless loopRange?
+      tokens := tree.tokens(node)
+      forTok := tokens.find (token) -> token.raw.trim() is "for" and not token.synthetic
+      return unless forTok?
+      openIndex := tokens.findIndex (token) -> token.raw is "(" and token.range.start >= forTok.range.end and not token.synthetic
+      return if openIndex < 0
+
+      var depth = 0
+      var closeIndex = -1
+      for let i = openIndex; i < tokens.length; i++
+        token := tokens[i]
+        continue if token.synthetic
+        if token.raw is "("
+          depth++
+        else if token.raw is ")"
+          depth--
+          if depth is 0
+            closeIndex = i
+            break
+      return if closeIndex < 0
+      openTok := tokens[openIndex]!
+      closeTok := tokens[closeIndex]!
+      semicolons := tokens.filter (token) ->
+        not token.synthetic and token.raw is ";" and token.range.start > openTok.range.end and token.range.end < closeTok.range.start
+      return unless semicolons.length is 2
+      firstSemi := semicolons[0]!
+      secondSemi := semicolons[1]!
+      initText := source.slice(openTok.range.end, firstSemi.range.start).trim()
+      conditionText := source.slice(firstSemi.range.end, secondSemi.range.start).trim()
+      updateText := source.slice(secondSemi.range.end, closeTok.range.start).trim()
+      initMatch := /^(?:let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/.exec(initText)
+      return unless initMatch
+      name := initMatch[1]!
+      initialValue := initMatch[2]!.trim()
+      condMatch := new RegExp(`^${name}\\s*(<=|>=|<|>)\\s*(.+)$`).exec(conditionText)
+      return unless condMatch
+      operator := condMatch[1]!
+      bound := condMatch[2]!.trim()
+      updateMatches := updateText is `${name}++`
+      decrementMatches := updateText is `${name}--`
+      return unless updateMatches or decrementMatches
+
+      headRange := { start: forTok.range.start, end: closeTok.range.end }
+      if intersectsRange(ignoredRanges, headRange.start, headRange.end)
+        ctx.report({
+          ruleId: "style/prefer-range-loop"
+          message: "Prefer Civet range-loop syntax for this C-style loop"
+          pos: forTok.range.start
+        })
+        return
+
+      blockRange := tree.range(node.block)
+      return unless blockRange?
+      bodyTokens := tree.tokens(node.block)
+      indexMutated := isAssigned(bodyTokens, name)
+
+      var boundMutated = false
+      if /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bound)
+        boundMutated = isAssigned(bodyTokens, bound)
+
+      var captured = false
+      tree.visit ["ArrowFunction", "FunctionExpression", "FunctionDeclaration"], (fn) ->
+        fnRange := tree.range(fn)
+        return unless fnRange? and blockRange.start <= fnRange.start and fnRange.end <= blockRange.end
+        captured = true if tree.tokens(fn).some (token) -> not token.synthetic and token.raw.trim() is name
+
+      usedAfter := tree.tokens().some (token) ->
+        token.range.start >= loopRange.end and not token.synthetic and token.raw.trim() is name and
+          not intersectsRange(ignoredRanges, token.range.start, token.range.end)
+
+      rangeSafe := not indexMutated and not boundMutated and not captured and not usedAfter and
+        SAFE_BOUND.test(initialValue) and SAFE_BOUND.test(bound) and
+        ((operator is "<" or operator is "<=") and updateMatches or
+          (operator is ">" or operator is ">=") and decrementMatches)
+
+      var replacement: string | undefined = undefined
+      if rangeSafe
+        rangeOperator := switch operator
+          when "<" then "..<"
+          when "<=" then ".."
+          when ">" then "..>"
+          when ">=" then ">.."
+          else ""
+        rangeStart := if operator is ">=" then `${initialValue} + 1` else initialValue
+        replacement = `for ${name} of [${rangeStart}${rangeOperator}${bound}]`
+      else
+        // The C-style head still has a fully equivalent Civet spelling. This is
+        // the conservative fallback whenever a range would alter scope, capture,
+        // mutation, or bound-evaluation behavior.
+        replacement = `for ${name} .= ${initialValue}; ${conditionText}; ${updateText}`
+
+      fix: Fix := { start: headRange.start, end: headRange.end, replacement: replacement! }
+      fixes.push(fix)
+      ctx.report({
+        ruleId: "style/prefer-range-loop"
+        message: rangeSafe
+          ? `Use Civet range loop '${replacement}'`
+          : "Use Civet's assignment form in the C-style loop header"
+        pos: forTok.range.start
+        fix
+      })
+}

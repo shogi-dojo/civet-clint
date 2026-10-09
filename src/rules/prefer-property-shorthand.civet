@@ -1,0 +1,66 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferPropertyShorthandRule: Rule = {
+  id: "style/prefer-property-shorthand"
+  meta: {
+    description: "Prefer property shorthand '{ a.b }' over '{ b: a.b }'"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    // The shorthand is only valid inside a BRACED object literal -- the style guide
+    // says so explicitly ("In braced object literals, `b: a.b` can be abbreviated
+    // `a.b`"). In a brace-free, indentation-delimited object, `topLevel.name` on its
+    // own line is a bare expression statement rather than a property, so the fix
+    // silently changes the object's shape and the gate rejects it.
+    bracedObjectSpans: { start: number, end: number }[] := []
+    tree.visit ["ObjectExpression", "ObjectLiteral"], (obj) ->
+      span := tree.range(obj)
+      return unless span?
+      bracedObjectSpans.push(span) if source.slice(span.start, span.end).trimStart().startsWith("{")
+
+    insideBracedObject := (pos: number): boolean ->
+      bracedObjectSpans.some (span) -> span.start <= pos and pos < span.end
+
+    tree.visit "Property", (node) ->
+      return unless node.name? and node.name.type is "Identifier"
+      keyName := node.name.name
+      val := node.value
+      return unless val? and val.type is "MemberExpression"
+
+      children := (val.children or []).filter(Boolean)
+      return if children.length is 0
+      last := children[children.length - 1]
+      return unless last? and last.type is "PropertyAccess"
+      return unless last.name is keyName
+
+      nameSpan := tree.range(node.name)
+      valSpan := tree.range(val)
+      return unless nameSpan? and valSpan?
+
+      pos := nameSpan.start
+      end := valSpan.end
+      return unless insideBracedObject(pos)
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, end)
+      seen.add(pos)
+
+      valText := tree.text(val).trim()
+      ctx.report({
+        ruleId: "style/prefer-property-shorthand"
+        message: `Use shorthand '{ ${valText} }' instead of '{ ${source.slice(pos, end)} }'`
+        pos
+        fix: {
+          start: pos
+          end
+          replacement: valText
+        }
+      })
+}

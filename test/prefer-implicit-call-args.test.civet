@@ -15,6 +15,10 @@ findings := (input: string) ->
   lint(input, false).diagnostics.filter (d) ->
     d.ruleId is "style/prefer-implicit-call-args"
 
+unchanged := (input: string) ->
+  res := lint(input)
+  expect(res.fixedSource ?? input).toBe(input)
+
 describe "style/prefer-implicit-call-args", ->
   it "drops the parens on a matcher with a string argument", ->
     res := lint("expect(a).toBe('x')\n")
@@ -36,35 +40,72 @@ describe "style/prefer-implicit-call-args", ->
     expect(res.fixedSource).toBe("render <A b=1 />\n")
     expect(res.isEquivalencePreserved).toBe(true)
 
+  it "drops the parens on general statement-level calls", ->
+    res1 := lint("g(x)\n")
+    expect(res1.fixedSource).toBe("g x\n")
+    expect(res1.isEquivalencePreserved).toBe(true)
+
+    res2 := lint("g(x, y)\n")
+    expect(res2.fixedSource).toBe("g x, y\n")
+    expect(res2.isEquivalencePreserved).toBe(true)
+
+    res3 := lint("a.b(x)\n")
+    expect(res3.fixedSource).toBe("a.b x\n")
+    expect(res3.isEquivalencePreserved).toBe(true)
+
+    res4 := lint("compute(a, b)\n")
+    expect(res4.fixedSource).toBe("compute a, b\n")
+    expect(res4.isEquivalencePreserved).toBe(true)
+
+  it "handles nested calls on consecutive passes", ->
+    res1 := lint("f(g(x))\n")
+    expect(res1.fixedSource).toBe("f g(x)\n")
+    expect(res1.isEquivalencePreserved).toBe(true)
+
+    res2 := lint(res1.fixedSource!)
+    expect(res2.fixedSource).toBe("f g x\n")
+    expect(res2.isEquivalencePreserved).toBe(true)
+
   it "emits byte-identical compiler output", ->
-    input := "expect(f(p)).toBe('/a/Foo.civet')\nrender(<Panel x=1 />)\n"
+    input := "expect(f(p)).toBe('/a/Foo.civet')\nrender(<Panel x=1 />)\ncompute(a, b)\n"
     res := lint(input)
     before := compileForOutput(input, { dial: DIAL })
     after := compileForOutput(res.fixedSource!, { dial: DIAL })
     expect(before.output).toBe(after.output)
 
+  it "is idempotent", ->
+    once := lint("expect(a).toBe('x')\n")
+    twice := lint(once.fixedSource!)
+    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)
+
+describe "style/prefer-implicit-call-args exclusions", ->
   it "keeps the parens on an empty argument list", ->
     // `toBeNull()` invokes; `toBeNull` alone is only a property read.
     expect(findings("expect(a).toBeNull()\n")).toHaveLength(0)
+    unchanged("expect(a).toBeNull()\n")
 
   it "keeps the parens when the call is followed by a chain", ->
     expect(findings("expect(a).toBe(1).x\n")).toHaveLength(0)
+    unchanged("expect(a).toBe(1).x\n")
 
   it "keeps the parens when the argument opens with an operator", ->
     expect(findings("expect(a).toBe(-1)\n")).toHaveLength(0)
+    unchanged("expect(a).toBe(-1)\n")
 
-  it "ignores a callee that is neither a matcher nor a render helper", ->
-    expect(findings("compute(a, b)\n")).toHaveLength(0)
-
-  it "ignores expect itself", ->
+  it "ignores expect itself when followed by a matcher chain", ->
     // `expect` is the subject of the assertion, not the tail of the line.
     hits := findings("expect(a).toBeTruthy()\n")
     expect(hits).toHaveLength(0)
 
   it "leaves a multi-line argument list alone", ->
     expect(findings("expect(a).toBe(\n  b\n)\n")).toHaveLength(0)
+    unchanged("expect(a).toBe(\n  b\n)\n")
 
-  it "is idempotent", ->
-    once := lint("expect(a).toBe('x')\n")
-    twice := lint(once.fixedSource!)
-    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)
+  it "leaves non-statement calls alone (f(x) + 1 compiles to f(x + 1) without parens)", ->
+    unchanged("y = f(x) + 1\n")
+    unchanged("const y = f(x)\n")
+
+  it "leaves top-level binary operators and ternaries between parens alone", ->
+    unchanged("f(a ? b : c)\n")
+    unchanged("f(a + b)\n")
+    unchanged("f(a is b)\n")

@@ -1,6 +1,90 @@
 import civet from "@danielx/civet"
-import type { CompileDial, CompileOptions } from "./types.civet"
+import fs from "node:fs"
+import path from "node:path"
+import { createRequire } from "node:module"
+import type { CivetCompiler, CompilerPreference, CompilerResolution, CompileDial, CompileOptions } from "./types.civet"
 import { SyntaxTree } from "./syntax.civet"
+
+const SUPPORTED_COMPILER_VERSIONS = new Set(["0.11.5", "0.11.15", "0.11.16"])
+const bundledRequire = createRequire(import.meta.url)
+const compilerCache = new Map<string, CompilerResolution>()
+
+function packageInfoFor(modulePath: string): { path: string, version: string } | undefined
+  var dir = path.dirname(modulePath)
+  while true
+    candidate := path.join(dir, "package.json")
+    if fs.existsSync(candidate)
+      try
+        parsed := JSON.parse(fs.readFileSync(candidate, "utf8"))
+        if parsed.name is "@danielx/civet"
+          return { path: modulePath, version: parsed.version or "unknown" }
+      catch
+        // Continue walking if a package.json is unreadable or malformed.
+    parent := path.dirname(dir)
+    return undefined if parent is dir
+    dir = parent
+
+function normalizedCompiler(value: any): CivetCompiler | undefined
+  candidate := value?.compile ? value : value?.default
+  return candidate if typeof candidate?.compile is "function"
+  undefined
+
+function bundledResolution(preference: CompilerPreference, warning?: string): CompilerResolution
+  bundledPath := bundledRequire.resolve("@danielx/civet")
+  info := packageInfoFor(bundledPath)
+  {
+    compiler: civet as CivetCompiler
+    version: info?.version or "unknown"
+    path: bundledPath
+    preference
+    usedBundled: true
+    warning
+  }
+
+// Resolve from the linter project's root, matching Node's normal dependency
+// lookup. Each worker invokes this with the same cwd and preference, so its
+// compiler module path and version match the main thread's selection.
+export function resolveCivetCompiler(
+  cwd: string = process.cwd()
+  preference: CompilerPreference = "project"
+): CompilerResolution
+  root := path.resolve(cwd)
+  cacheKey := `${root}\0${preference}`
+  cached := compilerCache.get(cacheKey)
+  return cached if cached?
+
+  if preference is "bundled"
+    resolution := bundledResolution(preference)
+    compilerCache.set(cacheKey, resolution)
+    return resolution
+
+  try
+    projectRequire := createRequire(path.join(root, "package.json"))
+    modulePath := projectRequire.resolve("@danielx/civet")
+    compiler := normalizedCompiler(projectRequire("@danielx/civet"))
+    info := packageInfoFor(modulePath)
+    if compiler and info
+      version := info.version
+      warning := SUPPORTED_COMPILER_VERSIONS.has(version)
+        ? undefined
+        : `@danielx/civet@${version} is outside clint's tested versions (0.11.5, 0.11.15, 0.11.16).`
+      resolution: CompilerResolution := {
+        compiler
+        version
+        path: modulePath
+        preference
+        usedBundled: false
+        warning
+      }
+      compilerCache.set(cacheKey, resolution)
+      return resolution
+  catch
+    // The bundled compiler is a deliberate fallback when the project does not
+    // install Civet or its package cannot be loaded.
+
+  resolution := bundledResolution(preference, "The project does not provide @danielx/civet; using clint's bundled compiler.")
+  compilerCache.set(cacheKey, resolution)
+  resolution
 
 const CONTROLLED_OPTIONS = new Set([
   "sync"
@@ -23,6 +107,7 @@ export interface CompileDialOptions
   dial: CompileDial
   compileOptions?: CompileOptions
   filename?: string
+  compiler?: CivetCompiler
 
 export interface SyntaxParseOptions extends CompileDialOptions
   // no extra fields
@@ -42,7 +127,8 @@ export interface CompileResult
 export function parseSyntax(source: string, options: SyntaxParseOptions): CompileResult
   try
     retained := pipelineOptions(options.compileOptions)
-    ast := civet.compile(source, {
+    compiler := options.compiler or civet as CivetCompiler
+    ast := compiler.compile(source, {
       ...retained
       sync: true
       ast: "raw"
@@ -64,7 +150,8 @@ export function parseSyntax(source: string, options: SyntaxParseOptions): Compil
 export function compileForOutput(source: string, options: CompileDialOptions): CompileResult
   try
     retained := pipelineOptions(options.compileOptions)
-    compiled := civet.compile(source, {
+    compiler := options.compiler or civet as CivetCompiler
+    compiled := compiler.compile(source, {
       ...retained
       sync: true
       ast: false

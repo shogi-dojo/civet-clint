@@ -150,8 +150,19 @@ export function normalizeSemicolonStyle(code: string): string
   var out = ""
   var i = 0
   var parenDepth = 0
+  var braceDepth = 0
   while i < code.length
     ch := code[i]
+    if ch is "{"
+      braceDepth++
+      out += ch
+      i++
+      continue
+    if ch is "}"
+      braceDepth = Math.max(0, braceDepth - 1)
+      out += ch
+      i++
+      continue
     if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
       block := code[i + 1] is "*"
       end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
@@ -202,12 +213,20 @@ export function normalizeSemicolonStyle(code: string): string
       out += ch
       i++
       continue
-    if ch is ";" and parenDepth is 0
+    // Line-final `;` inside a braced block is a statement terminator even when a
+    // call's parens are still open (Civet emits callback bodies as
+    // `filter((x) => { ... })`, so the whole body sits at paren depth >= 1). A
+    // `for ( ;; )` separator, the one `;` that is load-bearing, never sits inside
+    // braces -- there braceDepth is 0 and the guard below leaves it alone.
+    if ch is ";" and (parenDepth is 0 or braceDepth > 0)
       var k = i + 1
       while k < code.length and (code[k] is " " or code[k] is "\t")
         k++
       if k >= code.length or code[k] is "\n" or code[k] is "\r"
         i = k
+        continue
+      if braceDepth > 0 and code[k] is "}"
+        i++
         continue
       if code[k] is "/" and (code[k + 1] is "/" or code[k + 1] is "*")
         i++
@@ -231,3 +250,398 @@ export function normalizeSemicolonStyle(code: string): string
 // `const x = 1` keeps `const`, so the byte-identical gate would otherwise reject
 // every prefer-bare-assignment fix. Strings and comments are skipped, and the
 // match is word-bounded, so `constant` and `"const"` are left alone.
+
+// Index of the brace that closes the one at `open`, or -1. String and comment
+// ranges are skipped, so the `}` inside a template literal's `${...}` is never
+// mistaken for the closing brace of a statement block.
+function findBlockClose(code: string, open: number): number
+  var depth = 1
+  var i = open
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      return -1 if end < 0
+      i = block ? end + 2 : end
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      i = j + 1
+      continue
+    if ch is "{"
+      depth++
+    else if ch is "}"
+      depth--
+      return i if depth is 0
+    i++
+  -1
+
+// True when `code` holds a brace, semicolon, or newline OUTSIDE string and comment
+// ranges. Template-literal contents (including `${...}` expressions) count as
+// inert: the scanner copies them verbatim, so a braced statement body wrapping
+// `throw new Error(\`x ${y}\`)` is still provably brace-style-only.
+function containsStructuralChar(code: string): boolean
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      return true if end < 0
+      i = block ? end + 2 : end
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      i = j + 1
+      continue
+    return true if ch is "{" or ch is "}" or ch is ";" or ch is "\n" or ch is "\r"
+    i++
+  false
+
+export function normalizeBlockBraceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is "{" and /\)\s*$/.test(out)
+      close := findBlockClose(code, i + 1)
+      if close >= 0
+        inner := code.slice(i + 1, close)
+        if inner.trim().length > 0 and not containsStructuralChar(inner)
+          out += inner.trim()
+          i = close + 1
+          continue
+    out += ch
+    i++
+  out
+
+// `(x: string | undefined)` vs `(x: (string | undefined))` -- Civet wraps optional
+// types `T?` in parens when lowering to TypeScript `(T | undefined)`.
+// Strips a paren pair whose contents hold a top-level `|` and no nested
+// parens/braces/brackets, provided it is not adjacent to `&` or `[`.
+//
+// Consulted only for rules that declare the `type-paren-style` delta, so its
+// blast radius is that rule's own edits.
+
+// Normalize a trailing comma from emitted code while leaving strings, comments,
+// and array elisions untouched. Used when a source rewrite changes only whether
+// Civet's layout emits the comma before a closing delimiter.
+export function normalizeTrailingCommaStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is ","
+      var k = i + 1
+      while k < code.length and /\s/.test(code[k])
+        k++
+      // Scan back by hand: trimming `out` here would copy the whole string once
+      // per comma.
+      var back = out.length - 1
+      back-- while back >= 0 and /\s/.test(out[back])
+      prevNonWs := back >= 0 ? out[back] : ""
+      if k < code.length and ")]}".includes(code[k]) and prevNonWs isnt ","
+        i++
+        continue
+    out += ch
+    i++
+  out
+
+export function normalizeWhitespaceStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if /\s/.test(ch)
+      var k = i
+      while k < code.length and /\s/.test(code[k])
+        k++
+      // Keep one space only where removing it would join two tokens.
+      prev := out.slice(-1)
+      next := code[k] ?? ""
+      isWordChar := (c: string): boolean -> /[A-Za-z0-9_$]/.test(c)
+      if isWordChar(prev) and isWordChar(next)
+        out += " "
+      i = k
+      continue
+    out += ch
+    i++
+  out
+
+// Canonicalize the equivalent JS spellings `a !== b` and `!(a === b)`. This
+// bounded delta is used only by prefer-unless for a whole-condition rewrite.
+export function normalizeInequalityStyle(code: string): string
+  code.replace(/!\(\s*([^()]*?)\s*===\s*([^()]*?)\s*\)/g, (_whole, left, right) -> `${left.trim()} !== ${right.trim()}`)
+
+// Treat empty constructor call parentheses as syntax sugar while preserving
+// grouping when a member/index access follows the constructed value.
+export function normalizeNewCallStyle(code: string): string
+  out := code.replace(/\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
+  out.replace(/\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(\)(?!\s*(?:\.|\[))/g, "new $1")
+
+// Canonicalize only a one-parameter arrow whose body is a direct property chain,
+// the exact shape that placeholder shorthand replaces. This is intentionally
+// narrower than a general arrow/parameter normalizer.
+export function normalizePlaceholderParamStyle(code: string): string
+  code.replace(/(?:\(([A-Za-z_$][\w$]*)\)\s*=>\s*\1|\$\s*=>\s*\$)((?:\.[A-Za-z_$][\w$]*)+)/g, (_whole, _name, path) -> `$ => $${path}`)
+
+// Civet range loops lower to a hidden counter plus a per-iteration binding. This
+// narrow normalizer maps that generated wrapper back to the equivalent C-style
+// loop header so guarded range rewrites can pass the compiler-output gate.
+export function normalizeRangeLoopStyle(code: string): string
+  code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;/g, (_whole, _counter, start, operator, bound, name) ->
+    canonicalStart := start.trim().replace(/^\((.+) \+ 1\) \+ -1$/, "$1")
+    step := if operator is "<" or operator is "<=" then "++" else "--"
+    `for (let ${name} = ${canonicalStart}; ${name} ${operator} ${bound.trim()}; ${name}${step}) {`
+  )
+
+// Canonicalize `const f = (...) => { ... }` as `function f(...) { ... }` only
+// for the declaration shape that the guarded function-declaration rule proposes.
+// Strings, comments, nested braces, and nested declarations are kept intact.
+export function normalizeFunctionDeclarationStyle(code: string): string
+  skipQuoted := (start: number): number ->
+    quote := code[start]
+    var i = start + 1
+    while i < code.length
+      if code[i] is "\\"
+        i += 2
+        continue
+      if code[i] is quote
+        return i + 1
+      i++
+    code.length
+
+  skipComment := (start: number): number ->
+    if code[start + 1] is "/"
+      end := code.indexOf("\n", start + 2)
+      return if end < 0 then code.length else end
+    end := code.indexOf("*/", start + 2)
+    if end < 0 then code.length else end + 2
+
+  skipSpace := (start: number): number ->
+    var i = start
+    while i < code.length and /\s/.test(code[i])
+      i++
+    i
+
+  readWord := (start: number): { value: string, end: number } | undefined ->
+    return undefined unless /[A-Za-z_$]/.test(code[start] ?? "")
+    var end = start + 1
+    end++ while end < code.length and /[A-Za-z0-9_$]/.test(code[end])
+    { value: code.slice(start, end), end }
+
+  matching := (start: number, open: string, close: string): number ->
+    var depth = 0
+    var i = start
+    while i < code.length
+      ch := code[i]
+      if ch is "'" or ch is "\"" or ch is "`"
+        i = skipQuoted(i)
+        continue
+      if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+        i = skipComment(i)
+        continue
+      if ch is open
+        depth++
+      else if ch is close
+        depth--
+        return i if depth is 0
+      i++
+    -1
+
+  parseArrowDeclaration := (constPos: number): any ->
+    afterConst := constPos + 5
+    return undefined if /[A-Za-z0-9_$]/.test(code[constPos - 1] ?? "") or /[A-Za-z0-9_$]/.test(code[afterConst] ?? "")
+    nameStart := skipSpace(afterConst)
+    namePart := readWord(nameStart)
+    return undefined unless namePart?
+    equalsPos := skipSpace(namePart.end)
+    return undefined unless code[equalsPos] is "=" and code[equalsPos + 1] isnt "=" and code[equalsPos + 1] isnt ">"
+    var paramsStart = skipSpace(equalsPos + 1)
+    var asyncPrefix = ""
+    asyncWord := readWord(paramsStart)
+    if asyncWord?.value is "async"
+      asyncPrefix = "async "
+      paramsStart = skipSpace(asyncWord.end)
+    var typeParameters = ""
+    if code[paramsStart] is "<"
+      typeParametersEnd := matching(paramsStart, "<", ">")
+      return undefined if typeParametersEnd < 0
+      typeParameters = code.slice(paramsStart, typeParametersEnd + 1)
+      paramsStart = skipSpace(typeParametersEnd + 1)
+    return undefined unless code[paramsStart] is "("
+    paramsEnd := matching(paramsStart, "(", ")")
+    return undefined if paramsEnd < 0
+    var arrowPos = -1
+    var roundDepth = 0
+    var squareDepth = 0
+    var braceDepth = 0
+    var scan = paramsEnd + 1
+    while scan < code.length
+      ch := code[scan]
+      if ch is "'" or ch is "\"" or ch is "`"
+        scan = skipQuoted(scan)
+        continue
+      if ch is "/" and (code[scan + 1] is "/" or code[scan + 1] is "*")
+        scan = skipComment(scan)
+        continue
+      if code.slice(scan, scan + 2) is "=>" and roundDepth is 0 and squareDepth is 0 and braceDepth is 0
+        arrowPos = scan
+        break
+      if ch is "("
+        roundDepth++
+      else if ch is ")"
+        roundDepth--
+      else if ch is "["
+        squareDepth++
+      else if ch is "]"
+        squareDepth--
+      else if ch is "{"
+        braceDepth++
+      else if ch is "}"
+        braceDepth--
+      scan++
+    return undefined if arrowPos < 0
+    // Only a return type may sit between the parameter list and `=>`. Without
+    // this, `const x = (a as T).b` reads as a parameter list and the scan runs on
+    // to the next arrow in the file, however far away.
+    between := code.slice(paramsEnd + 1, arrowPos).trim()
+    return undefined unless between.length is 0 or (between.startsWith(":") and not /[;\n]/.test(between))
+    bodyStart := skipSpace(arrowPos + 2)
+    return undefined unless code[bodyStart] is "{"
+    bodyEnd := matching(bodyStart, "{", "}")
+    return undefined if bodyEnd < 0
+
+    var declarationStart = constPos
+    before := skipSpaceBackward(code, constPos)
+    exportWord := findPreviousWord(code, before)
+    var exportPrefix = ""
+    if exportWord?.value is "export" and code.slice(exportWord.end, constPos).trim().length is 0
+      declarationStart = exportWord.start
+      exportPrefix = "export "
+
+    body := normalizeFunctionDeclarationStyle(code.slice(bodyStart, bodyEnd + 1))
+    returnType := code.slice(paramsEnd + 1, arrowPos).trim()
+    returnTypeSpace := returnType.length > 0 and not returnType.startsWith(":") ? " " : ""
+    canonicalTypeParameters := typeParameters.replace(/,\s*>$/, ">")
+    replacement := `${exportPrefix}${asyncPrefix}function ${namePart.value}${canonicalTypeParameters}${code.slice(paramsStart, paramsEnd + 1)}${returnTypeSpace}${returnType} ${body}`
+    { start: declarationStart, end: bodyEnd + 1, replacement }
+
+  skipSpaceBackward := (value: string, end: number): number ->
+    var i = end
+    while i > 0 and /\s/.test(value[i - 1])
+      i--
+    i
+
+  findPreviousWord := (value: string, end: number): any ->
+    var start = end
+    while start > 0 and /[A-Za-z0-9_$]/.test(value[start - 1])
+      start--
+    return undefined if start is end
+    { value: value.slice(start, end), start, end }
+
+  var out = ""
+  var last = 0
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "'" or ch is "\"" or ch is "`"
+      i = skipQuoted(i)
+      continue
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      i = skipComment(i)
+      continue
+    if code.startsWith("const", i)
+      item := parseArrowDeclaration(i)
+      if item?
+        out += code.slice(last, item.start) + item.replacement
+        last = item.end
+        i = item.end
+        continue
+    i++
+  out + code.slice(last)
+
+// `if (a) return` vs `if (a) { return }` -- the only difference between a Civet
+// postfix conditional and its prefix form. Strips a brace pair that follows a `)`
+// and wraps a single statement: no `;`, `{`, `}`, or newline inside.
+//
+// Consulted only for rules that declare the `block-brace-style` delta, so its
+// blast radius is that rule's own edits. It is deliberately anchored on `) {`
+// rather than any brace, so object literals keep theirs.

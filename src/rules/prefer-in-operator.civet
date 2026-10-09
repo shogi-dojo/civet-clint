@@ -1,0 +1,98 @@
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+export const preferInOperatorRule: Rule = {
+  id: "style/prefer-in-operator"
+  meta: {
+    description: "Prefer Civet's 'is in' membership operator over includes calls"
+    fixable: true
+    defaultSeverity: "error"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+    // Build the direct negated-call relation once. Searching every unary
+    // expression again for each call is quadratic on real JSX-heavy files.
+    negatedCalls := new Map<any, any>()
+    tree.visit "UnaryExpression", (candidate) ->
+      for child of tree.children(candidate)
+        if child?.type is "CallExpression"
+          negatedCalls.set(child, candidate)
+
+    reportMembership := (callExpr: any, negated: boolean, outer?: any) ->
+      parts := tree.children(callExpr).filter (part: any) -> part?.type?
+      return unless parts.length is 2
+      member := parts[0]
+      call := parts[1]
+      return unless member?.type is "MemberExpression" and call?.type is "Call"
+
+      memberParts := tree.children(member).filter (part: any) -> part?.type?
+      return unless memberParts.length >= 2
+      property := memberParts[memberParts.length - 1]
+      return unless property?.type is "PropertyAccess" and property.name is "includes"
+      return if property.dot?.optional
+
+      // Civet stores chained properties as a flat run of accesses. The receiver
+      // is everything before the final `.includes` access.
+      receiverStart := tree.range(memberParts[0])
+      receiverEnd := tree.range(memberParts[memberParts.length - 2])
+      return unless receiverStart? and receiverEnd?
+      receiverText := source.slice(receiverStart.start, receiverEnd.end).trim()
+
+      args := (call.args or []).filter (arg: any) -> arg?.type is "Argument"
+      return unless args.length is 1
+      return if args[0].spread
+      argument := args[0].expression
+      return unless argument?
+      // An ungrouped negation would bind to membership rather than its value.
+      return if argument.type is "UnaryExpression"
+
+      argumentText := tree.text(argument).trim()
+      return unless receiverText.length > 0 and argumentText.length > 0
+      return if receiverText.includes("?.") or argumentText.includes("?.")
+
+      var span: any = undefined
+      if outer?
+        span = tree.range(outer)
+        operator := tree.tokens(outer).find (token) ->
+          (token.raw.trim() is "!" or token.raw.trim() is "not")
+        span.start = operator.range.start if operator? and span?
+      else
+        memberRange := tree.range(member)
+        callRange := tree.range(call)
+        return undefined unless memberRange? and callRange?
+        span = { start: memberRange.start, end: callRange.end }
+      return unless span?
+      return if intersectsRange(ignoredRanges, span.start, span.end)
+      return if seen.has(span.start)
+      seen.add(span.start)
+
+      replacement := `${argumentText} is ${negated ? "not " : ""}in ${receiverText}`
+      fix: Fix := { start: span.start, end: span.end, replacement }
+      ctx.report({
+        ruleId: "style/prefer-in-operator"
+        message: `Use '${replacement}' instead of '${source.slice(span.start, span.end)}'`
+        pos: span.start
+        fix
+      })
+
+    tree.visit "CallExpression", (node) ->
+      unary := negatedCalls.get(node)
+      if unary?
+        member := tree.children(node).find (part: any) -> part?.type is "MemberExpression"
+        memberSpan := tree.range(member)
+        operators := tree.tokens(unary).filter (token) ->
+          memberSpan? and token.range.end <= memberSpan.start and
+            (token.raw.trim() is "!" or token.raw.trim() is "not")
+        // Use raw spelling: real `not` is also lowered to a synthetic `!`.
+        // `unless` lowers through a synthetic negation too. Preserve its keyword
+        // and rewrite the positive membership call inside its condition.
+        if operators.length is 1
+          reportMembership(node, true, unary)
+        else if operators.length is 0
+          reportMembership(node, false)
+      else
+        reportMembership(node, false)
+}

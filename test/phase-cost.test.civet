@@ -1,0 +1,28 @@
+import civet from "@danielx/civet"
+import { describe, it, expect } from "vitest"
+import { lintPhased } from "../src/engine.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
+
+describe "phase cost", ->
+  it "does not parse and emit phases without enabled rules", ->
+    calls .= 0
+    compiler := {
+      compile: (source: string, options: any) ->
+        calls++
+        civet.compile(source, options)
+    }
+    rules := Object.fromEntries(defaultRuleRegistry.getRuleList().map((rule) -> [rule.id, "off"]))
+    rules["style/prefer-implicit-return"] = "error"
+    result := lintPhased("x := 1\n", { rules, compiler, fix: true })
+    expect(result.diagnostics).toHaveLength(0)
+    expect(result.fixedSource).toBeUndefined()
+    // The stable preflight is the final report: one parse and one emit.
+    expect(calls).toBe(2)
+
+
+  it "still applies fixes in an enabled phase after the preflight", ->
+    rules := Object.fromEntries(defaultRuleRegistry.getRuleList().map((rule) -> [rule.id, "off"]))
+    rules["style/prefer-implicit-return"] = "error"
+    result := lintPhased("function f()\n  return x\n", { rules, fix: true })
+    expect(result.fixedSource).toBe("function f()\n  x\n")
+    expect(result.isEquivalencePreserved).toBe(true)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { lintSource, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
+import { lintSource, lintPhased, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
 
 RULE := "style/prefer-indented-blocks"
 DIAL := { autoLet: true, react: true, coffeeComment: true, coffeeEq: true, coffeeNot: true, coffeeIsnt: true }
@@ -29,17 +29,123 @@ describe "style/prefer-indented-blocks", ->
     expect(fix("f = =>\n  while (a) {\n    g()\n    k()\n  }\n").fixedSource)
       .toBe("f = =>\n  while a\n    g()\n    k()\n")
 
+  it "de-braces both sides of an else chain without overlapping edits", ->
+    source := "if (a) {\n  first()\n} else {\n  second()\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("if a\n  first()\nelse\n  second()\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+
+  it "de-braces try/catch chains without overlapping edits", ->
+    source := "try {\n  work()\n} catch (error) {\n  recover(error)\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("try\n  work()\ncatch (error)\n  recover(error)\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+
+  it "preserves an empty-object catch pattern while de-bracing its body", ->
+    source := "try {\n  work()\n} catch {\n  // ignore matching objects\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("try\n  work()\ncatch {\n  // ignore matching objects\n}\n")
+    expect(normalizeWhitespaceStyle(compileSource(result.fixedSource!, DIAL)))
+      .toBe(normalizeWhitespaceStyle(compileSource(source, DIAL)))
+
+  it "de-braces a head that has already lost its parens", ->
+    // Before this, `if a {` was skipped and the braces were stranded: no other
+    // rule removes a brace whose head is paren-free.
+    expect(fix("f = =>\n  if a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free unless head", ->
+    // A trailing `h()` keeps the block out of expression position, where a braced
+    // body already mis-parses as an object literal before any fix is applied.
+    expect(fix("f = =>\n  unless a {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  unless a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a paren-free for head", ->
+    expect(fix("f = =>\n  for x of xs {\n    g(x)\n    k(x)\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  for x of xs\n    g(x)\n    k(x)\n  h()\n")
+
+  it "keeps parens that do not wrap the whole condition", ->
+    // `if (a) and b` -- the parens are load-bearing, so only the braces go.
+    expect(fix("f = =>\n  if (a) and b {\n    g()\n    k()\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if (a) and b\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a function declaration", ->
+    expect(fix("function f(x) {\n  g(x)\n  k(x)\n}\n").fixedSource)
+      .toBe("function f(x)\n  g(x)\n  k(x)\n")
+
+  it "de-braces an exported function and a TS return type", ->
+    expect(fix("export function f(x: number): void {\n  g(x)\n  k(x)\n}\n").fixedSource)
+      .toBe("export function f(x: number): void\n  g(x)\n  k(x)\n")
+
+  it "de-braces a function whose parameter list contains an object type", ->
+    // The ordinary React component signature. A `{` in the parameter list used to
+    // defeat the head pattern, so the flagship example in the style-guide gist kept
+    // its JS braces while item 9 was advertised as fully automated.
+    expect(fix("export default function C(p: { x: number }) {\n  g(p)\n  k(p)\n}\n").fixedSource)
+      .toBe("export default function C(p: { x: number })\n  g(p)\n  k(p)\n")
+
+  it "leaves a call that takes an object argument and opens a block", ->
+    // `f(a, {b: 1}) {` has no `function` keyword to mark it a declaration, so it
+    // must not be reached by the widened head pattern -- de-bracing a call's
+    // trailing block changes what is being invoked.
+    unchanged("f(a, {b: 1}) {\n  g()\n}\n")
+
+  it "de-braces a class and its methods in one pass", ->
+    expect(fix("class A {\n  m(x) {\n    g()\n    k()\n  }\n}\n").fixedSource)
+      .toBe("class A\n  m(x)\n    g()\n    k()\n")
+
+  it "de-braces a block nested inside a function it also de-braces", ->
+    expect(fix("function f(x) {\n  if (a) {\n    g()\n    k()\n  }\n  h()\n}\n").fixedSource)
+      .toBe("function f(x)\n  if a\n    g()\n    k()\n  h()\n")
+
+  it "de-braces a block-bodied arrow when its explicit return preserves the emit", ->
+    source := "f = (x) => {\n  y := x + 1\n  return y\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("f = (x) =>\n  y := x + 1\n  return y\n")
+    expect(normalizeWhitespaceStyle(compileSource(result.fixedSource!, DIAL)))
+      .toBe(normalizeWhitespaceStyle(compileSource(source, DIAL)))
+
+  it "preserves a call suffix after an arrow body's closing brace", ->
+    source := "register((arg) => {\n  const x = arg\n  return x\n});\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("register((arg) =>\n  const x = arg\n  return x\n);\n")
+    expect(normalizeWhitespaceStyle(compileSource(result.fixedSource!, DIAL)))
+      .toBe(normalizeWhitespaceStyle(compileSource(source, DIAL)))
+
+  it "keeps a trailing semicolon that prevents an implicit return", ->
+    source := "f = () => {\n  x = 1\n  sideEffect();\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("f = () =>\n  x = 1\n  sideEffect();\n")
+    expect(compileSource(result.fixedSource!, DIAL)).toBe(compileSource(source, DIAL))
+
+  it "de-braces multiple arrows in one equivalence batch", ->
+    source := "first = (arg) => {\n  const x = arg\n  return x\n}\nsecond = (arg) => {\n  const y = arg\n  return y\n}\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("first = (arg) =>\n  const x = arg\n  return x\nsecond = (arg) =>\n  const y = arg\n  return y\n")
+    expect(result.diagnostics.filter((d) -> d.ruleId.startsWith("compiler-equivalence-")).map((d) -> d.ruleId)).toEqual([])
+
+  it "de-braces nested statement blocks on the next fix pass", ->
+    source := "f = (x) => {\n  if (x) {\n    g(x)\n  }\n  return x\n}\n"
+    result := lintPhased(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: DIAL })
+    expect(result.fixedSource).toBe("f = (x) =>\n  if x\n    g(x)\n  return x\n")
+
+  it "de-braces an object method while the object keeps its braces", ->
+    expect(fix("o := {\n  m(x) {\n    g()\n    k()\n  }\n}\n").fixedSource)
+      .toBe("o := {\n  m(x)\n    g()\n    k()\n}\n")
+
   it "reports every braced block it finds", ->
     result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
     expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
 
 describe "style/prefer-indented-blocks exclusions", ->
-  it "leaves an arrow body to style/no-braced-arrow-body", ->
-    // De-bracing `=> { … }` is a semantic repair, not a layout change.
+  it "leaves an arrow Civet has mis-parsed as an object for the repair-phase rule", ->
     unchanged("f = => {\n  g()\n  k()\n}\n")
 
   it "leaves an object literal alone", ->
     unchanged("o := {\n  a: 1\n  b: 2\n}\n")
+
+  it "leaves a returned object inside a postfix if alone", ->
+    unchanged("f = =>\n  if (a) return {\n    tone: \"success\"\n    title: \"Solved\"\n  }\n")
 
   it "does not autofix a single-statement body ending in ';'", ->
     // `if (a) { g(); }` compiles to `if (a) ({ g() {; } })` -- an object with a
@@ -50,6 +156,21 @@ describe "style/prefer-indented-blocks exclusions", ->
     expect(diags.length).toBeGreaterThan(0)
     expect(result.fixedSource).toBeUndefined()
 
+  it "de-braces a single-statement body that only looks like the mis-parse", ->
+    // `return false;` is not a valid method name, so the braced body compiles
+    // normally -- the bare-`g();` heuristic does not apply. The rule compiles
+    // the de-braced candidate per site and attaches the fix when the emit is
+    // unchanged modulo whitespace (and the default-preset semicolons rule then
+    // drops the `;` in the same batch).
+    expect(fix("f = =>\n  if (a) {\n    return false;\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    return false\n  h()\n")
+
+  it "de-braces a single-statement member-call body", ->
+    // `xs.push(y);` cannot read as a method definition (dotted name), so the
+    // de-brace is layout-only and provable.
+    expect(fix("f = =>\n  if (a) {\n    xs.push(y);\n  }\n  h()\n").fixedSource)
+      .toBe("f = =>\n  if a\n    xs.push(y)\n  h()\n")
+
   it "reports but does not autofix a block in expression position", ->
     // A braced block that is the LAST statement of a function already mis-parses
     // into an object (`if (a) return ({ g: g(), k: k() })`). De-bracing repairs
@@ -58,6 +179,15 @@ describe "style/prefer-indented-blocks exclusions", ->
     result := fix "f = =>\n  if (a) {\n    g()\n    k()\n  }\n"
     expect(result.diagnostics.filter((d) -> d.ruleId is RULE).length).toBeGreaterThan(0)
     expect(result.fixedSource).toBeUndefined()
+
+  it "leaves a call with a braced object argument", ->
+    // `f(x) { a: 1 }` is a CALL -- it compiles to `f(x)({a: 1})`, not a method.
+    // The same line only means "method" inside a class body or object literal.
+    unchanged("f(x) {\n  a: 1\n}\n")
+
+  it "leaves a method whose closer carries a trailing comma", ->
+    // De-bracing strands the `,` that separates the object's properties.
+    unchanged("o := ({\n  clone() {\n    return x\n  },\n  json: f\n})\n")
 
   it "leaves an empty block", ->
     unchanged("f = =>\n  if (a) {\n  }\n")

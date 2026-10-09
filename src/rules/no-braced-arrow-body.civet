@@ -1,3 +1,4 @@
+import type { SyntaxTree } from "../syntax.civet"
 import type { Fix, Rule, RuleContext } from "../types.civet"
 
 // A JS-style `=> { ... }` arrow body is not a block in Civet: when every statement
@@ -58,13 +59,23 @@ function findMatchingBrace(source: string, openIdx: number): number
 // `implicitName` alone is NOT sufficient. Civet sets it for legitimate shorthand
 // too, so `{ a, b }` written across lines carries it on every property; keying off
 // it would trade one false positive for another.
-function objectLooksLikeStatements(node: any): boolean
+function objectLooksLikeStatements(node: any, tree: SyntaxTree): boolean
   return false unless node?.type is "ObjectExpression"
   properties := node.properties
   return false unless Array.isArray(properties) and properties.length > 0
   for property of properties
     continue unless property?
-    return true if property.callExpression?
+    // Property shorthand is a legitimate object key even when an older compiler
+    // marks its lowered value as a synthetic call (`{ p.userId }`). Repairing it
+    // as a statement would discard that key on the next --fix pass.
+    continue if property.implicitName and property.value?.type is "MemberExpression"
+    propertyText := tree.text(property).trim().replace(/,$/, "").trim()
+    continue if /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(propertyText)
+    continue if /^[A-Za-z_$][\w$]*\.\{[\w$,\s]+\}$/.test(propertyText)
+    // 0.11.16 marks the synthesized key directly. In 0.11.5 the same shape is
+    // represented by an implicit property whose value is the source call.
+    return true if property.callExpression? or
+      (property.implicitName and property.value?.type is "CallExpression")
   false
 
 export const noBracedArrowBodyRule: Rule = {
@@ -110,7 +121,7 @@ export const noBracedArrowBodyRule: Rule = {
       // Without this check the rule fires on every correct multi-line object returned
       // from a `.map`/`useMemo` callback -- roughly two thirds of its findings on a
       // real codebase were such false positives, which is what kept it at `warn`.
-      return unless objectLooksLikeStatements(first?.expression)
+      return unless objectLooksLikeStatements(first?.expression, tree)
 
       span := tree.range(node)
       return unless span?

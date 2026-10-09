@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
 import { defaultRuleRegistry } from "../src/registry.civet"
+import { SyntaxTree } from "../src/syntax.civet"
 
 function fixSemicolons(source: string, civetOptions: Record<string, any> = {})
   lintSource(source, {
@@ -209,6 +210,66 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-bare-assignment"
       expect(diags.length).toBe(0)
 
+  describe "style/prefer-existential-check soundness", ->
+    // `x?` lowers to the LOOSE `x != null`. Only a loose comparison against `null`
+    // may carry a fix; everything else is a real behaviour change and the
+    // equivalence gate rejects it, so the rule must not advertise it as fixable.
+    function diags(source: string, civetOptions: any = {})
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions
+      })
+      res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+
+    it "attaches a fix to loose '!= null'", ->
+      found := diags("if x != null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeDefined()
+
+    it "attaches a fix to loose '== null'", ->
+      found := diags("if x == null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeDefined()
+
+    it "reports strict '!== null' without a fix", ->
+      // x is undefined: `x !== null` is true, `x?` is false.
+      found := diags("if x !== null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+      expect(found[0].message).toContain("no autofix")
+
+    it "reports strict '=== null' without a fix", ->
+      found := diags("if x === null\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+
+    it "reports comparisons against undefined without a fix", ->
+      // x is null: `x !== undefined` is true, `x?` is false.
+      found := diags("if x !== undefined\n  b()\n")
+      expect(found.length).toBe(1)
+      expect(found[0].fix).toBeUndefined()
+      expect(found[0].message).toContain("undefined")
+
+    it "treats 'isnt' as fixable only under coffeeEq", ->
+      strict := diags("if x isnt null\n  b()\n", { coffeeIsnt: true })
+      expect(strict.length).toBe(1)
+      expect(strict[0].fix).toBeUndefined()
+      loose := diags("if x isnt null\n  b()\n", { coffeeIsnt: true, coffeeEq: true })
+      expect(loose.length).toBe(1)
+      expect(loose[0].fix).toBeDefined()
+
+    it "never leaves a fix the equivalence gate will reject", ->
+      // Regression: the rule used to fix every shape, so `clint` reported
+      // "fixable with --write" on diagnostics that --write could never apply.
+      for source of ["if x !== null\n  b()\n", "if x === undefined\n  b()\n"]
+        res := lintSource(source, {
+          // word-operators would rewrite `===` to `is` and mask what we assert.
+          rules: { "style/prefer-existential-check": "error", "style/prefer-word-operators": "off" }
+          fix: true
+        })
+        expect(res.fixedSource ?? source).toBe(source)
+        expect(res.isEquivalencePreserved).toBe(true)
+
   describe "style/prefer-existential-check", ->
     it "flags inequality null checks with suggestion x?", ->
       source := "valid := x != null\n"
@@ -230,7 +291,51 @@ describe "Style Guide Rules Coverage", ->
       expect(diags.length).toBe(1)
       expect(diags[0].message).toContain("not x?")
 
+    it "autofixes null and undefined equality/inequality checks", ->
+      source := "if x != null\n  b()\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("if x?\n  b()\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "flags reversed null checks (null !== foo)", ->
+      source := "valid := null !== foo\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("foo?")
+
+    it "flags non-identifier operands (a.b.c != null)", ->
+      source := "valid := a.b.c != null\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-existential-check": "error" }
+        civetOptions: { autoLet: true }
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-existential-check"
+      expect(diags.length).toBe(1)
+      expect(diags[0].message).toContain("a.b.c?")
+
   describe "style/prefer-jsx-attr-shorthand", ->
+    it "ignores whitespace separators in wrapped 0.11.5 JSX shorthand attributes", ->
+      source := "<C {foo} {bar} />"
+      foo := { type: "Identifier", name: "foo" }
+      bar := { type: "Identifier", name: "bar" }
+      fooAttribute := [foo, "={", foo, "}"]
+      barAttribute := [bar, "={", bar, "}"]
+      whitespace := { token: " " }
+      node := {
+        type: "JSXElement"
+        children: ["<", "C", undefined, [[whitespace, [fooAttribute, " ", barAttribute]]], whitespace, "/>" ]
+      }
+      attrs := new SyntaxTree(node, source).jsxAttributes(node)
+      expect(attrs.map((attr) -> attr.name)).toEqual(["foo", "bar"])
+
     it "flags onClick={onClick} and disabled={true}", ->
       source := "<button onClick={onClick} disabled={true}>Click</button>\n"
       res := lintSource(source, {
@@ -242,14 +347,14 @@ describe "Style Guide Rules Coverage", ->
       expect(diags.some((d) -> d.message.includes("{onClick}"))).toBe(true)
       expect(diags.some((d) -> d.message.includes("disabled"))).toBe(true)
 
-    it "is skipped when react is not enabled", ->
+    it "runs when react is not enabled", ->
       source := "<button onClick={onClick}>Click</button>\n"
       res := lintSource(source, {
         rules: { "style/prefer-jsx-attr-shorthand": "error" }
         civetOptions: {}
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
-      expect(diags.length).toBe(0)
+      expect(diags.length).toBe(1)
 
     it "fixes attr={attr} to {attr} without touching the compiled output", ->
       source := "x := <C users={users} />\n"
@@ -259,6 +364,16 @@ describe "Style Guide Rules Coverage", ->
         fix: true
       })
       expect(res.fixedSource).toBe("x := <C {users} />\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "combines adjacent shorthand attributes in Solid syntax", ->
+      source := "x := <C {foo} {bar} />\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: {}
+        fix: true
+      })
+      expect(res.fixedSource).toBe("x := <C {foo, bar} />\n")
       expect(res.isEquivalencePreserved).toBe(true)
 
     // A lone attribute is stored as the bare entry rather than a one-element
@@ -281,6 +396,15 @@ describe "Style Guide Rules Coverage", ->
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-jsx-attr-shorthand"
       expect(diags.length).toBe(0)
+
+    it "collects attributes after a spread without losing the tree receiver", ->
+      source := "<C {...props} onClick={onClick} />\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-jsx-attr-shorthand": "error" }
+        civetOptions: { react: true }
+      })
+      expect(res.diagnostics.some((d) -> d.ruleId is "internal-rule-error")).toBe(false)
+      expect(res.diagnostics.some((d) -> d.ruleId is "style/prefer-jsx-attr-shorthand")).toBe(true)
 
     // `prop={true}` lowers to `prop`, which is a different emitted attribute, so
     // the finding must never carry a fix.
@@ -314,6 +438,27 @@ describe "Style Guide Rules Coverage", ->
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
       expect(diags.length).toBe(1)
       expect(diags[0].message).toContain(".map &.trim()")
+
+    it "keeps placeholder renames report-only by default", ->
+      source := "items.map((x) => x.name)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        fix: true
+      })
+      diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-ampersand-shorthand"
+      expect(diags).toHaveLength(1)
+      expect(diags[0].fix).toBeUndefined()
+      expect(res.fixedSource).toBeUndefined()
+
+    it "autofixes a direct property placeholder only when opted in", ->
+      source := "items.map((x) => x.name)\n"
+      res := lintSource(source, {
+        rules: { "style/prefer-ampersand-shorthand": "error" }
+        ruleOptions: { "style/prefer-ampersand-shorthand": { autofixPlaceholders: true } }
+        fix: true
+      })
+      expect(res.fixedSource).toBe("items.map(&.name)\n")
+      expect(res.isEquivalencePreserved).toBe(true)
 
     it "allows method arguments that do not reference the callback parameter", ->
       source := "trimmed = lines.map((l) => l.slice(1))\n"
@@ -472,3 +617,16 @@ describe "Style Guide Rules Coverage", ->
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-range-operator"
       expect(diags.length).toBe(0)
+
+describe "style/prefer-walrus-declarations with type annotations", ->
+  run := (source: string) ->
+    lintSource(source, { rules: { "style/prefer-walrus-declarations": "error" }, fix: true })
+
+  it "moves the annotation in front of the operator", ->
+    res := run("const allowed: number[] = []\nlet n: number | undefined = 1\nexport const m: Map<string, 0 | 1> = new Map()\n")
+    expect(res.fixedSource).toBe("allowed: number[] := []\nn: number | undefined .= 1\nexport m: Map<string, 0 | 1> := new Map()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "leaves function-typed and uninitialised declarations alone", ->
+    for source of ["const cb: (x: number) => void = noop\n", "let name: string | undefined\n"]
+      expect(run(source).fixedSource).toBeUndefined()

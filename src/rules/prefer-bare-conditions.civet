@@ -1,0 +1,90 @@
+import type { Rule, RuleContext } from "../types.civet"
+import { intersectsRange } from "../utils.civet"
+
+const STATEMENT_TYPES = [
+  "IfStatement"
+  "IterationStatement"
+  "SwitchStatement"
+]
+
+export const preferBareConditionsRule: Rule = {
+  id: "style/prefer-bare-conditions"
+  meta: {
+    description: "Prefer bare condition expressions without outer parentheses for if / unless / while / switch"
+    fixable: true
+    defaultSeverity: "error"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    seen := new Set<number>()
+
+    edits: { start: number, end: number, replacement: string }[] := []
+    ctx.declareEquivalenceReference?.("whitespace-style", (input: string) ->
+      return undefined unless edits.length > 0
+      var out = input
+      for edit of [...edits].sort((a, b) -> b.start - a.start)
+        out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end)
+      out
+    )
+
+    tree.visit STATEMENT_TYPES, (node) ->
+      tokens := tree.tokens(node)
+      kwTok := tokens.find (t) ->
+        r := t.raw.trim()
+        v := t.value.trim()
+        (r is "if" or r is "unless" or r is "while" or r is "switch" or v is "if" or v is "while" or v is "switch") and t.range.end > t.range.start
+      return unless kwTok?
+
+      openParen := tokens.find (t) ->
+        t.raw is "(" and not t.synthetic and t.range.start >= kwTok.range.end
+      return unless openParen?
+
+      between := source.slice(kwTok.range.end, openParen.range.start)
+      return unless /^[ \t]*$/.test(between)
+
+      lineEnd := source.indexOf("\n", kwTok.range.start)
+      endOfHeadLine := lineEnd < 0 ? source.length : lineEnd
+
+      headLine := source.slice(kwTok.range.start, endOfHeadLine)
+      return if headLine.trim().endsWith("{")
+
+      closeParen := tokens.find (t) ->
+        t.raw is ")" and not t.synthetic and t.range.start > openParen.range.start and t.range.end <= endOfHeadLine
+      return unless closeParen?
+
+      afterClose := source.slice(closeParen.range.end, endOfHeadLine)
+      return unless /^[ \t]*$/.test(afterClose)
+
+      inner := source.slice(openParen.range.end, closeParen.range.start).trim()
+      return if inner.startsWith("(") and inner.endsWith(")")
+
+      pos := openParen.range.start
+      return if seen.has(pos)
+      return if intersectsRange(ignoredRanges, pos, closeParen.range.end)
+      seen.add(pos)
+
+      beforeOpen := source.slice(0, openParen.range.start)
+      hasSpaceBefore := /[ \t]$/.test(beforeOpen)
+      openReplacement := hasSpaceBefore ? "" : " "
+
+      openEdit := { start: openParen.range.start, end: openParen.range.end, replacement: openReplacement }
+      closeEdit := { start: closeParen.range.start, end: closeParen.range.end, replacement: "" }
+      edits.push(openEdit)
+      edits.push(closeEdit)
+
+      ctx.report({
+        ruleId: "style/prefer-bare-conditions"
+        message: "Omit parentheses around condition expression"
+        pos: openParen.range.start
+        fix: openEdit
+      })
+      ctx.report({
+        ruleId: "style/prefer-bare-conditions"
+        message: "Omit closing parenthesis of condition expression"
+        pos: closeParen.range.start
+        fix: closeEdit
+      })
+}

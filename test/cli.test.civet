@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { parseCliArgs, findCivetFiles, formatTextReport, runCli } from "../src/cli.civet"
+import { resolveCivetCompiler } from "../src/compiler.civet"
 
 describe "CLI Suite", ->
   it "publishes the civet-clint package with the clint executable", async ->
@@ -115,9 +116,13 @@ describe "CLI Suite", ->
     expect(payload.civetOptions.coffeeIsnt).toBe(true)
     expect(payload.civetOptions.coffeeEq).toBe(true)
     expect(payload.rules["style/prefer-jsx-shorthand"]).toBe("error")
-    // react is not in the dial, so the JSX rule must be skipped.
+    expect(payload.compilerVersion).toBe(resolveCivetCompiler(process.cwd()).version)
+    expect(payload.compilerPreference).toBe("project")
+    expect(payload.compilerUsedBundled).toBe(true)
+    expect(payload.compilerPath).toContain("@danielx/civet")
+    // JSX attribute rules are syntax-based and run under Solid as well as React.
     skippedIds := payload.skippedRules.map (s) -> s.ruleId
-    expect(skippedIds).toContain("style/prefer-jsx-shorthand")
+    expect(skippedIds).not.toContain("style/prefer-jsx-shorthand")
     // no-is-not requires coffeeIsnt, which IS present, so it must not be skipped.
     expect(skippedIds).not.toContain("style/no-is-not")
 
@@ -156,6 +161,7 @@ describe "CLI Suite", ->
     banner := errs.join("\n")
     expect(banner).toContain(configPath)
     expect(banner).toContain(path.join(tmpDir, "civet.json"))
+    expect(banner).toContain(`compiler     @danielx/civet@${resolveCivetCompiler(process.cwd()).version}`)
     expect(banner).toContain("preset       default")
     expect(banner).toContain("coffeeEq")
     expect(banner).toContain("files        1")
