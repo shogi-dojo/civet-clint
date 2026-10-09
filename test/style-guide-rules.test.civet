@@ -617,3 +617,16 @@ describe "Style Guide Rules Coverage", ->
       })
       diags := res.diagnostics.filter (d) -> d.ruleId is "style/prefer-range-operator"
       expect(diags.length).toBe(0)
+
+describe "style/prefer-walrus-declarations with type annotations", ->
+  run := (source: string) ->
+    lintSource(source, { rules: { "style/prefer-walrus-declarations": "error" }, fix: true })
+
+  it "moves the annotation in front of the operator", ->
+    res := run("const allowed: number[] = []\nlet n: number | undefined = 1\nexport const m: Map<string, 0 | 1> = new Map()\n")
+    expect(res.fixedSource).toBe("allowed: number[] := []\nn: number | undefined .= 1\nexport m: Map<string, 0 | 1> := new Map()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "leaves function-typed and uninitialised declarations alone", ->
+    for source of ["const cb: (x: number) => void = noop\n", "let name: string | undefined\n"]
+      expect(run(source).fixedSource).toBeUndefined()

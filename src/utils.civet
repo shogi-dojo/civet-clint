@@ -225,6 +225,9 @@ export function normalizeSemicolonStyle(code: string): string
       if k >= code.length or code[k] is "\n" or code[k] is "\r"
         i = k
         continue
+      if braceDepth > 0 and code[k] is "}"
+        i++
+        continue
       if code[k] is "/" and (code[k + 1] is "/" or code[k + 1] is "*")
         i++
         if /[ \t]$/.test(out) and (code[i] is " " or code[i] is "\t")
@@ -357,6 +360,50 @@ export function normalizeBlockBraceStyle(code: string): string
 // Consulted only for rules that declare the `type-paren-style` delta, so its
 // blast radius is that rule's own edits.
 
+// Normalize a trailing comma from emitted code while leaving strings, comments,
+// and array elisions untouched. Used when a source rewrite changes only whether
+// Civet's layout emits the comma before a closing delimiter.
+export function normalizeTrailingCommaStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    ch := code[i]
+    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
+      block := code[i + 1] is "*"
+      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
+      stop := end < 0 ? code.length : (block ? end + 2 : end)
+      out += code.slice(i, stop)
+      i = stop
+      continue
+    if ch is "`" or ch is '"' or ch is "'"
+      quote := ch
+      var j = i + 1
+      while j < code.length
+        if code[j] is "\\"
+          j += 2
+          continue
+        break if code[j] is quote
+        break if code[j] is "\n" and quote isnt "`"
+        j++
+      out += code.slice(i, Math.min(j + 1, code.length))
+      i = j + 1
+      continue
+    if ch is ","
+      var k = i + 1
+      while k < code.length and /\s/.test(code[k])
+        k++
+      // Scan back by hand: trimming `out` here would copy the whole string once
+      // per comma.
+      var back = out.length - 1
+      back-- while back >= 0 and /\s/.test(out[back])
+      prevNonWs := back >= 0 ? out[back] : ""
+      if k < code.length and ")]}".includes(code[k]) and prevNonWs isnt ","
+        i++
+        continue
+    out += ch
+    i++
+  out
+
 export function normalizeWhitespaceStyle(code: string): string
   var out = ""
   var i = 0
@@ -406,7 +453,7 @@ export function normalizeInequalityStyle(code: string): string
 // Treat empty constructor call parentheses as syntax sugar while preserving
 // grouping when a member/index access follows the constructed value.
 export function normalizeNewCallStyle(code: string): string
-  out := code.replace(/\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[))/g, "new $1()")
+  out := code.replace(/\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
   out.replace(/\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(\)(?!\s*(?:\.|\[))/g, "new $1")
 
 // Canonicalize only a one-parameter arrow whose body is a direct property chain,
@@ -532,6 +579,11 @@ export function normalizeFunctionDeclarationStyle(code: string): string
         braceDepth--
       scan++
     return undefined if arrowPos < 0
+    // Only a return type may sit between the parameter list and `=>`. Without
+    // this, `const x = (a as T).b` reads as a parameter list and the scan runs on
+    // to the next arrow in the file, however far away.
+    between := code.slice(paramsEnd + 1, arrowPos).trim()
+    return undefined unless between.length is 0 or (between.startsWith(":") and not /[;\n]/.test(between))
     bodyStart := skipSpace(arrowPos + 2)
     return undefined unless code[bodyStart] is "{"
     bodyEnd := matching(bodyStart, "{", "}")

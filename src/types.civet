@@ -77,13 +77,14 @@ export interface RuleCapability
 // "repair") is what makes its trailing semicolons genuinely redundant, so
 // style/no-trailing-semicolons must not run until that has happened.
 //
-//   repair  — semantic repairs that intentionally change emitted output.
-//             Gated by behaviour (the test suite), not byte-equality.
-//   idiom   — the default. Output-preserving style fixes.
-//   cleanup — fixes that only become correct once earlier phases have run.
-export type RulePhase = "repair" | "idiom" | "cleanup"
+//   repair      — semantic repairs that intentionally change emitted output.
+//                 Gated by behaviour (the test suite), not byte-equality.
+//   declaration — binding-preserving declaration rewrites, before body idioms.
+//   idiom       — the default. Output-preserving style fixes.
+//   cleanup     — fixes that only become correct once earlier phases have run.
+export type RulePhase = "repair" | "declaration" | "idiom" | "cleanup"
 
-export const RULE_PHASE_ORDER: RulePhase[] = ["repair", "idiom", "cleanup"]
+export const RULE_PHASE_ORDER: RulePhase[] = ["repair", "declaration", "idiom", "cleanup"]
 
 export interface RuleMeta
   description: string
@@ -114,9 +115,18 @@ export interface ConfigOverride
   civetOptions?: CompileDial
   compileOptions?: CompileOptions
 
+// One suppressed finding. `file` is relative to the exceptions file; without a
+// `line` the entry covers every finding of `rule` in that file.
+export interface ExceptionEntry
+  file: string
+  rule: string
+  line?: number
+  reason?: string
+
 export interface ClintConfig
   preset?: string
   civetConfig?: string
+  exceptions?: string
   compiler?: CompilerPreference
   rules?: Record<string, RuleEntry>
   overrides?: ConfigOverride[]
@@ -139,6 +149,9 @@ export interface ResolvedConfig
   compilerUsedBundled: boolean
   compilerWarning?: string
   configPath?: string
+  exceptionsPath?: string
+  // Entries of the exceptions file, with `file` resolved to an absolute path.
+  exceptions?: ExceptionEntry[]
   skippedRules: SkippedRule[]
   overrides?: ConfigOverride[]
   matchingOverrides?: string[]
@@ -153,3 +166,7 @@ export interface LintResult
   errorCount: number
   warningCount: number
   fixableCount: number
+  // Findings hidden by the exceptions file, and the indices (into
+  // `ResolvedConfig.exceptions`) of the entries that hid them.
+  suppressedCount?: number
+  usedExceptions?: number[]

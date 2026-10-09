@@ -72,8 +72,10 @@ describe "style/prefer-postfix-conditional exclusions", ->
   it "leaves a multi-line if", ->
     unchanged("f = =>\n  if (a)\n    return x\n  g()\n")
 
-  it "leaves an if whose body is not a return", ->
-    unchanged("f = =>\n  if (a) g()\n  h()\n")
+  it "uses the `then` form for a body that holds braces", ->
+    res := fix("f = =>\n  if (a) g({ b })\n  h()\n")
+    expect(res.fixedSource).toBe("f = =>\n  if a then g({ b })\n  h()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
 
   it "defers a negated condition to style/prefer-unless", ->
     // Both rules match `if (not x) return` and rewrite the same span in opposite
@@ -95,3 +97,24 @@ describe "style/prefer-postfix-conditional exclusions", ->
     // The guard is anchored, so `a is not b` is not mistaken for a negated head.
     expect(fix("f = =>\n  if (a isnt b) return\n  g()\n").fixedSource)
       .toBe("f = =>\n  return if a isnt b\n  g()\n")
+
+describe "style/prefer-postfix-conditional beyond return", ->
+  run := (source: string) ->
+    lintSource(source, { rules: { "style/prefer-postfix-conditional": "error" }, fix: true })
+
+  it "moves continue, a call, and an assignment behind the condition", ->
+    res := run("for x of xs\n  if (seen.has(x)) continue\n  if (x > 3) out.push(x)\n  if (x is 0) zero = true\n  g(x)\n")
+    expect(res.fixedSource).toBe("for x of xs\n  continue if seen.has(x)\n  out.push(x) if x > 3\n  zero = true if x is 0\n  g(x)\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "uses the `then` form for a statement past the length limit", ->
+    call := "report(" + "a, ".repeat(40) + "z)"
+    res := run("f := =>\n  if (ready) " + call + "\n  1\n")
+    expect(res.fixedSource).toBe("f := =>\n  if ready then " + call + "\n  1\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+describe "style/prefer-postfix-conditional and return-suppressing semicolons", ->
+  it "leaves `if (a) f();` alone", ->
+    res := lintSource("f := =>\n  if (a) g();\n", { rules: { "style/prefer-postfix-conditional": "error" }, fix: true })
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.isEquivalencePreserved).toBe(true)

@@ -9,6 +9,9 @@ export const preferFunctionDeclarationRule: Rule = {
     description: "Prefer function declarations for named const arrow functions with block bodies"
     fixable: true
     defaultSeverity: "warn"
+    // Convert the declaration before prefer-indented-blocks rewrites its arrow
+    // body; the next phase then sees an ordinary function declaration.
+    phase: "declaration"
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -22,30 +25,43 @@ export const preferFunctionDeclarationRule: Rule = {
     )
 
     tree.visit "ArrowFunction", (arrow) ->
-      return unless arrow.block?.type is "BlockStatement" and not arrow.block.bare
+      return unless arrow.block?.type is "BlockStatement"
       arrowRange := tree.range(arrow)
       bodyRange := tree.range(arrow.block)
       return unless arrowRange? and bodyRange?
       lineStartCandidate := source.lastIndexOf("\n", arrowRange.start - 1)
       lineStart := lineStartCandidate < 0 ? 0 : lineStartCandidate + 1
       prefix := source.slice(lineStart, arrowRange.start)
-      header := /^([ \t]*)(export[ \t]+)?const[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*=[ \t]*$/.exec(prefix)
+      // `const f = ...` or its Civet spelling `f := ...`; a bare `f = ...` is an
+      // assignment to something declared elsewhere.
+      header := /^([ \t]*)(export[ \t]+)?(?:const[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*=|([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*:=)[ \t]*$/.exec(prefix)
       return unless header
 
-      name := header[3]!
+      name := (header[3] or header[4])!
       nameStart := lineStart + prefix.indexOf(name)
       arrowToken := tree.tokens(arrow).find (token) -> token.value is "=>" and not token.synthetic
       return unless arrowToken?
       var signature = source.slice(arrowRange.start, arrowToken.range.start).trim()
       asyncArrow := /^async\b/.test(signature)
       signature = signature.replace(/^async\s+/, "") if asyncArrow
-      return unless signature.length > 0
-      bodyText := source.slice(arrowToken.range.end, arrowRange.end).trim()
-      return unless bodyText.startsWith("{") and bodyText.endsWith("}")
+      // `f := => ...` has no parameter list to carry over.
+      signature = "()" if signature.length is 0
+      return unless signature.startsWith("(") or signature.startsWith("<")
+      afterArrow := source.slice(arrowToken.range.end, arrowRange.end)
+      bodyText := afterArrow.trim()
+      braced := bodyText.startsWith("{") and bodyText.endsWith("}")
+      // An indented body starts on the line after `=>`. A one-line arrow
+      // (`f := (x) => x + 1`) is an expression and stays one.
+      indented := not braced and /^[ \t]*\r?\n/.test(afterArrow)
+      return unless braced or indented
 
       var unsafeLexicalBinding = tree.tokens(arrow).some (token) ->
         return false if token.synthetic or intersectsRange(ignoredRanges, token.range.start, token.range.end)
         token.raw.trim() is "this" or token.raw.trim() is "arguments" or token.raw.trim() is "super"
+      // `@`, `@x`, and `@#p` are Civet spellings of `this`, and no token carries
+      // the word. Scan the arrow's text instead; a decorator's `@` is refused too.
+      for let i = arrowRange.start; i < arrowRange.end; i++
+        unsafeLexicalBinding = true if source[i] is "@" and not intersectsRange(ignoredRanges, i, i + 1)
       tokenRun := tree.tokens(arrow).filter (token) -> not token.synthetic and not intersectsRange(ignoredRanges, token.range.start, token.range.end)
       for let i = 0; i + 2 < tokenRun.length; i++
         unsafeLexicalBinding = true if tokenRun[i].raw.trim() is "new" and tokenRun[i + 1].raw.trim() is "." and tokenRun[i + 2].raw.trim() is "target"
@@ -66,8 +82,12 @@ export const preferFunctionDeclarationRule: Rule = {
         indent := header[1] or ""
         exportPrefix := header[2] ? "export " : ""
         functionPrefix := asyncArrow ? "async function" : "function"
-        replacement := `${indent}${exportPrefix}${functionPrefix} ${name}${signature} ${bodyText}`
-        fix = { start: lineStart, end: arrowRange.end, replacement }
+        head := `${indent}${exportPrefix}${functionPrefix} ${name}${signature}`
+        fix = if braced
+          { start: lineStart, end: arrowRange.end, replacement: `${head} ${bodyText}` }
+        else
+          // The body keeps its own text; only the head up to `=>` is replaced.
+          { start: lineStart, end: arrowToken.range.end, replacement: head }
         fixes.push(fix)
 
       ctx.report({

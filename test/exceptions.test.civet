@@ -1,0 +1,94 @@
+import { describe, it, expect } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { runCli } from "../src/cli.civet"
+import { loadConfig, loadExceptions } from "../src/config.civet"
+import { lintFile, lintSource } from "../src/engine.civet"
+
+RULE := "style/prefer-word-operators"
+SOURCE := "a := x === 1\nb := y === 2\n"
+
+async function project(exceptions: any, source = SOURCE)
+  dir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-exc-"))
+  await fs.writeFile(path.join(dir, "clint.config.json"), JSON.stringify({ rules: { [RULE]: "error" } }))
+  await fs.writeFile(path.join(dir, "a.civet"), source)
+  if exceptions?
+    await fs.writeFile(path.join(dir, "clint.exceptions.json"), JSON.stringify({ exceptions }))
+  { dir, file: path.join(dir, "a.civet") }
+
+async function captureStderr(run: => Promise<number>)
+  original := console.error
+  originalLog := console.log
+  lines: string[] := []
+  console.error = (...args) -> lines.push(args.join(" "))
+  console.log = -> undefined
+  try
+    code := await run()
+    { code, stderr: lines.join("\n") }
+  finally
+    console.error = original
+    console.log = originalLog
+
+describe "exceptions file", ->
+  it "suppresses the finding on the named line only", async ->
+    { dir, file } := await project([{ file: "a.civet", line: 1, rule: RULE, reason: "legacy" }])
+    config := loadConfig(undefined, dir)
+    res := await lintFile(file, { config })
+    expect(res.diagnostics.map (d) -> d.line).toEqual([2])
+    expect(res.errorCount).toBe(1)
+    expect(res.suppressedCount).toBe(1)
+    expect(res.usedExceptions).toEqual([0])
+
+  it "covers every line of the file when no line is given", async ->
+    { dir, file } := await project([{ file: "a.civet", rule: RULE }])
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics).toHaveLength(0)
+    expect(res.suppressedCount).toBe(2)
+
+  it "leaves other rules and other files alone", async ->
+    { dir, file } := await project([
+      { file: "a.civet", line: 1, rule: "style/prefer-unless" }
+      { file: "b.civet", line: 1, rule: RULE }
+    ])
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics).toHaveLength(2)
+    expect(res.usedExceptions).toEqual([])
+
+  it "does not autofix a rule that has an exception in the file", async ->
+    { dir, file } := await project([{ file: "a.civet", line: 1, rule: RULE }])
+    res := await lintFile(file, { config: loadConfig(undefined, dir), fix: true })
+    expect(res.appliedFixesCount).toBe(0)
+    expect(await fs.readFile(file, "utf8")).toBe(SOURCE)
+    expect(res.diagnostics.map (d) -> d.line).toEqual([2])
+
+  it "makes the run pass and reports the count on stderr", async ->
+    { dir, file } := await project([{ file: "a.civet", rule: RULE }])
+    { code, stderr } := await captureStderr => runCli(["--config", path.join(dir, "clint.config.json"), file])
+    expect(code).toBe(0)
+    expect(stderr).toContain("2 findings suppressed by")
+
+  it "warns about an exception that no longer matches", async ->
+    { dir, file } := await project([{ file: "a.civet", line: 7, rule: RULE }])
+    { code, stderr } := await captureStderr => runCli(["--config", path.join(dir, "clint.config.json"), file])
+    expect(code).toBe(1)
+    expect(stderr).toContain("unused exception")
+    expect(stderr).toContain("a.civet:7")
+
+  it "honours an explicit path and fails when it is missing", async ->
+    { dir } := await project(undefined)
+    await fs.writeFile(path.join(dir, "allow.json"), JSON.stringify({ exceptions: [{ file: "a.civet", rule: RULE }] }))
+    expect(loadExceptions("allow.json", dir).entries).toHaveLength(1)
+    expect(=> loadExceptions("missing.json", dir)).toThrow(/not found/)
+    expect(loadExceptions(undefined, dir).entries).toEqual([])
+
+  it "rejects malformed entries", async ->
+    { dir } := await project([{ file: "a.civet" }])
+    expect(=> loadConfig(undefined, dir)).toThrow(/needs a "rule" id/)
+    { dir: dir2 } := await project([{ file: "a.civet", rule: RULE, line: 0 }])
+    expect(=> loadConfig(undefined, dir2)).toThrow(/invalid "line"/)
+
+  it "is inert for callers that pass no exceptions", ->
+    res := lintSource(SOURCE, { rules: { [RULE]: "error" } })
+    expect(res.diagnostics).toHaveLength(2)
+    expect(res.suppressedCount).toBe(0)

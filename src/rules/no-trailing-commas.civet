@@ -1,5 +1,58 @@
-import type { Rule, RuleContext } from "../types.civet"
-import { intersectsRange } from "../utils.civet"
+import type { CivetCompiler, Fix, Rule, RuleContext } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
+import { compileForOutput } from "../compiler.civet"
+
+type Candidate = { pos: number, fix: Fix }
+
+const MAX_VERIFY_COMPILES = 24
+
+// Line-ending commas are valid in source migrations but redundant in Civet lists.
+// Check the entire candidate group first (one compile in the usual case), and
+// bisect only if removing a comma changes the parsed program.
+function safeLineEndingCommas(
+  source: string,
+  baselineOutput: string | undefined,
+  dial: Record<string, any>,
+  compiler: CivetCompiler | undefined,
+  candidates: Candidate[]
+): Candidate[]
+  return [] if candidates.length is 0
+  baseline := if baselineOutput?
+    baselineOutput
+  else
+    base := compileForOutput(source, { dial, compiler })
+    return [] unless base.ok
+    base.output!
+
+  // Bounded: past the budget a group is left unreported instead of being split
+  // further, so a file with many load-bearing commas cannot cost a compile each.
+  var compilesLeft = MAX_VERIFY_COMPILES
+  verified := new Map<string, boolean>()
+  isSafe := (subset: Candidate[]): boolean ->
+    key := subset.map((item) -> item.pos).join(",")
+    cached := verified.get(key)
+    return cached if cached?
+    return false if compilesLeft-- <= 0
+    { output: candidate } := applyEdits(source, subset.map((item) -> item.fix))
+    return false if candidate is source
+    res := compileForOutput(candidate, { dial, compiler })
+    safe := res.ok and res.output is baseline
+    verified.set(key, safe)
+    safe
+
+  findSafe := (subset: Candidate[]): Candidate[] ->
+    return [] if subset.length is 0
+    return subset if isSafe(subset)
+    return [] if subset.length is 1
+    mid := Math.floor(subset.length / 2)
+    [...findSafe(subset.slice(0, mid)), ...findSafe(subset.slice(mid))]
+
+  // Groups that are safe alone can still interact; shrink until the union holds.
+  var accepted = findSafe(candidates)
+  compilesLeft = MAX_VERIFY_COMPILES
+  while accepted.length > 0 and not isSafe(accepted)
+    accepted = accepted.slice(0, Math.floor(accepted.length / 2))
+  accepted
 
 // A comma directly before a closing bracket, brace or paren separates nothing, so
 // Civet does not need it -- a newline already delimits the entries:
@@ -28,6 +81,13 @@ export const noTrailingCommasRule: Rule = {
     description: "Disallow a trailing comma before a closing bracket, brace, or paren"
     fixable: true
     defaultSeverity: "error"
+    defaultOptions: {
+      // Also drop a comma that ends a line between list entries (`a: 1,` + newline
+      // + `b: 2`). Off by default: it is a style choice rather than a redundancy
+      // before a closer, it reports thousands of sites on a comma-separated
+      // codebase, and each file costs a verification compile.
+      lineEndings: false
+    }
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -35,6 +95,7 @@ export const noTrailingCommasRule: Rule = {
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
 
     edits: { start: number, end: number, replacement: string }[] := []
+    lineEndingCandidates: Candidate[] := []
     ctx.declareEquivalenceReference?.("trailing-comma-style", (input: string) ->
       return undefined unless edits.length > 0
       var out = input
@@ -70,5 +131,40 @@ export const noTrailingCommasRule: Rule = {
         message: "Unnecessary trailing comma"
         pos: i
         fix: { start: i, end: i + 1, replacement: "" }
+      })
+
+    // Civet accepts newlines as separators in object, array, argument, parameter,
+    // and import lists. A comma at the end of a line inside one of those lists
+    // compiles the same without it. Collect every such comma, then let the compiler
+    // reject ambiguous cases such as a comma operator or a multi-declaration head.
+    for let i = 0; i < source.length; i++
+      break unless ctx.options.lineEndings is true
+      continue unless source[i] is ","
+      continue if intersectsRange(ignoredRanges, i, i + 1)
+      var k = i + 1
+      while k < source.length and (source[k] is " " or source[k] is "\t")
+        k++
+      if source[k] is "\r"
+        k++
+      continue unless source[k] is "\n"
+      k++
+      while k < source.length and /\s/.test(source[k])
+        k++
+      continue if k >= source.length or source[k] is ")" or source[k] is "]" or source[k] is "}"
+
+      var p = i - 1
+      while p >= 0 and /\s/.test(source[p])
+        p--
+      continue if p >= 0 and source[p] is ","
+      lineEndingCandidates.push({ pos: i, fix: { start: i, end: i + 1, replacement: "" } })
+
+    safeLineEnds := safeLineEndingCommas(source, ctx.baselineOutput, ctx.parseOptions, ctx.compiler, lineEndingCandidates)
+    for item of safeLineEnds
+      edits.push(item.fix)
+      ctx.report({
+        ruleId: "style/no-trailing-commas"
+        message: "Unnecessary comma at the end of a line"
+        pos: item.pos
+        fix: item.fix
       })
 }

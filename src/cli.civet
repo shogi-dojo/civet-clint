@@ -415,6 +415,7 @@ Options:
         compilerPath: fileConfig.compilerPath
         compilerPreference: fileConfig.compilerPreference
         compilerUsedBundled: fileConfig.compilerUsedBundled
+        exceptionsPath: fileConfig.exceptionsPath
         ignoredCompileOptions: ignored
         rules: fileConfig.rules
         ruleOptions: effectiveRuleOptions(fileConfig)
@@ -435,6 +436,7 @@ Options:
         compilerPath: config.compilerPath
         compilerPreference: config.compilerPreference
         compilerUsedBundled: config.compilerUsedBundled
+        exceptionsPath: config.exceptionsPath
         ignoredCompileOptions: ignored
         rules: config.rules
         ruleOptions: effectiveRuleOptions(config)
@@ -492,6 +494,24 @@ Options:
   else
     for each file, index of files
       results[index] = await lintOneFile(file, config, isRewriteMode, isWriteMode)
+
+  // Exceptions are reported on stderr so `--format json` stays parseable. An entry
+  // that matched nothing is stale -- the finding was fixed or its line moved -- and
+  // is only judged when its file was part of this run.
+  if config.exceptions?.length
+    linted := new Set(files.map (file) -> path.resolve(file))
+    used := new Set<number>()
+    var suppressed = 0
+    for res of results
+      suppressed += res.suppressedCount or 0
+      used.add(index) for index of res.usedExceptions or []
+    label := path.relative(process.cwd(), config.exceptionsPath!)
+    if suppressed > 0
+      console.error(`clint: ${suppressed} finding${suppressed is 1 ? "" : "s"} suppressed by ${label}`)
+    for each entry, index of config.exceptions
+      continue if used.has(index) or not linted.has(entry.file)
+      at := entry.line? ? `:${entry.line}` : ""
+      console.error(`clint: warning unused exception ${path.relative(process.cwd(), entry.file)}${at} [${entry.rule}] in ${label}`)
 
   var totalRewritten = 0
   if isRewriteMode

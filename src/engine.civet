@@ -2,12 +2,13 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
 export { normalizeBlockBraceStyle }
 export { normalizeWhitespaceStyle }
+export { normalizeTrailingCommaStyle }
 import { loadConfig, computeSkippedRules, resolveConfigForFile, resolveRuleOptions, validateRuleConflicts } from "./config.civet"
 import { RuleRegistry, defaultRuleRegistry } from "./registry.civet"
 import { RULE_PHASE_ORDER } from "./types.civet"
@@ -20,6 +21,9 @@ export interface LintOptions
   civetOptions?: Record<string, any>
   compileOptions?: Record<string, any>
   compiler?: CivetCompiler
+  // The exceptions that apply to this file; `index` identifies the entry in
+  // `ResolvedConfig.exceptions` so the caller can tell which ones were used.
+  exceptions?: { rule: string, line?: number, index: number }[]
   fix?: boolean
   rules?: Record<string, RuleLevel>
   ruleOptions?: Record<string, RuleOptions>
@@ -133,49 +137,6 @@ export function normalizeDeclarationStyle(code: string): string
       if not isWordChar(before) and not isWordChar(after)
         out += "let"
         i += 5
-        continue
-    out += ch
-    i++
-  out
-
-// Normalize away a comma that sits immediately before a closing bracket, so a fix
-// that only drops trailing commas can be verified. Civet emits the comma verbatim,
-// so the byte-identical gate would otherwise reject every such fix.
-//
-// Elision guard: `[1, 2,,]` has length 3 and `[a, , b]` skips an element, so a
-// comma preceded by another comma is left alone — dropping it would change meaning.
-export function normalizeTrailingCommaStyle(code: string): string
-  var out = ""
-  var i = 0
-  while i < code.length
-    ch := code[i]
-    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
-      block := code[i + 1] is "*"
-      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
-      stop := end < 0 ? code.length : (block ? end + 2 : end)
-      out += code.slice(i, stop)
-      i = stop
-      continue
-    if ch is "`" or ch is '"' or ch is "'"
-      quote := ch
-      var j = i + 1
-      while j < code.length
-        if code[j] is "\\"
-          j += 2
-          continue
-        break if code[j] is quote
-        break if code[j] is "\n" and quote isnt "`"
-        j++
-      out += code.slice(i, Math.min(j + 1, code.length))
-      i = j + 1
-      continue
-    if ch is ","
-      var k = i + 1
-      while k < code.length and /\s/.test(code[k])
-        k++
-      prevNonWs := out.replace(/\s+$/, "").slice(-1)
-      if k < code.length and ")]}".includes(code[k]) and prevNonWs isnt ","
-        i++
         continue
     out += ch
     i++
@@ -452,6 +413,11 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
       resAfter = applyDeltaNormalizer(kind, resAfter)
     resBefore is resAfter
 
+  fileExceptions := options.exceptions or []
+  exceptedRules := new Set(fileExceptions.map (entry) -> entry.rule)
+  usedExceptions := new Set<number>()
+  var suppressedCount = 0
+
   context: RuleContext := {
     source
     syntax
@@ -493,6 +459,12 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           line = 1
           column = 1
 
+      exception := fileExceptions.find (entry) -> entry.rule is d.ruleId and (not entry.line? or entry.line is line)
+      if exception?
+        usedExceptions.add(exception.index)
+        suppressedCount++
+        return
+
       diagnostics.push({
         ruleId: d.ruleId
         severity
@@ -500,7 +472,11 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         line: line!
         column: column!
         pos: d.pos
-        fix: suppressFixForCurrentRule ? undefined : d.fix
+        // A rule with an exception in this file is never autofixed here. Its
+        // equivalence reference is built from every site it found, so applying
+        // some of them cannot be verified -- and once other fixes move lines, a
+        // line-keyed exception would stop protecting the site it names.
+        fix: suppressFixForCurrentRule or exceptedRules.has(d.ruleId) ? undefined : d.fix
       })
   }
 
@@ -797,6 +773,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     errorCount
     warningCount
     fixableCount
+    suppressedCount
+    usedExceptions: [...usedExceptions]
   }
 
 // Runs each phase in turn, feeding one phase's fixed output into the next.
@@ -812,11 +790,32 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
 // so gone) or re-reported by the final pass.
 export function lintPhased(source: string, options: LintOptions = {}): LintResult
   phases := options.phases or RULE_PHASE_ORDER
+  registry := options.registry or defaultRuleRegistry
+  config := (options.config as ResolvedConfig)?.rules
+    ? options.config as ResolvedConfig
+    : loadConfig(undefined, process.cwd(), registry)
+  rules := { ...config.rules, ...(options.rules or {}) }
+  activePhases := new Set(Object.keys(rules)
+    .filter((id) -> rules[id] isnt "off")
+    .map((id) -> registry.get(id)?.meta.phase or "idiom"))
+
+  if options.fix
+    // Most files in a later corpus pass have already settled. One read-only
+    // lint proves there is no eligible fix; avoid re-parsing every phase just
+    // to produce that same final report. Repair findings must still run their
+    // phase because the unphased check deliberately withholds repair fixes.
+    initial := lintSource(source, { ...options, phases: undefined, fix: false })
+    needsWork := initial.diagnostics.some (diagnostic) ->
+      rulePhase := registry.get(diagnostic.ruleId)?.meta.phase or "idiom"
+      phases.includes(rulePhase) and (diagnostic.fix? or rulePhase is "repair")
+    return initial unless needsWork
 
   var current = source
   var totalApplied = 0
   var everFixed = false
   var equivalencePreserved = true
+  used := new Set<number>()
+  rejections: Diagnostic[] := []
 
   // Each phase runs to a fixed point. Nested constructs produce overlapping fixes --
   // de-bracing `describe => { it => { ... } }` yields an outer edit whose span
@@ -826,13 +825,22 @@ export function lintPhased(source: string, options: LintOptions = {}): LintResul
   // silently left half-repaired.
   MAX_PASSES := 10
   for phase of phases
+    // An empty phase cannot change the source or findings. Avoid its redundant
+    // parse and baseline emit, especially for house presets with no declarations.
+    continue unless activePhases.has(phase)
     var pass = 0
     while pass < MAX_PASSES
       pass++
       res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
+      used.add(index) for index of res.usedExceptions or []
       equivalencePreserved = false unless res.isEquivalencePreserved
       totalApplied += res.appliedFixesCount
-      break unless res.fixedSource? and res.fixedSource isnt current
+      unless res.fixedSource? and res.fixedSource isnt current
+        // The phase has settled. A fix the gate rejected on this last pass will be
+        // rejected again next run, so it must reach the report: the final re-lint
+        // below runs without `fix` and would show it as merely "fixable".
+        rejections.push(...res.diagnostics.filter (d) -> d.ruleId.startsWith("compiler-equivalence-"))
+        break
       current = res.fixedSource
       everFixed = true
 
@@ -844,12 +852,15 @@ export function lintPhased(source: string, options: LintOptions = {}): LintResul
     filePath: options.filename or "input.civet"
     source
     fixedSource: everFixed ? current : undefined
-    diagnostics: final.diagnostics
+    diagnostics: [...final.diagnostics, ...rejections]
     appliedFixesCount: totalApplied
     isEquivalencePreserved: equivalencePreserved
-    errorCount: final.errorCount
+    errorCount: final.errorCount + rejections.length
     warningCount: final.warningCount
     fixableCount: final.fixableCount
+    suppressedCount: final.suppressedCount
+    // An exception that matched before fixes moved its line still counts as used.
+    usedExceptions: [...new Set([...used, ...(final.usedExceptions or [])])]
   }
 
 export async function lintFile(filePath: string, options: LintOptions = {}): Promise<LintResult>
@@ -858,12 +869,17 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
   fileConfig := resolveConfigForFile(baseConfig, filePath, process.cwd(), registry)
 
-  hasRepairRules := Object.keys(fileConfig.rules).some (ruleId) ->
-    fileConfig.rules[ruleId] isnt "off" and (registry.get(ruleId)?.meta.phase is "repair")
-  shouldRunPhases := options.phases? or (options.fix and hasRepairRules)
+  hasOrderedRules := Object.keys(fileConfig.rules).some (ruleId) ->
+    phase := registry.get(ruleId)?.meta.phase
+    fileConfig.rules[ruleId] isnt "off" and (phase is "repair" or phase is "declaration")
+  shouldRunPhases := options.phases? or (options.fix and hasOrderedRules)
+  absolutePath := path.resolve(filePath)
+  exceptions := (fileConfig.exceptions or [])
+    .map((entry, index) -> { entry.rule, entry.line, index, entry.file })
+    .filter (entry) -> entry.file is absolutePath
   res := shouldRunPhases
-    ? lintPhased(content, { ...options, config: fileConfig, filename: filePath, registry })
-    : lintSource(content, { ...options, config: fileConfig, filename: filePath, registry })
+    ? lintPhased(content, { ...options, config: fileConfig, filename: filePath, registry, exceptions })
+    : lintSource(content, { ...options, config: fileConfig, filename: filePath, registry, exceptions })
 
   if options.fix and res.fixedSource and res.fixedSource isnt content
     lineEnding := detectLineEnding(content)

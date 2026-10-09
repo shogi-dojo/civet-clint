@@ -12,29 +12,25 @@ import { parseSyntax, compileForOutput } from "../compiler.civet"
 //     f()               value, and a `useEffect` that returns a non-function
 //     g();              makes React treat it as a cleanup callback.
 //
-// Emitted `;` is normalized away by the engine's "semicolon-style" delta, so the
-// only differences that survive normalization are real semantic ones. Rather than
-// guess which positions are safe from syntax alone, each candidate is verified by
-// compiling with and without it and comparing normalized output. That keeps the
-// rule correct for shapes nobody enumerated.
+// That one position is decided from syntax: a `;` ending the last statement of a
+// value-returning function is left alone and never compiled (see
+// `suppressesImplicitReturn`). They are exactly the semicolons a converged codebase
+// keeps, so proving each one unsafe by compiling was the rule's entire steady-state
+// cost -- a full bisection tree, 2n-1 compiles for n of them, on every run.
+//
+// Everything else is a candidate, and the candidates of a file are verified
+// together with a single compile against the engine's baseline. Emitted `;` is
+// normalized away by the "semicolon-style" delta, so a difference that survives is
+// a real one; only then is the group bisected to find the offender.
 
+type Candidate = { pos: number, fix: Fix }
 
-// True when removing the semicolon leaves the emitted program unchanged once
-// pass-through semicolons are normalized away. A compile failure counts as unsafe.
-function removalIsSafe(source: string, fix: Fix, dial: Record<string, any>, compiler?: CivetCompiler): boolean
-  candidate := source.slice(0, fix.start) + fix.replacement + source.slice(fix.end)
-  withSemi := compileForOutput(source, { dial, compiler })
-  return false unless withSemi.ok
-  without := compileForOutput(candidate, { dial, compiler })
-  return false unless without.ok
-  normalizeSemicolonStyle(withSemi.output!) is normalizeSemicolonStyle(without.output!)
-
-function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number, fix: Fix }[]
+function findTrailingSemicolons(source: string, tree: SyntaxTree): Candidate[]
   commentRanges := tree.commentRanges()
   stringRanges := tree.stringRanges()
   ignoredRanges := [...commentRanges, ...stringRanges]
 
-  results: { pos: number, fix: Fix }[] := []
+  results: Candidate[] := []
   lines := source.split("\n")
   var currentOffset = 0
 
@@ -96,22 +92,102 @@ function findTrailingSemicolons(source: string, tree: SyntaxTree): { pos: number
 
   results
 
+const MAX_FALLBACK_COMPILES = 24
+const FUNCTION_NODES = ["FunctionExpression", "ArrowFunction", "MethodDefinition"]
+const BRANCH_CONTINUATION = /^(?:else|catch|finally|when|case|default)\b/
+const EXPLICIT_EXIT = /^(?:return|throw|break|continue)\b/
+const PROPERTY_LIKE = /^[A-Za-z_$][\w$]*(?:\s*\(.*)?[;,]?$/
+const CLOSERS_ONLY = /^[)\]}]*[;,]?$/
+
+// True when the `;` at `pos` ends the last statement of a function that returns a
+// value -- the position where it suppresses the implicit return. Conservative by
+// construction: a wrong `true` only leaves a semicolon unreported, and a wrong
+// `false` is still caught by the compile in `safeSemicolons`.
+function suppressesImplicitReturn(source: string, tree: SyntaxTree, pos: number, functions: any[]): boolean
+  var enclosing: any = undefined
+  for fn of functions
+    continue unless fn.start <= pos and pos < fn.end
+    enclosing = fn if not enclosing? or fn.end - fn.start < enclosing.end - enclosing.start
+  return false unless enclosing?
+  // Every `;` in such a body is what keeps Civet reading it as a block.
+  return true if enclosing.objectProne
+  // `: void` functions and constructors have no implicit return to suppress.
+  return false if enclosing.returnsNothing
+  // Neither has a statement that already transfers control.
+  lineStart := source.lastIndexOf("\n", pos - 1) + 1
+  return false if EXPLICIT_EXIT.test(source.slice(lineStart, pos).trimStart())
+
+  // Find the next line that holds a statement: not blank, not a comment, and not
+  // just the closers of blocks ending here.
+  var lineEnd = source.indexOf("\n", pos)
+  while lineEnd >= 0 and lineEnd < enclosing.end
+    nextEnd := source.indexOf("\n", lineEnd + 1)
+    line := source.slice(lineEnd + 1, if nextEnd < 0 then source.length else nextEnd)
+    text := line.trim()
+    textStart := lineEnd + 1 + (line.length - line.trimStart().length)
+    isComment := text.length > 0 and intersectsRange(enclosing.comments, textStart, textStart + 1)
+    if text.length > 0 and not isComment and not CLOSERS_ONLY.test(text)
+      // Past the function, or at a branch boundary whose arms each return.
+      return true if textStart >= enclosing.end or BRANCH_CONTINUATION.test(text)
+      // A statement follows inside the same function, so this one is not last.
+      return false
+    lineEnd = nextEnd
+  true
+
+// A JS-style braced arrow body made only of bare expressions is one Civet reads as
+// an OBJECT LITERAL the moment its semicolons go:
+//
+//   batch(=> {            batch(() => ({
+//     setA(1);      ->      setA: setA(1),
+//     setB(2);              setB: setB(2)
+//   })                    }))
+//
+// Only a bare `name(args)` call or a lone identifier can pass for a property, so
+// one statement of any other shape at the body's own indentation settles the body
+// as a block.
+function isObjectProneBody(body: string): boolean
+  return false unless body.startsWith("{") and body.endsWith("}")
+  lines := body.slice(1, -1).split("\n").filter (line) -> line.trim().length > 0
+  return false if lines.length is 0
+  indent := Math.min(...lines.map (line) -> line.length - line.trimStart().length)
+  lines.every (line) ->
+    text := line.trim()
+    line.length - line.trimStart().length > indent or PROPERTY_LIKE.test(text) or CLOSERS_ONLY.test(text)
+
+function withoutReturnSuppressors(source: string, tree: SyntaxTree, found: Candidate[]): Candidate[]
+  return found if found.length is 0
+  comments := tree.commentRanges()
+  functions: any[] := []
+  tree.visit FUNCTION_NODES, (node) ->
+    range := tree.range(node)
+    return unless range?
+    returnType := node.returnType ? tree.text(node.returnType) : ""
+    name := typeof node.name is "string" ? node.name : ""
+    arrow := node.type is "ArrowFunction" ? tree.tokens(node).find((token) -> token.value is "=>" and not token.synthetic) : undefined
+    functions.push({
+      range.start
+      range.end
+      comments
+      objectProne: arrow? and isObjectProneBody(source.slice(arrow.range.end, range.end).trim())
+      returnsNothing: /\bvoid\b/.test(returnType) or name is "constructor"
+    })
+  found.filter (item) -> not suppressesImplicitReturn(source, tree, item.pos, functions)
+
 // Candidates whose removal provably does not change the emitted program.
 //
-// Verifying one candidate at a time costs a compile per semicolon, which on a large
-// test file (hundreds of semicolons, ~1k lines) is slow enough to exhaust memory.
-// Instead the set is bisected: a group that verifies clean is accepted whole, and
-// only a group that fails is split. Files where every semicolon is removable — the
-// common case — cost two compiles regardless of size, and a file with k unsafe
-// semicolons costs O(k log n) rather than O(n).
+// One compile covers the whole file in the common case where every candidate is
+// removable. Only a group that fails is bisected, so k unsafe candidates cost
+// O(k log n) compiles rather than O(n).
 function safeSemicolons(
   source: string,
   tree: SyntaxTree,
   dial: Record<string, any>,
   baselineOutput?: string,
-  compiler?: CivetCompiler
-): { pos: number, fix: Fix }[]
-  found := findTrailingSemicolons(source, tree)
+  compiler?: CivetCompiler,
+  verifyFunctionTails = false
+): Candidate[]
+  all := findTrailingSemicolons(source, tree)
+  found := verifyFunctionTails ? all : withoutReturnSuppressors(source, tree, all)
   return found if found.length is 0
 
   // The engine already compiled this exact source under the same options before
@@ -124,16 +200,18 @@ function safeSemicolons(
     return [] unless base.ok
     normalizeSemicolonStyle(base.output!)
 
-  groupIsSafe := (group: { pos: number, fix: Fix }[]): boolean ->
+  groupIsSafe := (group: Candidate[]): boolean ->
     return true if group.length is 0
     { output } := applyEdits(source, group.map((f) -> f.fix))
     res := compileForOutput(output, { dial, compiler })
     res.ok and normalizeSemicolonStyle(res.output!) is baseline
 
-  // Depth-bounded so a pathological file can never blow the stack.
-  accepted: { pos: number, fix: Fix }[] := []
-  partition := (group: { pos: number, fix: Fix }[], depth: number): void ->
-    return if group.length is 0
+  // The bisection is bounded: past the budget an unverified group is simply not
+  // reported, so a file the syntactic checks misjudge costs seconds, not minutes.
+  var compilesLeft = MAX_FALLBACK_COMPILES
+  accepted: Candidate[] := []
+  partition := (group: Candidate[], depth: number): void ->
+    return if group.length is 0 or compilesLeft-- <= 0
     if groupIsSafe(group)
       accepted.push(...group)
       return
@@ -143,7 +221,11 @@ function safeSemicolons(
     partition(group.slice(0, mid), depth + 1)
     partition(group.slice(mid), depth + 1)
 
-  partition(found, 0)
+  // The whole file verified in one compile: nothing left to re-check.
+  return found if groupIsSafe(found)
+  mid := Math.floor(found.length / 2)
+  partition(found.slice(0, mid), 1)
+  partition(found.slice(mid), 1)
   accepted.sort (a, b) -> a.pos - b.pos
 
   // Bisection verifies each group in isolation, but two removals that are each
@@ -155,33 +237,20 @@ function safeSemicolons(
     result = result.slice(0, Math.floor(result.length / 2))
   result
 
-// safeSemicolons is the expensive part (several compiles), and the engine calls the
-// rule's reference builder with the same source it just checked. Memoising the last
-// result halves the work without holding memory across files.
+// The engine calls the rule's reference builder with the same source it just
+// checked. Memoising the last result answers that without a second parse or
+// compile, and holds no memory across files.
 var lastKey: string | undefined = undefined
-var lastValue: { pos: number, fix: Fix }[] = []
+var lastValue: Candidate[] = []
 
-function safeSemicolonsCached(
-  source: string,
-  tree: SyntaxTree,
-  dial: Record<string, any>,
-  baselineOutput?: string,
-  compiler?: CivetCompiler
-): { pos: number, fix: Fix }[]
-  key := source
-  return lastValue if lastKey is key
-  value := safeSemicolons(source, tree, dial, baselineOutput, compiler)
-  lastKey = key
-  lastValue = value
-  value
-
-function buildReference(input: string, dial: Record<string, any>, compiler?: CivetCompiler): string | undefined
-  parseRes := parseSyntax(input, { dial, compiler })
-  return undefined unless parseRes.ok
-  found := safeSemicolonsCached(input, parseRes.syntax!, dial, undefined, compiler)
+function buildReference(input: string, dial: Record<string, any>, compiler: CivetCompiler | undefined, verifyFunctionTails: boolean): string | undefined
+  var found = lastValue
+  unless lastKey is input
+    parseRes := parseSyntax(input, { dial, compiler })
+    return undefined unless parseRes.ok
+    found = safeSemicolons(input, parseRes.syntax!, dial, undefined, compiler, verifyFunctionTails)
   return undefined if found.length is 0
-  fixes := found.map((f) -> f.fix)
-  { output } := applyEdits(input, fixes)
+  { output } := applyEdits(input, found.map((f) -> f.fix))
   output is input ? undefined : output
 
 export const noTrailingSemicolonsRule: Rule = {
@@ -194,13 +263,22 @@ export const noTrailingSemicolonsRule: Rule = {
     // the trailing semicolon is load-bearing, and neither keeping nor removing it
     // produces correct code.
     phase: "cleanup"
+    defaultOptions: {
+      // Also compile-check a `;` that ends a value-returning function, removing it
+      // where the emit proves it redundant. Off by default: such a semicolon almost
+      // always suppresses an implicit return, and proving that costs compiles.
+      verifyFunctionTails: false
+    }
   }
   check: (ctx: RuleContext) ->
+    verifyFunctionTails := ctx.options.verifyFunctionTails is true
     if ctx.declareEquivalenceReference?
       ctx.declareEquivalenceReference "semicolon-style", (input: string) ->
-        buildReference(input, ctx.parseOptions, ctx.compiler)
+        buildReference(input, ctx.parseOptions, ctx.compiler, verifyFunctionTails)
 
-    found := safeSemicolonsCached(ctx.source, ctx.syntax, ctx.parseOptions, ctx.baselineOutput, ctx.compiler)
+    found := safeSemicolons(ctx.source, ctx.syntax, ctx.parseOptions, ctx.baselineOutput, ctx.compiler, verifyFunctionTails)
+    lastKey = ctx.source
+    lastValue = found
     for item of found
       ctx.report({
         ruleId: "style/no-trailing-semicolons"

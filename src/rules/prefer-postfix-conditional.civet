@@ -5,6 +5,12 @@ import { intersectsRange } from "../utils.civet"
 // prefer `return if ...`."
 //
 //   if (a) return x   ->   return x if a
+//   if (a) continue   ->   continue if a
+//   if (a) f(x)       ->   f(x) if a
+//
+// The guide extends this to "other short conditional statements", so any
+// single-statement body qualifies, up to MAX_POSTFIX_LENGTH columns: past that the
+// condition is too far right to be seen, and the statement reads better indented.
 //
 // The postfix form can also add the return's statement terminator after the block.
 // Declare both output deltas so the engine removes that terminator before comparing
@@ -12,6 +18,8 @@ import { intersectsRange } from "../utils.civet"
 //
 // A project that would rather not loosen the gate at all has a byte-identical
 // alternative: `if a then return x` emits the unbraced form. The message says so.
+const MAX_POSTFIX_LENGTH = 100
+
 export const preferPostfixConditionalRule: Rule = {
   id: "style/prefer-postfix-conditional"
   meta: {
@@ -57,10 +65,6 @@ export const preferPostfixConditionalRule: Rule = {
       thenBlock := node.then or node.block
       return unless thenBlock?
 
-      returnTok := tree.tokens(thenBlock).find (t) ->
-        t.raw.trim() is "return" or t.value.trim() is "return"
-      return unless returnTok?
-
       pos := span.start
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, span.end)
@@ -74,16 +78,6 @@ export const preferPostfixConditionalRule: Rule = {
       return unless returnText.length > 0 and condText.length > 0
       // The postfix head has to stay a single statement.
       return if returnText.includes("\n") or condText.includes("\n")
-      // A returned JSX element swallows the trailing `if` as another attribute:
-      // `return <Navigate to=r replace if cond` parses `if` as a prop name. `<` in
-      // any other position (a comparison, a type argument) is rare enough here that
-      // refusing all of them costs little.
-      return if returnText.includes("<") or condText.includes("<")
-      // The `block-brace-style` normalizer only strips a brace pair whose contents
-      // hold no further braces, so a returned object literal (`if (a) return {…}`)
-      // is outside what it can prove. Reporting it is right; autofixing it would be
-      // a fix the gate then rejects, which surfaces as an error.
-      return if /[{};]/.test(returnText) or /[{};]/.test(condText)
       // A negated condition belongs to style/prefer-unless. Both rules match
       // `if (not x) return`, and each rewrites the same span in its own direction
       // -- with a third rule also editing the file the combined replay diverges and
@@ -94,12 +88,35 @@ export const preferPostfixConditionalRule: Rule = {
       // should own the shape.
       return if /^(?:not\b|!)/.test(condText)
 
-      replacement := `${returnText} if ${condText}`
+      // A returned JSX element swallows the trailing `if` as another attribute:
+      // `return <Navigate to=r replace if cond` parses `if` as a prop name. `<` in
+      // any other position (a comparison, a type argument) is rare enough here that
+      // refusing all of them costs little.
+      var postfix = not (returnText.includes("<") or condText.includes("<"))
+      // The `block-brace-style` normalizer only strips a brace pair whose contents
+      // hold no further braces, so a returned object literal (`if (a) return {…}`)
+      // is outside what it can prove.
+      postfix = false if /[{};]/.test(returnText) or /[{};]/.test(condText)
+      // A `;` after the statement suppresses an implicit return. It would end up
+      // after the condition (`f() if a;` parses as a call on `f()`), and the
+      // `then` form changes the emit around it too.
+      return if /^[ \t]*;/.test(source.slice(span.end))
+      lineStart := source.lastIndexOf("\n", span.start - 1) + 1
+      postfix = false if span.start - lineStart + returnText.length + condText.length + 4 > MAX_POSTFIX_LENGTH
+
+      // Where the postfix form is out of reach, `if a then x` still sheds the
+      // JS-style parentheses, and it is byte-identical in the emit.
+      parenthesized := /^if\s*\(/.test(slice)
+      return unless postfix or parenthesized
+
+      replacement := postfix ? `${returnText} if ${condText}` : `if ${condText} then ${returnText}`
       edit := { start: span.start, end: span.end, replacement }
       edits.push(edit)
       ctx.report({
         ruleId: "style/prefer-postfix-conditional"
-        message: `Use postfix conditional '${replacement}' instead of '${slice}' ('if ${condText} then ${returnText}' is the byte-identical alternative)`
+        message: postfix
+          ? `Use postfix conditional '${replacement}' instead of '${slice}' ('if ${condText} then ${returnText}' is the byte-identical alternative)`
+          : `Use '${replacement}' instead of '${slice}'`
         pos
         fix: edit
       })

@@ -17,3 +17,8 @@ describe RULE, ->
   it "leaves no-argument and optional-chain calls alone", ->
     source := "a := xs.slice()\nb := xs?.slice(start)\n"
     expect(fix(source).fixedSource).toBeUndefined()
+
+
+  it "keeps conditional slice bounds explicit", ->
+    source := "x := xs.slice(0, if count is 3 then 3 else 4)\n"
+    expect(fix(source).fixedSource).toBeUndefined()

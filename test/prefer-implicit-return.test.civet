@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { lintSource, compileSource } from "../src/engine.civet"
+import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
 
 RULE := "style/prefer-implicit-return"
 DIAL := { autoLet: true, react: true }
@@ -65,3 +65,38 @@ describe "style/prefer-implicit-return guards", ->
     // Matched via the function's final entry tuple, but control flow depends on it.
     unchanged("f := (t) =>\n  if t.a\n    return t.a()\n  if t.b\n    t.b()\n")
 
+
+describe "trailing return semicolons", ->
+  for source of [
+    "function f() { return x; }\n"
+    "f := =>\n  return g(\n    x\n  );\n"
+    "function f()\n  return x;\n"
+  ]
+    it `removes the suppressing semicolon with the keyword: ${source}`, ->
+      result := fix(source)
+      fixed := result.fixedSource ?? source
+      expect(fixed).not.toContain("return")
+      expect(fixed).not.toContain(";")
+      expect(result.isEquivalencePreserved).toBe(true)
+      expect(normalizeSemicolonStyle(compileSource(fixed, DIAL)))
+        .toBe(normalizeSemicolonStyle(compileSource(source, DIAL)))
+      expect(fix(fixed).appliedFixesCount).toBe(0)
+
+  it "preserves early returns when another statement follows", ->
+    unchanged("function f() { return x; g() }\n")
+
+  it "does not reparse a sole braced-arrow return as an object method", ->
+    unchanged("direction := => { return directions()[id] ?? null; }\n")
+
+  it "removes nested callback returns without overlapping the outer edit", ->
+    source := "function mask(xs)\n  return xs.reduce((mask, x) =>\n    y := x + 1\n    return mask | y\n  , 0);\n"
+    result := fix(source)
+    fixed := result.fixedSource ?? source
+    expect(fixed).not.toContain("return")
+    expect(result.isEquivalencePreserved).toBe(true)
+    expect(normalizeSemicolonStyle(compileSource(fixed, DIAL)))
+      .toBe(normalizeSemicolonStyle(compileSource(source, DIAL)))
+
+
+  it "does not attribute a nested object's return to an outer implicit return", ->
+    unchanged("function f(xs)\n  xs.map((x) =>\n    return { x }\n  )\n")

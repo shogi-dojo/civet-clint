@@ -27,3 +27,25 @@ describe RULE, ->
     res := fix(source)
     expect(res.fixedSource).toBeUndefined()
     expect(res.isEquivalencePreserved).toBe(true)
+
+
+  it "preserves unless rather than consuming its synthetic negation", ->
+    source := "f := (values, value) =>\n  return false unless values.includes(value)\n  true\n"
+    result := fix(source)
+    expect(result.fixedSource).toContain("return false unless value is in values")
+    expect(result.isEquivalencePreserved).toBe(true)
+    expect(compileSource(result.fixedSource!)).toBe(compileSource(source))
+
+
+  it "does not move an argument's negation onto membership", ->
+    source := "x := values.includes(!value)\n"
+    expect(fix(source).fixedSource).toBeUndefined()
+
+
+  it "preserves negation before an implicit call in a function tail", ->
+    source := "f := (values, value) =>\n  return false unless values.includes value\n  not values.includes value\n"
+    result := fix(source)
+    expect(result.fixedSource).toContain("return false unless value is in values")
+    expect(result.fixedSource).toContain("value is not in values")
+    expect(result.isEquivalencePreserved).toBe(true)
+    expect(compileSource(result.fixedSource!)).toBe(compileSource(source))

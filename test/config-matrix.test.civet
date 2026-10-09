@@ -168,7 +168,7 @@ describe "Configuration matrix", ->
       expect(preset.rules["style/prefer-slice-shorthand"]).toBe("error")
       expect(preset.rules["style/prefer-range-loop"]).toBe("warn")
       expect(preset.rules["style/prefer-switch"]).toBe("warn")
-      expect(preset.rules["style/prefer-function-declaration"]).toBeUndefined()
+      expect(preset.rules["style/prefer-function-declaration"]).toBe("warn")
       expect(preset.rules["style/prefer-unless"]).toBe("error")
       expect(preset.rules["style/prefer-at-shorthand"]).toBe("error")
       expect(preset.rules["style/prefer-length-shorthand"]).toBe("error")

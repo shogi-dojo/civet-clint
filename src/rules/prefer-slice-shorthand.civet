@@ -33,6 +33,9 @@ export const preferSliceShorthandRule: Rule = {
       return unless args.length is 1 or args.length is 2
       return if args.some (arg: any) -> arg.spread
       return if args.some (arg: any) -> not arg.expression?
+      // A conditional's source span can omit its leading synthetic `if`, and
+      // putting that text in a slice bound changes the parse. Keep it explicit.
+      return if args.some (arg: any) -> /\b(?:then|else)\b/.test(tree.text(arg.expression))
 
       receiverText := tree.text(receiver).trim()
       firstText := tree.text(args[0].expression).trim()

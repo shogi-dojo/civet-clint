@@ -24,3 +24,10 @@ describe RULE, ->
   it "does not rewrite constructors with arguments or dynamic constructors", ->
     source := "x := new Foo(value)\ny := new (factory())()\n"
     expect(fix(source).fixedSource).toBeUndefined()
+
+
+  it "accepts Civet's constructor grouping in the true arm of a conditional", ->
+    source := "x := if bad then new Foo() else value\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("x := if bad then new Foo else value\n")
+    expect(result.isEquivalencePreserved).toBe(true)

@@ -46,6 +46,8 @@ export const preferInOperatorRule: Rule = {
       return if args[0].spread
       argument := args[0].expression
       return unless argument?
+      // An ungrouped negation would bind to membership rather than its value.
+      return if argument.type is "UnaryExpression"
 
       argumentText := tree.text(argument).trim()
       return unless receiverText.length > 0 and argumentText.length > 0
@@ -54,7 +56,8 @@ export const preferInOperatorRule: Rule = {
       var span: any = undefined
       if outer?
         span = tree.range(outer)
-        operator := tree.tokens(outer).find (token) -> token.value is "!" or token.value is "not"
+        operator := tree.tokens(outer).find (token) ->
+          (token.raw.trim() is "!" or token.raw.trim() is "not")
         span.start = operator.range.start if operator? and span?
       else
         memberRange := tree.range(member)
@@ -78,9 +81,18 @@ export const preferInOperatorRule: Rule = {
     tree.visit "CallExpression", (node) ->
       unary := negatedCalls.get(node)
       if unary?
-        operators := tree.tokens(unary).filter (token) -> token.value is "!" or token.value is "not"
-        return unless operators.length is 1
-        reportMembership(node, true, unary)
+        member := tree.children(node).find (part: any) -> part?.type is "MemberExpression"
+        memberSpan := tree.range(member)
+        operators := tree.tokens(unary).filter (token) ->
+          memberSpan? and token.range.end <= memberSpan.start and
+            (token.raw.trim() is "!" or token.raw.trim() is "not")
+        // Use raw spelling: real `not` is also lowered to a synthetic `!`.
+        // `unless` lowers through a synthetic negation too. Preserve its keyword
+        // and rewrite the positive membership call inside its condition.
+        if operators.length is 1
+          reportMembership(node, true, unary)
+        else if operators.length is 0
+          reportMembership(node, false)
       else
         reportMembership(node, false)
 }

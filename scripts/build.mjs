@@ -111,6 +111,7 @@ export class SyntaxTree {
   findToken(node: any, tokenValue: string): SourceToken | undefined;
   visit(targetOrType: any, typeOrCallback?: any, callback?: any): void;
   jsxAttributes(jsxElementNode: any, options?: JsxAttributeOptions): JsxAttribute[];
+  nearestAncestor(node: any, types: string | string[]): any;
   hasAncestorType(node: any, types: string | string[]): boolean;
   commentRanges(): SourceRange[];
   stringRanges(): SourceRange[];
@@ -211,10 +212,19 @@ export interface LintResult {
   errorCount: number;
   warningCount: number;
   fixableCount: number;
+  suppressedCount?: number;
+  usedExceptions?: number[];
+}
+export interface ExceptionEntry {
+  file: string;
+  rule: string;
+  line?: number;
+  reason?: string;
 }
 export interface ClintConfig {
   preset?: string;
   civetConfig?: string;
+  exceptions?: string;
   compiler?: CompilerPreference;
   rules?: Record<string, RuleEntry>;
   overrides?: ConfigOverride[];
@@ -237,6 +247,8 @@ export interface ResolvedConfig {
   compilerUsedBundled: boolean;
   compilerWarning?: string;
   configPath?: string;
+  exceptionsPath?: string;
+  exceptions?: ExceptionEntry[];
   skippedRules: SkippedRule[];
   overrides?: ConfigOverride[];
   matchingOverrides?: string[];
@@ -258,6 +270,7 @@ export interface LintOptions {
   config?: ResolvedConfig;
   registry?: RuleRegistry;
   compiler?: CivetCompiler;
+  exceptions?: { rule: string; line?: number; index: number }[];
   civetOptions?: Record<string, any>;
   compileOptions?: Record<string, any>;
   fix?: boolean;
@@ -311,6 +324,7 @@ export const preferRangeLoopRule: Rule;
 export const preferSwitchRule: Rule;
 export const preferFunctionDeclarationRule: Rule;
 export function findConfigFile(cwd?: string): string | undefined;
+export function loadExceptions(explicitPath: string | undefined, baseDir: string): { path?: string; entries: ExceptionEntry[] };
 export function findCivetConfigFile(cwd?: string): string | undefined;
 export function loadCivetConfig(civetConfigPath?: string, cwd?: string): { dial: CompileDial; compileOptions: CompileOptions; resolvedPath?: string };
 export function loadCivetOptions(civetConfigPath?: string, cwd?: string): CompileDial;

@@ -7,6 +7,23 @@ DIAL := { autoLet: true }
 function fix(source: string, rules: Record<string, string> = { [RULE]: "error" })
   lintSource(source, { rules: rules as any, fix: true, civetOptions: DIAL })
 
+// Line-ending commas are only removed under the `lineEndings` option.
+function fixLineEndings(source: string)
+  lintSource(source, {
+    rules: { [RULE]: "error" } as any
+    ruleOptions: { [RULE]: { lineEndings: true } }
+    fix: true
+    civetOptions: DIAL
+  })
+
+function expectLineEndingsEquivalent(source: string)
+  res := fixLineEndings(source)
+  fixed := res.fixedSource ?? source
+  expect(res.isEquivalencePreserved).toBe(true)
+  expect(normalizeTrailingCommaStyle(compileSource(fixed, DIAL)))
+    .toBe(normalizeTrailingCommaStyle(compileSource(source, DIAL)))
+  fixed
+
 function unchanged(source: string)
   expect(fix(source).fixedSource ?? source).toBe(source)
 
@@ -53,6 +70,18 @@ describe "style/no-trailing-commas", ->
     expect(expectCommaEquivalent("render(\n  <C a=1 />,\n)\n"))
       .toBe("render(\n  <C a=1 />\n)\n")
 
+  it "removes line-ending commas between object properties", ->
+    expect(expectLineEndingsEquivalent("o := {\n  a: 1,\n  b: 2\n}\n"))
+      .toBe("o := {\n  a: 1\n  b: 2\n}\n")
+
+  it "removes line-ending commas between array items", ->
+    expect(expectLineEndingsEquivalent("a := [\n  1,\n  2\n]\n"))
+      .toBe("a := [\n  1\n  2\n]\n")
+
+  it "removes line-ending commas between call arguments and parameters", ->
+    expect(expectLineEndingsEquivalent("f(\n  a,\n  b\n)\ng = (\n  a,\n  b\n) => a + b\n"))
+      .toBe("f(\n  a\n  b\n)\ng = (\n  a\n  b\n) => a + b\n")
+
   it "removes commas at every level of a nested literal", ->
     expect(expectCommaEquivalent("o := {\n  a: [\n    1,\n  ],\n}\n"))
       .toBe("o := {\n  a: [\n    1\n  ]\n}\n")
@@ -69,6 +98,14 @@ describe "style/no-trailing-commas", ->
   it "leaves a separating comma untouched", ->
     source := "o := { a: 1, b: 2 }\n"
     expect(fix(source).fixedSource ?? source).toBe(source)
+
+  it "keeps a line-ending comma that separates variable declarations", ->
+    // In this position, removing the comma changes the parse to a call on the
+    // first initializer. The compiler-backed candidate check leaves it intact.
+    expect(fixLineEndings("const a = 1,\n  b = 2\n").fixedSource).toBeUndefined()
+
+  it "leaves line-ending commas alone unless the option is set", ->
+    unchanged("o := {\n  a: 1,\n  b: 2\n}\n")
 
   it "leaves a comma inside a string untouched", ->
     source := 'label = "a,]"\n'

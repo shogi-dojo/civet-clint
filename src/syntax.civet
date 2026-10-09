@@ -417,15 +417,18 @@ export class SyntaxTree
 
   // Whether a raw node is nested under one of the requested normalized node types.
   // Rules use this helper instead of depending on Civet's parent layout directly.
-  hasAncestorType(node: any, types: string | string[]): boolean
+  nearestAncestor(node: any, types: string | string[]): any
     wanted := new Set(if Array.isArray(types) then types else [types])
     seen := new Set<any>()
     var current = node?.parent
     while current? and typeof current is "object" and not seen.has(current)
-      return true if wanted.has(current.type)
+      return current if wanted.has(current.type)
       seen.add(current)
       current = current.parent
-    false
+    undefined
+
+  hasAncestorType(node: any, types: string | string[]): boolean
+    @nearestAncestor(node, types)?
 
   // Ranges of all comments.
   commentRanges(): SourceRange[]
