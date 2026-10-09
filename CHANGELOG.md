@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0] - 2026-10-09
 
+### Upgrading
+
+Expect new findings on code that was clean under 0.6.0. Several existing rules now
+cover more shapes, and all of the additions below are autofixable, so
+`clint --write` clears them:
+
+- `style/prefer-implicit-call-args` fires on any statement-level call with
+  unambiguous arguments, not just a fixed list of callees. This is the large one:
+  3,248 sites on a 585-file production codebase.
+- `style/prefer-bare-jsx-values` rewrites `foo={bar()}` to `foo=bar()` (148 sites
+  on the same codebase).
+- `style/prefer-indented-blocks` de-braces function, class, method, and arrow
+  bodies as well as statement blocks.
+- `style/prefer-postfix-conditional` covers any short one-line `if`, not only
+  `return`.
+
+A finding you want to keep can go in `clint.exceptions.json`. Plain `--write` still
+never changes emitted output; only `--rewrite` applies `repair` fixes.
 
 ### Added
 
