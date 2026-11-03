@@ -29,6 +29,13 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
   Run `clint --write` and review the new `switch` blocks.
 - `style/prefer-range-loop` writes `_` for a counter the body never reads
   (`for _ of [0..<n]`), where it used to keep the name.
+- `style/prefer-in-operator`, `style/prefer-unless` and `style/prefer-bare-conditions`
+  now report constructs that hold a string literal (`a.includes 'x'`,
+  `if (x is 'a')`, `if !(x is 'a')`), which they used to skip as if the whole
+  construct sat inside a string. On a 1,500-file Solid app this was 105 new, all
+  fixable, findings.
+- `style/prefer-implicit-return` now also fixes a one-line `return if c then a else b`
+  tail (see Added).
 
 ### Added
 
@@ -96,9 +103,22 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
 - The `new-call-style` delta unwrapped `f(new X) : y` as if `(new X)` were a grouping,
   which rejected `new Foo(new Bar())` inside a conditional and every
   `style/prefer-new-shorthand` fix in the same file.
+- The `whitespace-style` delta read the slash after `return`, `typeof`, `case` and
+  other keywords that take an operand as division, so the quote in `return /"/.test(s)`
+  opened a string for the rest of the line.
 - README: the `extraZeroArgCallees` option was listed under
   `style/prefer-terse-imports`; the rule count, release status and equivalence-engine
   description were out of date.
+
+### Performance
+
+- The AST walker behind every `tree.visit` no longer builds a result array per node
+  (an implicit return of its loops), and `tree.range` memoizes the span it computes
+  from a node's subtree. On a 377-file slice of a Solid app with 51 rules, rule work
+  went from 15.2s to 13.2s.
+- `style/prefer-implicit-return` rules out Civet's synthetic returns before scanning
+  their tokens, which for a component walked the whole JSX tree once per nested
+  callback: 1.7s to 1.1s on the same slice.
 
 ## [0.7.0] - 2026-10-09
 
