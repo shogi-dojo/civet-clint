@@ -164,3 +164,18 @@ describe "style/prefer-unclosed-jsx — options", ->
       civetOptions: DIAL
     })
     expect(res.fixedSource).toBe("x := <div>\n  <span>hi</span>\n  <Foo />\n")
+
+describe "style/prefer-unclosed-jsx — whitespace delta with regex literals", ->
+  it "drops a multi-line self-closing last child and its parent's closer in a file with a backtick regex", ->
+    // `/```shot\n[^`]*```/g` holds an ODD number of backticks. The whitespace
+    // normalizer used to read them as a template literal, inverting its string state
+    // for the rest of the file: indentation before `/>` survived on one side and not
+    // the other, and the gate rejected a fix that only changes whitespace.
+    source := "SHOT := /```shot\\n[^`]*```/g\nx := <Shell>\n  <Body\n    a=1\n    b=2\n  />\n</Shell>\n"
+    res := fix(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("SHOT := /```shot\\n[^`]*```/g\nx := <Shell>\n  <Body\n    a=1\n    b=2\n  >\n")
+
+describe "normalizeWhitespaceStyle regex literals", ->
+  it "does not read the backticks of a regex as a template literal", ->
+    expect(normalizeWhitespaceStyle("let a = /```x[^`]*```/g\nlet b = 1 +\n   2")).toBe("let a=/```x[^`]*```/g let b=1+2")
