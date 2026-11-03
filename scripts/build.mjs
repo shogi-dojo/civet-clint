@@ -154,6 +154,7 @@ export interface RuleContext {
   options: RuleOptions;
   baselineOutput?: string;
   compiler?: CivetCompiler;
+  activeRuleOptions?(ruleId: string): RuleOptions | undefined;
   report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
   declareEquivalenceReference?(delta: OutputDelta | OutputDelta[], build: EquivalenceReference): void;

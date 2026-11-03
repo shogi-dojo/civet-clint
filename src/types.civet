@@ -50,6 +50,10 @@ export interface RuleContext
   // context without one.
   baselineOutput?: string
   compiler?: CivetCompiler
+  // The resolved options of another rule that will run on this file, or undefined
+  // when that rule is off or skipped under the active dial. For a rule whose fix
+  // must not create a finding a sibling rule would then report.
+  activeRuleOptions?: (ruleId: string) => RuleOptions | undefined
   report: (diag: {
     ruleId: string
     severity?: Severity

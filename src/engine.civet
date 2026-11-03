@@ -433,6 +433,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     compiler
     options: {}
     getLineColumn
+    activeRuleOptions: (ruleId) ->
+      level := mergedRules[ruleId]
+      return undefined if level is undefined or level is "off" or skippedIds.has(ruleId)
+      resolveRuleOptions(ruleId, mergedRuleOptions[ruleId], registry)
     declareEquivalenceReference: (delta, build) ->
       if currentRuleId
         equivalenceReferences.set(currentRuleId, build)

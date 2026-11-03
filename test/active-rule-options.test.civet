@@ -1,0 +1,50 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
+import type { Rule, RuleOptions } from "../src/types.civet"
+
+// A probe rule records what it can see of a sibling rule.
+probe := (peer: string, seen: (RuleOptions | undefined)[]): Rule ->
+  return {
+    id: "test/probe"
+    meta: { description: "records a peer's options", fixable: false, defaultSeverity: "warn" }
+    check: (ctx) -> seen.push(ctx.activeRuleOptions?(peer))
+  }
+
+PEER := "style/no-single-param-arrow-without-parens"
+
+peek := (rules: Record<string, any>, ruleOptions?: Record<string, RuleOptions>, civetOptions = {}) ->
+  seen: (RuleOptions | undefined)[] := []
+  registry := defaultRuleRegistry.clone()
+  registry.register(probe(PEER, seen))
+  lintSource("x = 1\n", { registry, rules: { "test/probe": "warn", ...rules }, ruleOptions, civetOptions })
+  seen
+
+describe "RuleContext.activeRuleOptions", ->
+  it "returns a peer's resolved options, defaults included", ->
+    seen := peek({ [PEER]: "warn" }, { [PEER]: { extraZeroArgCallees: ["use*"] } })
+    expect(seen).toEqual([{ extraZeroArgCallees: ["use*"] }])
+
+  it "fills in declared defaults when the config sets none", ->
+    expect(peek({ [PEER]: "warn" })).toEqual([{ extraZeroArgCallees: [] }])
+
+  it "is undefined when the peer is off or unconfigured", ->
+    expect(peek({ [PEER]: "off" })).toEqual([undefined])
+    expect(peek({})).toEqual([undefined])
+
+  it "is undefined when the dial skips the peer", ->
+    registry := defaultRuleRegistry.clone()
+    gated: Rule := {
+      id: "test/needs-coffee"
+      meta: { description: "gated", fixable: false, defaultSeverity: "warn", capabilities: { requires: ["coffeeIsnt"] } }
+      check: -> undefined
+    }
+    registry.register(gated)
+    seen: (RuleOptions | undefined)[] := []
+    registry.register({
+      id: "test/probe"
+      meta: { description: "probe", fixable: false, defaultSeverity: "warn" }
+      check: (ctx) -> seen.push(ctx.activeRuleOptions?("test/needs-coffee"))
+    })
+    lintSource("x = 1\n", { registry, rules: { "test/probe": "warn", "test/needs-coffee": "warn" }, civetOptions: {} })
+    expect(seen).toEqual([undefined])
