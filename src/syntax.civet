@@ -38,6 +38,10 @@ export class SyntaxTree
   #commentRanges: SourceRange[] | undefined
   #stringRanges: SourceRange[] | undefined
   #tokens: WeakMap<any, SourceToken[]>
+  // Spans computed by walking a node's subtree (`null` when it has none). Rules ask
+  // for the range of every function, block and statement, so without this a nested
+  // node's subtree is re-walked once per enclosing node that is asked about.
+  #ranges: WeakMap<any, SourceRange | null>
 
   constructor(ast: any, source: string)
     // `ast` is Civet's unpruned tree. All raw tuple/parent handling stays in this
@@ -46,6 +50,7 @@ export class SyntaxTree
     @source = source
     @root = ast
     @#tokens = new WeakMap<any, SourceToken[]>()
+    @#ranges = new WeakMap<any, SourceRange | null>()
 
   // Source span of a node or token.
   range(node: any): SourceRange | undefined
@@ -61,6 +66,12 @@ export class SyntaxTree
       len := node.$loc.length or 0
       return { start: pos, end: pos + len }
 
+    return undefined unless typeof node is "object"
+    // A copy every time: callers adjust the span they get back.
+    cached := @#ranges.get(node)
+    if cached isnt undefined
+      return cached ? { start: cached.start, end: cached.end } : undefined
+
     var lo = Infinity
     var hi = -Infinity
     walkAst node, (child) ->
@@ -70,8 +81,9 @@ export class SyntaxTree
       lo = Math.min(lo, pos)
       hi = Math.max(hi, pos + len)
 
-    return undefined unless hi > lo
-    { start: lo, end: hi }
+    computed := hi > lo ? { start: lo, end: hi } : null
+    @#ranges.set(node, computed)
+    computed ? { start: computed.start, end: computed.end } : undefined
 
   // Range of a node ONLY when it is a source token carrying its own location.
   // Unlike `range`, this never falls back to a subtree walk: callers that just

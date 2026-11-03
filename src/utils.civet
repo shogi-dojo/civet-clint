@@ -27,7 +27,7 @@ export function createLineColumnIndex(source: string)
 export function walkAst(ast: any, visitor: (node: any, parent: any) => void)
   visited := new Set<any>()
 
-  traverse := (node: any, parent: any) ->
+  traverse := (node: any, parent: any): void ->
     return unless node? and typeof node is "object"
     return if visited.has(node)
     visited.add(node)
