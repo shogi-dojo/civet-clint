@@ -445,6 +445,8 @@ export function normalizeExistentialParenStyle(code: string): string
     (_whole, before, space, operand, operator) -> `${before}${space}${operand} ${operator} null`
   )
 
+const REGEX_AFTER_KEYWORD = new Set(["return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "instanceof", "yield", "await"])
+
 // Index just past the string, template, comment or regex literal that starts at
 // `i`, or -1 when `i` does not start one. Template substitutions are scanned for
 // their own matching brace so a backtick inside `${…}` does not end the literal.
@@ -485,7 +487,14 @@ function jsLiteralEnd(code: string, i: number): number
     return -1 if code[i + 1] is ">"
     var back = i - 1
     back-- while back >= 0 and /\s/.test(code[back])
-    return -1 unless back < 0 or "(,=:[!&|?{;+-*%>~^".includes(code[back])
+    unless back < 0 or "(,=:[!&|?{;+-*%>~^".includes(code[back])
+      // After a word, a slash divides -- unless the word is a keyword that takes an
+      // operand: `return /"/.test(s)` holds a regex, and reading its quote as a
+      // string would flip the literal state for the rest of the file.
+      var wordStart = back + 1
+      wordStart-- while wordStart > 0 and /[\w$]/.test(code[wordStart - 1])
+      word := code.slice(wordStart, back + 1)
+      return -1 unless REGEX_AFTER_KEYWORD.has(word) and not /[.\w$]/.test(code[wordStart - 1] ?? "")
     var j = i + 1
     var inClass = false
     while j < code.length and code[j] isnt "\n"

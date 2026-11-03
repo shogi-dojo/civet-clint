@@ -186,3 +186,14 @@ describe "normalizeWhitespaceStyle JSX slashes", ->
     // kept whitespace up to the next slash on one side of a comparison only.
     expect(normalizeWhitespaceStyle("<div>\n  <a href={x}>t</a> </div>")).toBe("<div><a href={x}>t</a></div>")
     expect(normalizeWhitespaceStyle("<b c={d} /> <i e={f} />")).toBe("<b c={d}/><i e={f}/>")
+
+describe "normalizeWhitespaceStyle regex after a keyword", ->
+  it "reads a slash after `return`, `typeof` or `case` as a regex", ->
+    // Read as division, the quote inside the regex opens a string that swallows the
+    // rest of the line, so `a  +  b` keeps its spaces.
+    expect(normalizeWhitespaceStyle("return /\"/.test(s)\nlet c = a  +  b")).toBe("return/\"/.test(s)let c=a+b")
+    expect(normalizeWhitespaceStyle("case /'/: x = a  +  b")).toBe("case/'/:x=a+b")
+
+  it "still divides after a name or a property called like a keyword", ->
+    expect(normalizeWhitespaceStyle("x = a / 2 + \"q /\"")).toBe("x=a/2+\"q /\"")
+    expect(normalizeWhitespaceStyle("x = o.return / 2 / 3")).toBe("x=o.return/2/3")
