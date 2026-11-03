@@ -20,6 +20,9 @@ const STATEMENT_KEYWORD = /^(?:if|unless|switch|try|do|for|while|until|loop)\b/
 const CONDITIONAL_TAIL = /^(?:if|unless)\b[^\n]*\bthen\b[^\n]*\belse\b[^\n]*$/
 const ELSE_CHAIN = /\belse\s+(?:if|unless)\b/
 
+// A statement that starts with the keyword as written, after any leading comments.
+const WRITTEN_RETURN = /(?:\s|#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*return(?![\w$])/y
+
 const LOOP_TYPES = [
   "ForStatement"
   "IterationStatement"
@@ -128,6 +131,15 @@ export const preferImplicitReturnRule: Rule = {
       exprType := lastStmt.expression.type
       return if exprType is "ObjectLiteral" or exprType is "ObjectExpression" or exprType is "BareObjectLiteral"
 
+      // Civet adds a synthetic ReturnStatement for every implicit return, so most
+      // functions reach this point. Their source does not start with `return`, and
+      // telling so here skips the token scan below -- which for a component's last
+      // statement walks its whole JSX tree, once per nested callback.
+      stmtSpan := tree.range(lastStmt)
+      return unless stmtSpan?
+      WRITTEN_RETURN.lastIndex = stmtSpan.start
+      return unless WRITTEN_RETURN.test(source)
+
       return if tree.hasAncestorType(lastStmt, LOOP_TYPES)
 
       // The structural check above is not sufficient on its own: when a function's
@@ -143,9 +155,8 @@ export const preferImplicitReturnRule: Rule = {
       // rejected it on every run (37 sites on a 441-file codebase). Require the
       // statement to also be textually last: nothing but whitespace and block
       // closers may follow it inside the function.
-      stmtSpan := tree.range(lastStmt)
       fnSpan := tree.range(fnNode)
-      return unless stmtSpan? and fnSpan?
+      return unless fnSpan?
       return unless /^[\s});]*$/.test(source.slice(stmtSpan.end, fnSpan.end))
 
       // The return must belong to THIS function, not to a nested one.
