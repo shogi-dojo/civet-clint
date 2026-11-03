@@ -340,7 +340,7 @@ export function normalizeBlockBraceStyle(code: string): string
       out += code.slice(i, Math.min(j + 1, code.length))
       i = j + 1
       continue
-    if ch is "{" and /\)\s*$/.test(out)
+    if ch is "{" and /(?:\)|\belse)\s*$/.test(out)
       close := findBlockClose(code, i + 1)
       if close >= 0
         inner := code.slice(i + 1, close)

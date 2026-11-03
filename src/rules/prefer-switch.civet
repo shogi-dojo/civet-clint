@@ -1,17 +1,38 @@
-import type { Rule, RuleContext } from "../types.civet"
+import type { Rule, RuleContext, Fix } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
 
-const EQUALITY_TEST = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:===|is)\s*(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?|true|false|null|undefined|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\s*$/
+const IDENT = "[A-Za-z_$][A-Za-z0-9_$]*"
+// What a `switch` pattern can compare against without ambiguity. A bare identifier
+// on the right (`kind is OTHER`) is still an equality test worth reporting, but it
+// is not a pattern: Civet reads it as a binding or fails to parse it.
+const LITERAL = String.raw`-?\d+(?:\.\d+)?|true|false|null|undefined|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'`
+const EQUALITY_TEST = new RegExp(`^\\s*(${IDENT})\\s*(?:===|is)\\s*(?:${IDENT}|${LITERAL})\\s*$`)
+
+// A branch test the fix can turn into a pattern: `subject is <literal>`.
+const LITERAL_TEST = new RegExp(`^\\s*(${IDENT})\\s*(?:===|is)\\s*(${LITERAL})\\s*$`)
 
 export const preferSwitchRule: Rule = {
   id: "style/prefer-switch"
   meta: {
     description: "Prefer switch statements for chains of strict equality checks"
-    fixable: false
+    fixable: true
     defaultSeverity: "warn"
   }
   check: (ctx: RuleContext) ->
+    source := ctx.source
     tree := ctx.syntax
+    ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+    edits: Fix[] := []
+
+    // A switch compiles to the same `===` chain, laid out differently: no space after
+    // `if`, braces around single-statement bodies. Both are layout, so the delta is
+    // the engine's own pair of normalizers, and the reference replays these edits.
+    ctx.declareEquivalenceReference?.(["block-brace-style", "whitespace-style"], (input: string) ->
+      return undefined unless edits.length > 0
+      { output } := applyEdits(input, edits)
+      output
+    )
 
     testName := (node: any): string | undefined ->
       condition := node.condition
@@ -21,6 +42,75 @@ export const preferSwitchRule: Rule = {
       match := EQUALITY_TEST.exec(text)
       match?[1]
 
+    // The nested IfStatement of an `else if`, or undefined when the else is plain.
+    nextLink := (cursor: any): any ->
+      clause := cursor.else
+      return undefined unless clause?.block?
+      blockText := tree.text(clause.block).trim()
+      return undefined unless /^if\b/.test(blockText)
+      var nextIf: any = undefined
+      tree.visit clause.block, "IfStatement", (candidate) ->
+        candidateRange := tree.range(candidate)
+        nextRange := tree.range(nextIf)
+        if candidateRange? and (not nextRange? or candidateRange.start < nextRange.start)
+          nextIf = candidate
+      nextIf
+
+    // Rewrite the whole chain as a `switch` on its subject, or undefined when it is
+    // not a plain statement in indentation form with literal patterns. Every piece of
+    // text comes from a branch's own range, and the gaps between the pieces must hold
+    // nothing but the `then` / `else` keywords: a comment or a brace there would be
+    // lost, so such a chain is left to a person.
+    buildSwitch := (links: any[], chainEnd: number, subject: string): string | undefined ->
+      rootStart := tree.range(links[0])!.start
+      lineStart := source.lastIndexOf("\n", rootStart - 1) + 1
+      indent := source.slice(lineStart, rootStart)
+      return undefined unless /^[ \t]*$/.test(indent)
+      lineEnd := source.indexOf("\n", chainEnd)
+      return undefined unless /^[ \t\r]*$/.test(source.slice(chainEnd, lineEnd is -1 ? source.length : lineEnd))
+      // Re-indenting a body must not reach inside a multi-line string.
+      return undefined if ignoredRanges.some((r) -> r.start < chainEnd and r.end > rootStart and source.slice(r.start, r.end).includes("\n"))
+
+      // One case: the pattern and a body on the same line (`3 then 'A'`), or the
+      // pattern alone with the body's own lines pushed one level deeper.
+      caseRows := (head: string, joiner: string, body: { start: number, end: number }): string[] | undefined ->
+        text := source.slice(body.start, body.end)
+        if text.includes("\n")
+          return undefined unless /^[ \t]*\n/.test(text)
+          rows := text.replace(/\s+$/, "").split("\n").slice(1).map((l) -> l.replace(/\r$/, ""))
+          return undefined if rows.some((l) -> l.trim().length > 0 and not l.startsWith(indent + " "))
+          [head, ...rows.map((l) -> l.trim().length > 0 ? "  " + l : "")]
+        else
+          inlineBody := text.trim()
+          return undefined if inlineBody.length is 0 or inlineBody.startsWith("{")
+          [head + joiner + inlineBody]
+
+      out: string[] := [`${indent}switch ${subject}`]
+      for link, index of links
+        match := LITERAL_TEST.exec(tree.text(link.condition.expression ?? link.condition))
+        return undefined unless match? and match[1] is subject
+        condRange := tree.range(link.condition)
+        thenRange := tree.range(link.then)
+        return undefined unless condRange? and thenRange?
+        gap := source.slice(condRange.end, thenRange.start)
+        inline := not source.slice(thenRange.start, thenRange.end).includes("\n")
+        return undefined unless inline ? /^[ \t]*then$/.test(gap) : /^[ \t]*$/.test(gap)
+        rows := caseRows(`${indent}  ${match[2]}`, " then ", thenRange)
+        return undefined unless rows?
+        out.push(...rows)
+
+        continue unless link.else?
+        if index < links.length - 1
+          nextStart := tree.range(links[index + 1])?.start
+          return undefined unless nextStart? and /^\s*else[ \t]+$/.test(source.slice(thenRange.end, nextStart))
+        else
+          elseRange := tree.range(link.else.block)
+          return undefined unless elseRange? and /^\s*else$/.test(source.slice(thenRange.end, elseRange.start))
+          elseRows := caseRows(`${indent}  else`, " ", elseRange)
+          return undefined unless elseRows?
+          out.push(...elseRows)
+      out.join("\n")
+
     tree.visit "IfStatement", (node) ->
       return if tree.hasAncestorType(node, "ElseClause")
       span := tree.range(node)
@@ -28,30 +118,30 @@ export const preferSwitchRule: Rule = {
       firstName := testName(node)
       return unless firstName?
 
+      // Every branch must test the same subject: a `switch` has no place for an
+      // `else if count > 3` or an `and current.id` in the middle of the chain.
+      links: any[] := []
       var cursor: any = node
-      var count = 0
       while cursor?.type is "IfStatement"
-        currentName := testName(cursor)
-        break unless currentName is firstName
-        count++
-        clause := cursor.else
-        break unless clause?.block?
-        blockText := tree.text(clause.block).trim()
-        break unless /^if\b/.test(blockText)
-        var nextIf: any = undefined
-        tree.visit clause.block, "IfStatement", (candidate) ->
-          candidateRange := tree.range(candidate)
-          nextRange := tree.range(nextIf)
-          if candidateRange? and (not nextRange? or candidateRange.start < nextRange.start)
-            nextIf = candidate
-        break unless nextIf?
-        cursor = nextIf
+        return unless testName(cursor) is firstName
+        links.push(cursor)
+        cursor = nextLink(cursor)
+      return unless links.length >= 2
 
-      if count >= 2
-        seen.add(span.start)
-        ctx.report({
-          ruleId: "style/prefer-switch"
-          message: `Consider a switch statement for repeated strict equality checks on '${firstName}'`
-          pos: span.start
-        })
+      seen.add(span.start)
+      var fix: Fix | undefined = undefined
+      switched := buildSwitch(links, span.end, firstName)
+      if switched?
+        lineStart := source.lastIndexOf("\n", span.start - 1) + 1
+        candidate: Fix := { start: lineStart, end: span.end, replacement: switched }
+        // A chain nested in an already-claimed one is left for the next pass.
+        unless edits.some((e) -> e.start < candidate.end and candidate.start < e.end)
+          fix = candidate
+          edits.push(candidate)
+      ctx.report({
+        ruleId: "style/prefer-switch"
+        message: `Consider a switch statement for repeated strict equality checks on '${firstName}'`
+        pos: span.start
+        fix
+      })
 }

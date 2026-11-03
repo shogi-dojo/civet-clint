@@ -4,8 +4,14 @@ import { lintSource } from "../src/engine.civet"
 RULE := "style/prefer-switch"
 
 describe RULE, ->
-  it "reports a same-variable strict equality chain without a fix", ->
+  it "rewrites a same-variable strict equality chain as a switch", ->
     source := "if (kind === 'move')\n  move()\nelse if (kind === 'rotate')\n  rotate()\nelse\n  ignore()\n"
+    res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" }, fix: true })
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("switch kind\n  'move'\n    move()\n  'rotate'\n    rotate()\n  else\n    ignore()\n")
+
+  it "reports a braced chain without a fix", ->
+    source := "if (kind === 'move') {\n  move()\n} else if (kind === 'rotate') {\n  rotate()\n} else {\n  ignore()\n}\n"
     res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" }, fix: true })
     diags := res.diagnostics.filter (d) -> d.ruleId is RULE
     expect(diags).toHaveLength(1)
@@ -20,3 +26,109 @@ describe RULE, ->
     ]
       res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" } })
       expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe `${RULE} autofix`, ->
+  fixOf := (source: string) ->
+    lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" }, fix: true, civetOptions: { autoLet: true, coffeeComment: true } })
+
+  converts := (source: string, expected: string) ->
+    res := fixOf(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe(expected)
+
+  it "turns a one-line chain into pattern cases", ->
+    converts(
+      "f = (d) =>\n  if d is 3 then 'A'\n  else if d is 2 then 'B'\n  else 'C'\n"
+      "f = (d) =>\n  switch d\n    3 then 'A'\n    2 then 'B'\n    else 'C'\n"
+    )
+
+  it "turns a chain written on a single line", ->
+    converts(
+      "f = (d) =>\n  if d is 3 then 'A' else if d is 2 then 'B' else 'C'\n"
+      "f = (d) =>\n  switch d\n    3 then 'A'\n    2 then 'B'\n    else 'C'\n"
+    )
+
+  it "turns block bodies into indented cases and keeps their inner indentation", ->
+    converts(
+      "if d is 3\n  a()\n  if x\n    b()\nelse if d is 2\n  c()\nelse\n  e()\n"
+      "switch d\n  3\n    a()\n    if x\n      b()\n  2\n    c()\n  else\n    e()\n"
+    )
+
+  it "converts a chain with no else", ->
+    converts(
+      "if d is 'x'\n  a()\nelse if d is 'y'\n  b()\n"
+      "switch d\n  'x'\n    a()\n  'y'\n    b()\n"
+    )
+
+  it "accepts every literal kind as a pattern", ->
+    converts(
+      "if d is null then a()\nelse if d is true then b()\nelse if d is -1 then c()\nelse if d is 2.5 then e()\n"
+      "switch d\n  null then a()\n  true then b()\n  -1 then c()\n  2.5 then e()\n"
+    )
+
+  it "leaves the code before and after the chain alone", ->
+    converts(
+      "before()\nif d is 1 then a() else if d is 2 then b()\nafter()\n"
+      "before()\nswitch d\n  1 then a()\n  2 then b()\nafter()\n"
+    )
+
+  it "is idempotent", ->
+    once := fixOf("if d is 1 then a()\nelse if d is 2 then b()\n").fixedSource!
+    twice := fixOf(once)
+    expect(twice.fixedSource).toBeUndefined()
+    expect(twice.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "fixes the outer chain first and the one nested in a branch on the next pass", ->
+    res := fixOf("if a is 1\n  if b is 1\n    x()\n  else if b is 2\n    y()\nelse if a is 2\n  z()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toContain("switch a")
+
+describe `${RULE} stays quiet or report-only`, ->
+  diagnosticsFor := (source: string) ->
+    res := lintSource(source, { rules: { [RULE]: "warn", "style/prefer-word-operators": "off" }, fix: true, civetOptions: { autoLet: true, coffeeComment: true } })
+    { res, found: res.diagnostics.filter((d) -> d.ruleId is RULE) }
+
+  it "is silent on a chain that mixes in another test", ->
+    // `count > 3` cannot be a case, so the leading `is 2` / `is 3` pair is not a switch.
+    source := "f = (count) =>\n  if count is 2\n    a()\n  else if count is 3\n    b()\n  else if count > 3\n    c()\n  else\n    e()\n"
+    { found } := diagnosticsFor(source)
+    expect(found).toHaveLength(0)
+
+  it "is silent when a later branch adds a second condition", ->
+    source := "if key is 'players'\n  a()\nelse if key is 'events'\n  b()\nelse if key is 'games' and current.id\n  c()\n"
+    { found } := diagnosticsFor(source)
+    expect(found).toHaveLength(0)
+
+  it "is silent on a chain over different variables", ->
+    { found } := diagnosticsFor("if kind is 'a'\n  x()\nelse if mode is 'b'\n  y()\n")
+    expect(found).toHaveLength(0)
+
+  it "reports but does not fix a chain compared against an identifier", ->
+    // `OTHER` is not a pattern: Civet would read it as a binding or fail to parse.
+    { res, found } := diagnosticsFor("if kind is A\n  x()\nelse if kind is B\n  y()\n")
+    expect(found).toHaveLength(1)
+    expect(found[0].fix).toBeUndefined()
+    expect(res.fixedSource).toBeUndefined()
+
+  it "reports but does not fix a chain assigned to a variable", ->
+    // `x = if …` is a ternary and `x = switch …` an if/else assigning in each branch.
+    { res, found } := diagnosticsFor("f = (n) =>\n  podium = if n is 1 then 'gold' else if n is 2 then 'silver' else ''\n  podium\n")
+    expect(found).toHaveLength(1)
+    expect(res.fixedSource).toBeUndefined()
+
+  it "reports but does not fix a chain with a comment between branches", ->
+    // Rebuilding the chain from its branches would drop the comment.
+    { res, found } := diagnosticsFor("if d is 1\n  a()\n# second\nelse if d is 2\n  b()\n")
+    expect(found).toHaveLength(1)
+    expect(res.fixedSource).toBeUndefined()
+
+  it "reports but does not fix a braced JS-style chain", ->
+    { res, found } := diagnosticsFor("if (d === 1) {\n  a()\n} else if (d === 2) {\n  b()\n}\n")
+    expect(found).toHaveLength(1)
+    expect(res.fixedSource).toBeUndefined()
+
+  it "does not re-indent a multi-line template literal inside a branch", ->
+    source := "if d is 1\n  log `a\nb`\nelse if d is 2\n  c()\n"
+    { res, found } := diagnosticsFor(source)
+    expect(found).toHaveLength(1)
+    expect(res.fixedSource).toBeUndefined()
