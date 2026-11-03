@@ -480,10 +480,12 @@ function jsLiteralEnd(code: string, i: number): number
     if code[i + 1] is "*"
       end := code.indexOf("*/", i + 2)
       return end < 0 ? code.length : end + 2
-    // A slash starts a regex only where an operand is expected.
+    // A slash starts a regex only where an operand is expected. Not after `<` or `}`
+    // and not before `>`: in emitted JSX those are `</div>` and `<Foo a={b} />`.
+    return -1 if code[i + 1] is ">"
     var back = i - 1
     back-- while back >= 0 and /\s/.test(code[back])
-    return -1 unless back < 0 or "(,=:[!&|?{};+-*%<>~^".includes(code[back])
+    return -1 unless back < 0 or "(,=:[!&|?{;+-*%>~^".includes(code[back])
     var j = i + 1
     var inClass = false
     while j < code.length and code[j] isnt "\n"

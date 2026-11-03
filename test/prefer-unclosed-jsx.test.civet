@@ -179,3 +179,10 @@ describe "style/prefer-unclosed-jsx — whitespace delta with regex literals", -
 describe "normalizeWhitespaceStyle regex literals", ->
   it "does not read the backticks of a regex as a template literal", ->
     expect(normalizeWhitespaceStyle("let a = /```x[^`]*```/g\nlet b = 1 +\n   2")).toBe("let a=/```x[^`]*```/g let b=1+2")
+
+describe "normalizeWhitespaceStyle JSX slashes", ->
+  it "does not read the slash of a closing tag or `/>` as a regex", ->
+    // `</div>` and `<Foo a={b} />` are JSX, not regex literals: treating them as one
+    // kept whitespace up to the next slash on one side of a comparison only.
+    expect(normalizeWhitespaceStyle("<div>\n  <a href={x}>t</a> </div>")).toBe("<div><a href={x}>t</a></div>")
+    expect(normalizeWhitespaceStyle("<b c={d} /> <i e={f} />")).toBe("<b c={d}/><i e={f}/>")
