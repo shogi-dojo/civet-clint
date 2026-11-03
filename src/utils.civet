@@ -595,11 +595,36 @@ export function normalizePlaceholderParamStyle(code: string): string
 // `;` after the alias is optional because `semicolon-style` runs first when
 // several rules' deltas are combined, and has already removed it.
 export function normalizeRangeLoopStyle(code: string): string
-  code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;?/g, (_whole, _counter, start, operator, bound, name) ->
+  lowered := code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;?/g, (_whole, _counter, start, operator, bound, name) ->
     canonicalStart := start.trim().replace(/^\((.+) \+ 1\) \+ -1$/, "$1")
     step := if operator is "<" or operator is "<=" then "++" else "--"
     `for (let ${name} = ${canonicalStart}; ${name} ${operator} ${bound.trim()}; ${name}${step}) {`
   )
+  renameUnusedLoopCounters(lowered)
+
+// `for (let i = 0; i < n; i++) {…}` and `for (let _ = 0; _ < n; _++) {…}` are the same
+// loop when the body never mentions the counter: only a name nobody reads changed.
+// Both spellings are canonicalized to `_`, but only where the body mentions neither
+// the counter nor `_` itself -- a body that reads either keeps its own name, so a
+// rewrite that renamed a counter somebody uses still fails the gate.
+function renameUnusedLoopCounters(code: string): string
+  var out = ""
+  var last = 0
+  re := /for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); ((?:\+\+|--)?)\1((?:\+\+|--)?)\) \{/g
+  var match: RegExpExecArray | null = null
+  while (match = re.exec(code)) !== null
+    name := match[1]!
+    continue if name is "_"
+    close := findBlockClose(code, match.index + match[0].length)
+    continue if close < 0
+    mentions := (text: string, id: string): boolean ->
+      new RegExp(`(?<![\\w$])${id.replace(/\$/g, "\\$")}(?![\\w$])`).test(text)
+    body := code.slice(match.index + match[0].length, close)
+    continue if mentions(body, name) or mentions(body, "_") or mentions(match[2]! + " " + match[4]!, "_")
+    renamed := match[0].replace(new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g"), () -> "_")
+    out += code.slice(last, match.index) + renamed
+    last = match.index + match[0].length
+  out + code.slice(last)
 
 // Canonicalize `const f = (...) => { ... }` as `function f(...) { ... }` only
 // for the declaration shape that the guarded function-declaration rule proposes.

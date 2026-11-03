@@ -137,7 +137,14 @@ export const preferRangeLoopRule: Rule = {
           when ">" then "..>"
           when ">=" then "..>="
           else ""
-        replacement = `for ${name} of [${initialValue}${rangeOperator}${bound}]`
+        // A counter nobody reads is written `_`: the range head needs a binding, and
+        // `for [0..<n]` with none compiles but crashes eslint-plugin-civet. The loop
+        // text must mention neither the counter nor an existing `_`.
+        loopText := source.slice(blockRange.start, blockRange.end)
+        counterUnused := name isnt "_" and
+          not new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(loopText) and
+          not /(?<![\w$])_(?![\w$])/.test(loopText + " " + initialValue + " " + bound)
+        replacement = `for ${counterUnused ? "_" : name} of [${initialValue}${rangeOperator}${bound}]`
       else
         // `.=` declares with `let`; a `var` index that outlives the loop has no
         // equivalent head.
