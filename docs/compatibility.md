@@ -90,3 +90,4 @@ By default, Clint enforces strict, byte-for-byte identity on compiled JS output 
 | `placeholder-param` | `style/prefer-ampersand-shorthand` | A single direct-property callback parameter and its reference canonicalized to `$`; disabled unless explicitly opted in. |
 | `range-loop` | `style/prefer-range-loop` | The hidden counter and per-iteration binding emitted for Civet ranges normalized to the equivalent guarded C-style loop. |
 | `function-declaration` | `style/prefer-function-declaration` | A guarded named const arrow block canonicalized to a function declaration. |
+| `arrow-paren-style` | `style/prefer-implicit-arrow-arg` | The doubled parentheses Civet emits for `f (=> x)` (`f((() => x))`) dropped to `f(() => x)`. Only a single arrow closed directly by the call's paren qualifies; a top-level comma inside, a second argument, or any other parenthesised expression stays a mismatch. Declared only when such a site is fixed. |

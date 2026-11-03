@@ -76,3 +76,102 @@ describe "style/prefer-implicit-arrow-arg", ->
     once := lint("d = vi.fn(=> 1)\n")
     twice := lint(once.fixedSource!)
     expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)
+
+describe "style/prefer-implicit-arrow-arg: implicit call with a parenthesised arrow", ->
+  it "rewrites `callee (=> body)` and proves it with the arrow-paren-style delta", ->
+    res := lint("m = createMemo (=> a())\n")
+    expect(res.fixedSource).toBe("m = createMemo => a()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "only differs from the original by the doubled paren pair", ->
+    input := "m = createMemo (=> a())\n"
+    res := lint(input)
+    before := compileForOutput(input, { dial: DIAL }).output
+    after := compileForOutput(res.fixedSource!, { dial: DIAL }).output
+    expect(before).toBe("let m = createMemo((() => a()))\n")
+    expect(after).toBe("let m = createMemo(() => a())\n")
+
+  it "handles member callees, nested implicit calls and a trailing comment", ->
+    expect(lint("a = obj.track (=> go())\n").fixedSource).toBe("a = obj.track => go()\n")
+    expect(lint("g f (=> x)\n").fixedSource).toBe("g f => x\n")
+    expect(lint("m = createMemo (=> a()) # why\n").fixedSource).toBe("m = createMemo => a() # why\n")
+
+  it "fixes explicit and parenthesised sites together", ->
+    res := lint("a = vi.fn(=> 1)\nb = createMemo (=> 2)\n")
+    expect(res.fixedSource).toBe("a = vi.fn => 1\nb = createMemo => 2\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "leaves the multi-argument form alone", ->
+    // `g => a(), 5` compiles the same, but reads as if the comma were the arrow's.
+    expect(findings("g (=> a()), 5\n")).toHaveLength(0)
+    expect(findings("useEffect (=> run()), []\n")).toHaveLength(0)
+
+  it "leaves a parameterised arrow, a chain, and anything after the paren alone", ->
+    for source of [
+      "f ((a) => a)\n"
+      "x = f (=> a()).b\n"
+      "x = (f (=> a())).b\n"
+      "f (=> a()) if ok\n"
+      "x = ok ? f (=> a()) : b\n"
+      "x = f (=> a()), y\n"
+      "o := { p: foo (=> a()), q: 1 }\n"
+    ]
+      expect(findings(source)).toHaveLength(0)
+
+  it "keeps a following object property out of the arrow", ->
+    input := "o :=\n  p: foo (=> a())\n  q: 1\n"
+    res := lint(input)
+    expect(res.fixedSource).toBe("o :=\n  p: foo => a()\n  q: 1\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "leaves a parenthesised arrow whose paren is not followed by a call gap", ->
+    expect(findings("x = (=> a())\n")).toHaveLength(0)
+
+  it "is idempotent", ->
+    once := lint("m = createMemo (=> a())\n")
+    twice := lint(once.fixedSource!)
+    expect(twice.fixedSource ?? once.fixedSource).toBe(once.fixedSource)
+
+PEER := "style/no-single-param-arrow-without-parens"
+
+both := (input: string, extraZeroArgCallees?: string[]) ->
+  lintSource(input, {
+    rules: { "style/prefer-implicit-arrow-arg": "warn", [PEER]: "warn" }
+    ruleOptions: extraZeroArgCallees ? { [PEER]: { extraZeroArgCallees } } : undefined
+    civetOptions: DIAL
+    fix: true
+  })
+
+describe "style/prefer-implicit-arrow-arg agrees with no-single-param-arrow-without-parens", ->
+  it "does not write a callee the peer rule would flag", ->
+    for source of ["x = useUser (=> id())\n", "x = useUser(=> id())\n", "x = createMemo (=> a())\n", "x = renderPage(=> go())\n"]
+      expect(both(source).fixedSource).toBeUndefined()
+
+  it "writes it once the callee is exempted by name or pattern", ->
+    expect(both("x = useUser (=> id())\n", ["useUser"]).fixedSource).toBe("x = useUser => id()\n")
+    expect(both("x = useUser(=> id())\n", ["use*"]).fixedSource).toBe("x = useUser => id()\n")
+
+  it "always writes built-in zero-arg callees and member callees", ->
+    expect(both("x = lazy (=> import('./p'))\n").fixedSource).toBe("x = lazy => import('./p')\n")
+    expect(both("x = useMemo(=> compute())\n").fixedSource).toBe("x = useMemo => compute()\n")
+    expect(both("x = vi.fn (=> 1)\n").fixedSource).toBe("x = vi.fn => 1\n")
+    expect(both("x = a.useUser(=> id())\n").fixedSource).toBe("x = a.useUser => id()\n")
+
+  it "never produces a finding the peer rule reports", ->
+    sources := [
+      "a = useUser (=> id())\n", "b = useUser(=> id())\n", "c = lazy (=> 1)\n", "d = vi.fn(=> 1)\n"
+      "e = createMemo (=> a())\n", "f = beforeEach (=> reset())\n", "g = obj.read (=> 1)\n"
+      "h = renderWithQuery(=> go())\n"
+    ]
+    for source of sources
+      fixed := both(source).fixedSource ?? source
+      left := lintSource(fixed, { rules: { [PEER]: "warn" }, civetOptions: DIAL }).diagnostics
+        .filter (d) -> d.ruleId is PEER
+      before := lintSource(source, { rules: { [PEER]: "warn" }, civetOptions: DIAL }).diagnostics
+        .filter (d) -> d.ruleId is PEER
+      // The rule may leave a pre-existing finding, but must not add one.
+      expect(left.length).toBeLessThanOrEqual(before.length)
+
+  it "ignores the peer when it is off", ->
+    res := lint("x = useUser (=> id())\n")
+    expect(res.fixedSource).toBe("x = useUser => id()\n")

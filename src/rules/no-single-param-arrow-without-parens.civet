@@ -61,6 +61,23 @@ export function zeroArgCalleeMatcher(configured: unknown): (name: string) => boo
   (name: string) ->
     ZERO_ARG_CALLEES.has(name) or exact.has(name) or patterns.some (re) -> re.test(name)
 
+// The identifier that would sit directly in front of an `=>` if the text ended at
+// `before` -- the name this rule would warn about -- or undefined when the rule
+// would stay quiet regardless of configuration (a member callee like `vi.fn`, a
+// non-identifier, a reserved modifier, a return-type annotation).
+//
+// style/prefer-implicit-arrow-arg asks this before it writes `callee => body`, so
+// that its fix never produces a finding this rule then reports. Keep it in step
+// with the scan in `check` below; a test runs both rules over the same sources.
+export function bareArrowCallee(before: string): string | undefined
+  match := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)[^\S\n]*$/.exec(before)
+  return undefined unless match?
+  ident := match[1]
+  return undefined if RESERVED_MODIFIERS.has(ident)
+  lineStart := before.lastIndexOf("\n") + 1
+  return undefined if /\)\s*:[^)]*$/.test(before.slice(lineStart, before.length - match[0].length + match[0].indexOf(ident)))
+  ident
+
 export const noSingleParamArrowWithoutParensRule: Rule = {
   id: "style/no-single-param-arrow-without-parens"
   meta: {
