@@ -10,9 +10,9 @@
 
 **civet-clint** is a compiler-backed style checker and autofixer for [Civet](https://civet.dev). The package installs the concise `clint` command line tool and provides a programmatic Node.js API.
 
-Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. By default, every autofix edit is compiled and verified to produce byte-for-byte identical output to the original source. For opt-in non-byte-identical transforms (such as unquoting single-quoted module paths in `style/prefer-terse-imports`), fixes are validated against a compiler reference source and bounded by engine-enforced output delta checks. Unsafe or semantics-altering edits are rejected by the safety gate.
+Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/civet` compiler parser. By default, every autofix edit is compiled and verified to produce byte-for-byte identical output to the original source. For transforms that cannot be byte-identical (unquoting single-quoted module paths in `style/prefer-terse-imports`, dropping the braces from `f { a: 1 }`, or the doubled parens Civet emits for `f (=> x)`), fixes are validated against a compiler reference source and bounded by engine-enforced output delta checks. Unsafe or semantics-altering edits are rejected by the safety gate.
 
-> **Release Status:** `0.7.0` is unreleased; npm `latest` remains `0.6.0`. Clint bundles Civet `0.11.16`, resolves a project's installed compiler by default, and supports tested versions `0.11.5`, `0.11.15`, and `0.11.16`. See the [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md).
+> **Release Status:** `0.8.0` is unreleased; npm `latest` remains `0.7.0`. Clint bundles Civet `0.11.16`, resolves a project's installed compiler by default, and supports tested versions `0.11.5`, `0.11.15`, and `0.11.16`. See the [Compatibility Matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md).
 
 ---
 
@@ -20,7 +20,7 @@ Unlike a text-only regex formatter, `civet-clint` uses the official `@danielx/ci
 
 - 🛡️ **Compiler-Equivalence Verification**: Every rule batch is verified against Civet's compilation output. Unsafe or output-altering edits are rejected by the safety gate.
 - ⚡ **Atomic File Rewrites**: Changes are written atomically via temporary files, preventing partial writes and preserving line endings (`\n` vs `\r\n`).
-- 🎯 **Bidirectional Civet Style Rules**: 49 built-in rules covering idiomatic Civet style, Solid and React JSX, Coffee conventions, and compiler-safe migration toward standard Civet.
+- 🎯 **Bidirectional Civet Style Rules**: 51 built-in rules covering idiomatic Civet style, Solid and React JSX, Coffee conventions, and compiler-safe migration toward standard Civet.
 - 🧩 **Modular Rule Registry & Plugins**: Modular `RuleRegistry` abstraction with plugin contracts, duplicate-rule validation, and runtime-isolated registries.
 - 🗂️ **Per-File Configuration Overrides**: Support for glob-based `overrides` in configuration files to tailor rules, presets, and compiler dials per directory or file pattern.
 - ⚙️ **Configurable & Extensible**: Support for presets (`default`, `civet-idiomatic`, `coffee-react`, `coffee-to-standard`), granular rule severities (`off`, `warn`, `error`), project compiler resolution, and integration with project `civet.json` configs.
@@ -379,7 +379,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
 | [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on trailing calls when the argument list is unambiguous. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
 | [`style/prefer-implicit-arrow-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-arrow-arg.civet) | Drop call parens when the sole argument is a zero-parameter arrow (`vi.fn => x`, `lazy => import(…)`), including the implicit-call form `createMemo (=> x)`. Never fires on an object property followed by more properties — the arrow would absorb them — or on a multi-argument call, and it defers to `style/no-single-param-arrow-without-parens` so a fix never trades one finding for another. | — |
-| [`style/prefer-implicit-object-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-object-arg.civet) | Drop the braces from a single-line object that closes its line and is the last argument of a paren-free call (`f x, { a: 1 }` → `f x, a: 1`), a JSX attribute value (`p={{ a: 1 }}` → `p={a: 1}`), or an arrow body (`=> ({ a: 1 })` → `=> a: 1`). Keeps shorthand entries, spreads, methods and getters, a first key Civet reads as syntax (`when`, `from`, `do`, `await`, …), explicit-paren calls and anything after the object. | — |
+| [`style/prefer-implicit-object-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-object-arg.civet) | Drop the braces from a single-line object that closes its line and is the last argument of a paren-free call (`f x, { a: 1 }` → `f x, a: 1`), a JSX attribute value (`p={{ a: 1 }}` → `p={a: 1}`), or an arrow body (`=> ({ a: 1 })` → `=> a: 1`). Keeps shorthand entries, spreads, methods and getters, a first key Civet reads as syntax (`when`, `from`, `do`, `await`, …), explicit-paren calls and anything after the object. Verified via the `whitespace-style` output delta. | — |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}` and combine adjacent `{foo} {bar}` into `{foo, bar}`. `prop={true}` is reported but not fixed — see below. | — |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | — |
@@ -607,7 +607,7 @@ That last one is a behaviour change, not a layout one, so the rule leaves it alo
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Report `prop={true}`, which lowers to `prop` and so is not byte-identical. The fixable forms are listed above. | — |
 | [`style/prefer-ampersand-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-ampersand-shorthand.civet) | Prefer `&` shorthand for single-parameter callbacks. Placeholder parameter renames are autofixed only with `autofixPlaceholders: true`. | — |
 | [`style/prefer-switch`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-switch.civet) | Suggest `switch` for chains of strict equality checks on the same variable. Report-only. | — |
-| [`style/no-single-param-arrow-without-parens`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-single-param-arrow-without-parens.civet) | Require parentheses around single arrow function parameters `(x) => ...`. | — |
+| [`style/no-single-param-arrow-without-parens`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-single-param-arrow-without-parens.civet) | Flag `name => x`, which Civet compiles to the call `name(() => x)` rather than an arrow with a parameter. Callees known to take a zero-argument callback are exempt; add project-local ones, or whole families such as `"use*"`, with [`extraZeroArgCallees`](#stylono-single-param-arrow-without-parens). | — |
 | [`style/prefer-named-export-default`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-named-export-default.civet) | Prefer named default exports (`export default MyComp = ...`). | — |
 | [`style/no-thin-arrow`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-thin-arrow.civet) | Disallow thin arrows `->` in favor of fat arrows `=>`. | — |
 | [`style/no-pipe-operator`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/no-pipe-operator.civet) | Disallow pipe operator `\|>`. | — |
@@ -766,6 +766,17 @@ Fixes that intentionally rewrite comment text must declare
 `meta.allowFixesInsideComments: true`; comment edits from every other built-in or
 plugin rule are rejected before the compiler-equivalence gate.
 
+Two hooks let a rule cooperate with its configuration and its siblings:
+
+- `meta.validateOptions(options)` runs when a config loads, after the key and type
+  checks. Return a message to reject the options (the config fails to load) or
+  `undefined` to accept them. `style/no-single-param-arrow-without-parens` uses it to
+  validate `extraZeroArgCallees` patterns.
+- `context.activeRuleOptions(ruleId)` returns another rule's resolved options when that
+  rule is enabled and not skipped by the compiler dial, and `undefined` otherwise.
+  `style/prefer-implicit-arrow-arg` uses it so its fix never produces a finding that
+  `style/no-single-param-arrow-without-parens` would then report.
+
 ---
 
 ## Architecture & Equivalence Engine
@@ -794,15 +805,20 @@ flowchart TD
 Fixes are validated per rule, one batch per file, so a rejected rule never discards
 another rule's approved edits.
 
-The reference-source branch is the single, opt-in exception to comparing against the
-original file's output, currently used only by
-[`unquoteSingleQuotes`](#styleprefer-terse-imports). It does not relax the gate,
-because it is paired with an engine-owned bound on the emitted difference. A rule
+The reference-source branch is the exception to comparing against the original file's
+output. It is how a rule whose fix cannot be byte-identical is verified: the opt-in
+[`unquoteSingleQuotes`](#styleprefer-terse-imports), brace removal in
+`style/prefer-implicit-object-arg` (`whitespace-style`), and the `f (=> x)` form of
+`style/prefer-implicit-arrow-arg` (`arrow-paren-style`, declared only when such a site
+is fixed). Every delta kind is listed in the
+[compatibility matrix](https://github.com/shogi-dojo/civet-clint/blob/main/docs/compatibility.md#compiler-equivalence--output-deltas).
+It does not relax the gate, because it is paired with an engine-owned bound on the
+emitted difference. A rule
 supplies the reference *source*; the engine defines what each delta kind permits and
 verifies it separately, so a rule cannot widen its own allowance or launder an
 arbitrary rewrite through a broad reference. A rule never inspects, normalizes, or
-approves compiled output. Rules that declare no reference — every rule today by
-default — are governed solely by the strict check against the original.
+approves compiled output. Rules that declare no reference are governed solely by the strict check against the
+original.
 
 For design details regarding AST constraints, compiler dials, and upstream Civet integration, see [docs/upstream.md](https://github.com/shogi-dojo/civet-clint/blob/main/docs/upstream.md).
 

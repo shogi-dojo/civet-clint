@@ -5,6 +5,58 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-03
+
+### Upgrading
+
+A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
+`clint --write` clears them.
+
+- `style/prefer-implicit-object-arg` (new, `error` in `civet-idiomatic`) drops the
+  braces from single-line objects passed to paren-free calls, JSX attributes and
+  arrow bodies. On a Solid app that had already been through an earlier brace pass
+  it still found 426 fixable sites across 136 files, together with the arrow rule
+  below.
+- `style/prefer-implicit-arrow-arg` now also rewrites `createMemo (=> a())`, and no
+  longer rewrites a callee that `style/no-single-param-arrow-without-parens` would
+  then flag (when that rule is on). List such callees, or families with `"use*"`, in
+  `extraZeroArgCallees` to get the fix.
+- `extraZeroArgCallees` entries are now validated when the config loads: each must be
+  an identifier, optionally with `*` wildcards. Entries that were silently ignored
+  before (`"foo.bar"`, `""`) now fail the load.
+
+### Added
+
+- **`style/prefer-implicit-object-arg`.** `f x, { a: 1 }` becomes `f x, a: 1`,
+  `p={{ a: 1 }}` becomes `p={a: 1}`, and `=> ({ a: 1 })` becomes `=> a: 1`. Verified
+  by the `whitespace-style` delta. It leaves shorthand entries (`f { a, b: 1 }` would
+  make `a` its own argument), spreads, methods and getters, a first key Civet reads as
+  syntax (`when`, `from`, `do`, `await`, `then`, `of`, `yield`, `debugger`, `as`, `satisfies`, `by`,
+  `implements`, and `function` in an arrow body), explicit-paren calls, objects on a
+  continuation line, and anything after the closing brace. A test re-derives the
+  keyword list from the compiler, so a Civet release that changes it fails the suite.
+- **`arrow-paren-style` output delta.** Licenses exactly the doubled parentheses Civet
+  emits for `f (=> x)` (`f((() => x))` against `f(() => x)`). A top-level comma inside,
+  a second argument, or any other parenthesised expression remains a mismatch.
+- **Patterns in `extraZeroArgCallees`.** `*` matches any run of identifier characters:
+  `"use*"`, `"render*"`, `"create*"`. A pattern needs a literal character, so a bare `*`
+  is rejected rather than silently disabling the rule.
+- **Plugin API.** `meta.validateOptions(options)` lets a rule reject its options at
+  config load, and `context.activeRuleOptions(ruleId)` returns another active rule's
+  resolved options.
+
+### Changed
+
+- `style/prefer-implicit-arrow-arg` checks `style/no-single-param-arrow-without-parens`
+  for the explicit form too (`useUser(=> id())`), which used to be rewritten into a
+  finding.
+
+### Fixed
+
+- README: the `extraZeroArgCallees` option was listed under
+  `style/prefer-terse-imports`; the rule count, release status and equivalence-engine
+  description were out of date.
+
 ## [0.7.0] - 2026-10-09
 
 ### Upgrading
