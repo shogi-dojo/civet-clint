@@ -49,3 +49,34 @@ describe RULE, ->
     expect(result.fixedSource).toContain("value is not in values")
     expect(result.isEquivalencePreserved).toBe(true)
     expect(compileSource(result.fixedSource!)).toBe(compileSource(source))
+
+describe `${RULE} operand shapes`, ->
+  it "gives an implicit-call operand its own parens", ->
+    source := "f := (ids, item) => ids.includes(Number item.id) and item.ok\ng := (a, c) => c? and a.o.includes Number c\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("f := (ids, item) => Number(item.id) is in ids and item.ok\ng := (a, c) => c? and Number(c) is in a.o\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+    expect(compileSource(result.fixedSource!)).toBe(compileSource(source))
+
+  it "keeps every argument of an implicit call in its parens", ->
+    source := "x := a.includes(f g, h)\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("x := f(g, h) is in a\n")
+    expect(compileSource(result.fixedSource!)).toBe(compileSource(source))
+
+  it "braces a bare JSX attribute value", ->
+    source := "x := <b aria-checked=p.codes.includes(o.code) role=\"radio\">\n"
+    result := lintSource(source, { rules: { [RULE]: "error" }, fix: true, dial: { solid: true } })
+    expect(result.fixedSource).toBe("x := <b aria-checked={o.code is in p.codes} role=\"radio\">\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+
+  it "reports an operand looser than membership without a fix", ->
+    for source of ["x := a.includes(b or c)\n", "x := a.includes(b ? c : d)\n", "x := a.includes(b is c)\n"]
+      result := fix(source)
+      expect(result.diagnostics.map (d) -> [d.ruleId, d.fix?]).toEqual([[RULE, false]])
+      expect(result.fixedSource).toBeUndefined()
+
+  it "still fixes an operand that binds tighter", ->
+    result := fix("x := a.includes(b + c)\n")
+    expect(result.fixedSource).toBe("x := b + c is in a\n")
+    expect(result.isEquivalencePreserved).toBe(true)
