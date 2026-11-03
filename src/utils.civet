@@ -516,23 +516,29 @@ function jsMatchClose(code: string, open: number): number
     i++
   -1
 
-function hasTopLevelComma(code: string): boolean
+// `code` with every literal and every bracketed group blanked to spaces, so a search
+// for an operator sees only the ones at depth 0.
+function topLevelText(code: string): string
+  var out = ""
   var depth = 0
   var i = 0
   while i < code.length
     end := jsLiteralEnd(code, i)
     if end >= 0
+      out += " ".repeat(end - i)
       i = end
       continue
     ch := code[i]
     if ch is "(" or ch is "[" or ch is "{"
       depth++
+      out += " "
     else if ch is ")" or ch is "]" or ch is "}"
       depth--
-    else if ch is "," and depth is 0
-      return true
+      out += " "
+    else
+      out += depth is 0 ? ch : " "
     i++
-  false
+  out
 
 // `f => x` emits `f(() => x)`, but `f (=> x)` -- an implicit call whose argument is a
 // parenthesised arrow -- emits `f((() => x))`. The extra pair is a parenthesised
@@ -562,7 +568,7 @@ export function normalizeArrowParenStyle(code: string): string
           var outerEnd = wrapperEnd + 1
           outerEnd++ while outerEnd < code.length and /\s/.test(code[outerEnd])
           inner := code.slice(wrapper + 1, wrapperEnd).trim()
-          if code[outerEnd] is ")" and ARROW_HEAD.test(inner) and not hasTopLevelComma(inner)
+          if code[outerEnd] is ")" and ARROW_HEAD.test(inner) and not topLevelText(inner).includes(",")
             // Keep the layout around the wrapper (`f(\n  (() => x))` keeps its break);
             // only the pair itself, and any padding inside it, goes.
             out += code.slice(i, wrapper) + normalizeArrowParenStyle(inner) + code.slice(wrapperEnd + 1, outerEnd) + ")"
@@ -571,6 +577,90 @@ export function normalizeArrowParenStyle(code: string): string
     out += code[i]
     i++
   out
+
+// `return if c then a else b` emits `return (c? a : b)`; the same words as a
+// function's last statement emit `if (c) { return a} else return b`. One program,
+// two spellings, so the ternary is canonicalized to Civet's if/else layout -- but
+// only a ternary this scan can split without doubt: one top-level `?` and `:` pair,
+// a condition without an assignment or arrow (in `a = b ? c : d` the `?` belongs to
+// the right-hand side), and an alternative without a comma (`c ? a : b, d` returns
+// `d`). Anything else is copied as-is, so a rewrite it cannot prove fails the gate.
+export function normalizeConditionalReturnStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    lit := jsLiteralEnd(code, i)
+    if lit >= 0
+      out += code.slice(i, lit)
+      i = lit
+      continue
+    if code.startsWith("return (", i) and not /[\w$.]/.test(code[i - 1] ?? "")
+      open := i + "return ".length
+      close := jsMatchClose(code, open)
+      parts := close > 0 ? splitTernary(code.slice(open + 1, close)) : undefined
+      if parts?
+        [test, consequent, alternate] := parts.map (part) -> normalizeConditionalReturnStyle(unwrapBranch(part.trim()))
+        out += `if (${test}) { return ${consequent}} else return ${alternate}`
+        i = close + 1
+        continue
+    out += code[i]
+    i++
+  out
+
+// The ternary parenthesizes every branch that is not a bare name, call or literal
+// (`c? (a || b) : (-d)`) unless the branch already is a parenthesized group; after
+// `return` the same values are bare. That added pair is grouping only, so it goes --
+// except around an object literal, which keeps its parens after `return` too.
+function unwrapBranch(text: string): string
+  return text unless fullyParenthesized(text)
+  inner := text.slice(1, -1).trim()
+  return text if inner.startsWith("{") or fullyParenthesized(inner)
+  inner
+
+function fullyParenthesized(text: string): boolean
+  text.startsWith("(") and jsMatchClose(text, 0) is text.length - 1
+
+// `[test, consequent, alternate]` of a ternary with exactly one top-level `?` and
+// `:`, or undefined. `?.` (unless a digit follows) and `??` are not the operator.
+function splitTernary(inner: string): string[] | undefined
+  var depth = 0
+  var question = -1
+  var colon = -1
+  var i = 0
+  while i < inner.length
+    lit := jsLiteralEnd(inner, i)
+    if lit >= 0
+      i = lit
+      continue
+    ch := inner[i]
+    if "([{".includes(ch)
+      depth++
+    else if ")]}".includes(ch)
+      depth--
+    else if depth is 0
+      if ch is "?"
+        next := inner[i + 1] ?? ""
+        if next is "?"
+          i += 2
+          continue
+        unless next is "." and not /\d/.test(inner[i + 2] ?? "")
+          return undefined if question >= 0
+          question = i
+      else if ch is ":"
+        return undefined if question < 0 or colon >= 0
+        colon = i
+      else if ch is ","
+        return undefined
+      else if ch is "=" and question < 0
+        // `==`, `===`, `!=`, `!==`, `<=`, `>=` compare; a lone `=` or `=>` does not.
+        prev := inner[i - 1] ?? ""
+        next := inner[i + 1] ?? ""
+        return undefined if next is ">" or not ("=!<>".includes(prev) or next is "=")
+    i++
+  return undefined unless question > 0 and colon > question and colon < inner.length - 1
+  test := inner.slice(0, question)
+  return undefined if /^\s*$/.test(test) or /(?<![\w$])(?:yield|async)(?![\w$])/.test(test)
+  [test, inner.slice(question + 1, colon), inner.slice(colon + 1)]
 
 // Canonicalize the equivalent JS spellings `a !== b` and `!(a === b)`. This
 // bounded delta is used only by prefer-unless for a whole-condition rewrite.

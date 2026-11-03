@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
+import { normalizeConditionalReturnStyle } from "../src/utils.civet"
 
 RULE := "style/prefer-implicit-return"
 DIAL := { autoLet: true, react: true }
@@ -13,6 +14,15 @@ function expectReturnEquivalent(source: string)
   expect(res.isEquivalencePreserved).toBe(true)
   expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
   fixed
+
+// For a fix whose output differs by the ternary-vs-if/else spelling only.
+function expectConditionalEquivalent(source: string)
+  res := fix(source)
+  expect(res.fixedSource).toBeDefined()
+  expect(res.isEquivalencePreserved).toBe(true)
+  canonical := (code: string) -> normalizeConditionalReturnStyle(compileSource(code, DIAL))
+  expect(canonical(res.fixedSource!)).toBe(canonical(source))
+  res.fixedSource!
 
 function unchanged(source: string)
   res := fix(source)
@@ -149,16 +159,37 @@ describe "one-line braced method bodies", ->
       .toBe("o := {\n  get data() {\n    mocks.events\n  }\n}\n")
 
 describe "return of a conditional expression", ->
-  it "does not offer to drop `return if … then … else …`", ->
-    // A conditional expression after `return` is a ternary; as the last statement it
-    // is an if/else. Same behaviour, different compiled output: the gate would reject
-    // the fix on every run, so the rule stays silent instead of reporting it.
-    source := "f = (w) =>\n  if w.a\n    return 'x'\n  return if s() then 'm' else 'n'\n"
+  // A conditional expression after `return` is a ternary; as the last statement it is
+  // an if/else with a `return` in each branch. The `conditional-return` delta proves
+  // the pair, so a guard-clause tail loses its keyword.
+  it "drops the 'return' of a one-line `if … then … else …` tail", ->
+    fixed := expectConditionalEquivalent("f = (w) =>\n  if w.a\n    return 'x'\n  return if s() then 'm' else 'n'\n")
+    expect(fixed).toBe("f = (w) =>\n  if w.a\n    return 'x'\n  if s() then 'm' else 'n'\n")
+
+  it "handles `unless`, compound tests and branches Civet parenthesizes", ->
+    for [source, expected] of [
+      ["f = (c) ->\n  return unless c then a() else b 1\n", "f = (c) ->\n  unless c then a() else b 1\n"]
+      ["f = (x) =>\n  return if x? and y then a or b else c ?? d\n", "f = (x) =>\n  if x? and y then a or b else c ?? d\n"]
+      ["f = (x) =>\n  return if x then (y) => y else -z\n", "f = (x) =>\n  if x then (y) => y else -z\n"]
+      ["f = (c) =>\n  return if c then (if d then e else f) else {x: 1}\n", "f = (c) =>\n  if c then (if d then e else f) else {x: 1}\n"]
+    ]
+      expect(expectConditionalEquivalent(source)).toBe(expected)
+
+  it "drops the braces with it in a one-line method", ->
+    expect(expectConditionalEquivalent("class X\n  get v() { return if @c then 1 else 2 }\n")).toBe("class X\n  get v() if @c then 1 else 2\n")
+
+  it "stays silent on an `else if` chain, which emits an IIFE after `return`", ->
+    source := "f = (c) =>\n  return if c then a else if d then e else b\n"
     res := fix(source)
     expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
-    expect(res.fixedSource ?? source).toBe(source)
 
-  it "does not let such a return poison the file's other fixes", ->
-    fixed := expectReturnEquivalent("f = (w) =>\n  return if s() then 'm' else 'n'\ng = (x) =>\n  y := x + 1\n  return y\n")
-    expect(fixed).toContain("  y := x + 1\n  y\n")
-    expect(fixed).toContain("return if s() then 'm' else 'n'")
+  it "stays silent on other statement forms after `return`", ->
+    source := "f = (c) =>\n  return switch c\n    when 1 then a\n    else b\n"
+    expect(fix(source).diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "functions typed void", ->
+  it "keeps the 'return' where Civet adds no implicit one", ->
+    for source of ["f = (c): void =>\n  g()\n  return a\n", "f = (c): Promise<void> ->\n  return if c then a else b\n"]
+      res := fix(source)
+      expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+      expect(res.diagnostics.filter((d) -> d.ruleId is "compiler-equivalence-mismatch")).toHaveLength(0)

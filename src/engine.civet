@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle, normalizeArrowParenStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle, normalizeArrowParenStyle, normalizeConditionalReturnStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
@@ -38,6 +38,9 @@ export interface LintOptions
 // this same sequence so single-rule and multi-rule verification agree.
 export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "semicolon-style"
+  // Before block-brace-style: both sides must reach `{ return a}` before a combined
+  // brace delta unwraps it.
+  "conditional-return"
   "quote-style"
   "declaration-style"
   "trailing-comma-style"
@@ -403,6 +406,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeExistentialParenStyle(code)
       when "arrow-paren-style"
         normalizeArrowParenStyle(code)
+      when "conditional-return"
+        normalizeConditionalReturnStyle(code)
       else
         code
 

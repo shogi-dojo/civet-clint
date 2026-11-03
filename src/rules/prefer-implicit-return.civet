@@ -10,9 +10,15 @@ const FN_NODE_TYPES = [
 
 const CLASS_TYPES = ["ClassExpression", "ClassDeclaration"]
 
+const VOID_RETURN = /^\s*:\s*(?:void|Promise\s*<\s*void\s*>)\s*$/
+
 // Words that start a statement form which Civet compiles differently from the
 // expression form it takes after `return`.
 const STATEMENT_KEYWORD = /^(?:if|unless|switch|try|do|for|while|until|loop)\b/
+// The one statement form that is also a plain ternary: `if c then a else b` on one
+// line, with no second `if` after its `else`.
+const CONDITIONAL_TAIL = /^(?:if|unless)\b[^\n]*\bthen\b[^\n]*\belse\b[^\n]*$/
+const ELSE_CHAIN = /\belse\s+(?:if|unless)\b/
 
 const LOOP_TYPES = [
   "ForStatement"
@@ -37,7 +43,7 @@ export const preferImplicitReturnRule: Rule = {
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
     edits: Fix[] := []
-    ctx.declareEquivalenceReference?.("semicolon-style", (input: string) ->
+    ctx.declareEquivalenceReference?.(["semicolon-style", "conditional-return"], (input: string) ->
       return undefined unless edits.length > 0
       var output = input
       for edit of [...edits].sort((a, b) -> b.start - a.start)
@@ -95,6 +101,11 @@ export const preferImplicitReturnRule: Rule = {
       // makes `new` hand back the fresh instance instead. The gate rejects the fix --
       // which also took every other method's fix in the file down with it.
       return if fnNode.type is "MethodDefinition" and fnNode.name is "constructor" and tree.hasAncestorType(fnNode, CLASS_TYPES)
+
+      // The same holds for a function typed `: void` (or `Promise<void>`): Civet adds no
+      // implicit return there, so without the keyword the value is dropped.
+      returnType := fnNode.returnType ?? fnNode.signature?.returnType
+      return if returnType? and VOID_RETURN.test(tree.text(returnType))
 
       block := fnNode.block
       return unless block? and Array.isArray(block.expressions) and block.expressions.length > 0
@@ -169,10 +180,14 @@ export const preferImplicitReturnRule: Rule = {
 
       // `return if c then a else b` is a conditional EXPRESSION that compiles to a
       // ternary; the same words as the function's last statement compile to an
-      // if/else with a `return` in each branch. Same behaviour, different output, so
-      // the gate rejects the fix every time -- and a rejected fix takes the rest of
-      // the file's batch down with it. A report that can never be applied is noise.
-      return if STATEMENT_KEYWORD.test(source.slice(after, stmtSpan.end))
+      // if/else with a `return` in each branch. The `conditional-return` delta proves
+      // that pair for a one-line `if`/`unless` with a single `else`. Every other
+      // statement form (`else if` chains become an IIFE, a `switch`, a loop) emits
+      // differently, the gate would reject the fix every time, and a rejected fix
+      // takes the rest of the file's batch down with it: a report that can never be
+      // applied is noise.
+      valueText := source.slice(after, stmtSpan.end)
+      return if STATEMENT_KEYWORD.test(valueText) and not (CONDITIONAL_TAIL.test(valueText) and not ELSE_CHAIN.test(valueText))
 
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, after)
