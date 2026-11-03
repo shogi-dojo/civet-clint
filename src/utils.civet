@@ -589,7 +589,9 @@ export function normalizeInequalityStyle(code: string): string
 // Treat empty constructor call parentheses as syntax sugar while preserving
 // grouping when a member/index access follows the constructed value.
 export function normalizeNewCallStyle(code: string): string
-  out := code.replace(/\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
+  // The `(` must open a grouping, not a call's argument list: in `c ? f(new X) : y`
+  // the `(new X)` is followed by `:` too, and unwrapping it would eat the callee.
+  out := code.replace(/(?<![\w$)\]])\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
   out.replace(/\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(\)(?!\s*(?:\.|\[))/g, "new $1")
 
 // Canonicalize only a one-parameter arrow whose body is a direct property chain,
