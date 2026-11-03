@@ -73,3 +73,13 @@ describe "style/prefer-property-group-shorthand exclusions", ->
 
   it "leaves a brace-free object", ->
     unchanged("y :=\n  b: a.b\n  c: a.c\n")
+
+describe "style/prefer-property-group-shorthand in a file with a backtick regex", ->
+  it "groups `step.id, step.title` even though the whole-file output comparison sees ``` in a regex", ->
+    // The same odd-backtick regex that broke the unclosed-JSX comparison: the
+    // whitespace normalizer read it as a template literal and the gate rejected a
+    // rewrite whose only difference is `id:step.id,title:step.title` spacing.
+    source := "SHOT := /```shot\\n[^`]*```/g\nparts := (step, index) =>\n  { step.id, step.title, number: index + 1 }\n"
+    res := fix(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("SHOT := /```shot\\n[^`]*```/g\nparts := (step, index) =>\n  { step.{id,title}, number: index + 1 }\n")
