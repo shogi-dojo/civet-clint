@@ -182,6 +182,7 @@ export interface RuleMeta {
   capabilities?: RuleCapability;
   conflictsWith?: string[];
   defaultOptions?: RuleOptions;
+  validateOptions?(options: RuleOptions): string | undefined;
   phase?: RulePhase;
 }
 export interface Rule {

@@ -153,7 +153,6 @@ resolved compiler version and path; versions outside the tested set are reported
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `unquoteSingleQuotes` | boolean | `false` | Also unquote single-quoted module specifiers. |
-| `extraZeroArgCallees` | string[] | `[]` | For `style/no-single-param-arrow-without-parens`: project-local callees whose callback takes no arguments, exempted from the ambiguity warning. |
 
 By default the rule only unquotes double-quoted specifiers, because that rewrite is
 byte-identical: Civet echoes the original quote character, and the terse form emits
@@ -185,6 +184,18 @@ The second check is what makes the first safe to trust. A reference source is su
 by the rule, so on its own it would let a rule authorize its own rewrite; the
 engine-owned delta bound is not something a rule can widen. The strict byte-identity
 check is unchanged for every other rule and for this rule's default path.
+
+#### `style/no-single-param-arrow-without-parens`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `extraZeroArgCallees` | string[] | `[]` | Project-local callees whose callback takes no arguments, exempted from the ambiguity warning. An entry is a name or a pattern where `*` matches any run of identifier characters (`"use*"`, `"render*"`). |
+
+In Civet `name => x` always compiles to the call `name(() => x)`, so the warning is
+about readers coming from JavaScript, not about a different program. Patterns exist so
+a family of hooks or test helpers can be listed once: `use*` also matches `user`, so
+prefer a prefix that names the family. A pattern needs a literal character (a bare
+`*` would disable the rule), and entries are validated when the config loads.
 
 ### Presets
 

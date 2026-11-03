@@ -96,6 +96,9 @@ export interface RuleMeta
   capabilities?: RuleCapability
   conflictsWith?: string[]
   defaultOptions?: RuleOptions
+  // Called with the options a config supplies, after the key and type checks. Return
+  // a message to reject them (the config fails to load) or undefined to accept.
+  validateOptions?: (options: RuleOptions) => string | undefined
 
 export interface Rule
   id: string

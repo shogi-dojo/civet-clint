@@ -323,6 +323,9 @@ export function normalizeRuleEntry(
         actual := typeof options[key]
         unless actual is expected
           throw new Error(`Invalid value for option "${key}" of rule "${ruleId}": expected ${expected}, received ${actual}`)
+      problem := rule.meta.validateOptions?(options)
+      if problem?
+        throw new Error(`Invalid options for ${context} "${ruleId}": ${problem}`)
 
   { level: level as RuleLevel, options }
 
