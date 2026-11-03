@@ -88,7 +88,9 @@ export const preferInOperatorRule: Rule = {
         return undefined unless memberRange? and callRange?
         span = { start: memberRange.start, end: callRange.end }
       return unless span?
-      return if intersectsRange(ignoredRanges, span.start, span.end)
+      // Only a call that STARTS inside a comment or string is not code. Testing the
+      // whole span also skipped every call with a string argument (`a.includes 'x'`).
+      return if intersectsRange(ignoredRanges, span.start, span.start + 1)
       return if seen.has(span.start)
       seen.add(span.start)
 

@@ -63,7 +63,9 @@ export const preferBareConditionsRule: Rule = {
 
       pos := openParen.range.start
       return if seen.has(pos)
-      return if intersectsRange(ignoredRanges, pos, closeParen.range.end)
+      // Only the two parens are edited: a string inside them (`if (x is 'a')`) stays
+      // as written, so it is the parens themselves that must be code.
+      return if intersectsRange(ignoredRanges, pos, openParen.range.end) or intersectsRange(ignoredRanges, closeParen.range.start, closeParen.range.end)
       seen.add(pos)
 
       beforeOpen := source.slice(0, openParen.range.start)

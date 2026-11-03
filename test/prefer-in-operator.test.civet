@@ -66,7 +66,7 @@ describe `${RULE} operand shapes`, ->
 
   it "braces a bare JSX attribute value", ->
     source := "x := <b aria-checked=p.codes.includes(o.code) role=\"radio\">\n"
-    result := lintSource(source, { rules: { [RULE]: "error" }, fix: true, dial: { solid: true } })
+    result := lintSource(source, { rules: { [RULE]: "error" }, fix: true, civetOptions: { solid: true } })
     expect(result.fixedSource).toBe("x := <b aria-checked={o.code is in p.codes} role=\"radio\">\n")
     expect(result.isEquivalencePreserved).toBe(true)
 
@@ -80,3 +80,10 @@ describe `${RULE} operand shapes`, ->
     result := fix("x := a.includes(b + c)\n")
     expect(result.fixedSource).toBe("x := b + c is in a\n")
     expect(result.isEquivalencePreserved).toBe(true)
+
+  it "fixes a call whose argument is a string, but not one inside a string or comment", ->
+    source := "f := (s) =>\n  return [25] if s.includes 'chiitoitsu'\n  s.includes(\"a\")\nx := 'a.includes(b)' // c.includes(d)\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("f := (s) =>\n  return [25] if 'chiitoitsu' is in s\n  \"a\" is in s\nx := 'a.includes(b)' // c.includes(d)\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+    expect(compileSource(result.fixedSource!)).toBe(compileSource(source))
