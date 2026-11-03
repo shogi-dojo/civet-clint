@@ -124,6 +124,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-implicit-block-call": "error"
       "style/prefer-implicit-call-args": "error"
       "style/prefer-implicit-arrow-arg": "error"
+      "style/prefer-implicit-object-arg": "error"
       "style/no-braced-arrow-body": "error"
       "style/prefer-jsx-shorthand": "error"
       "style/prefer-bare-jsx-values": "error"

@@ -1,0 +1,181 @@
+import type { Fix, Rule, RuleContext } from "../types.civet"
+import { applyEdits, intersectsRange } from "../utils.civet"
+
+// Civet reads `key: value` pairs after a callee as an object, so the braces around a
+// single-line object are redundant in three places:
+//
+//   f x, { a: 1 }              ->  f x, a: 1             last argument of a paren-free call
+//   <C p={{ a: 1 }} />         ->  <C p={a: 1} />        JSX attribute value
+//   items.map (x) => ({ a: x }) -> items.map (x) => a: x  arrow body
+//
+// The emitted object differs only in the space inside its braces (`{ a: 1 }` vs
+// `{a: 1}`), which the whitespace-style delta covers, so the engine proves each fix.
+//
+// The guards below keep the rule from proposing a rewrite the compiler would reject
+// or, worse, accept with a different meaning. Each was found by compiling both
+// spellings, and test/prefer-implicit-object-arg.test.civet pins them:
+//
+//   * Shorthand `{ a, b: 1 }` -- without braces `a` becomes its own argument.
+//   * Spread `{ ...x, a: 1 }`, methods and getters -- the first fails to parse and
+//     `{ a: 1, ...rest }` compiles as a CALL on the object, silently.
+//   * A first key Civet reads as syntax (`when`, `from`, `do`, `await`, ...), per
+//     context; non-first keys never matter.
+//   * Anything after the object on its line (`.chain`, `)`, `,`): the brace is what
+//     ends the object there. A trailing comment is fine.
+//   * An explicit-paren call (`f(x, { a: 1 })`) -- the closing paren would then
+//     directly follow the object's last value.
+//   * Multi-line objects, which style/prefer-indented-object owns.
+//
+// Rewrites are only proposed where the AST says so: a paren-free Call, a JSX
+// attribute, or the parenthesised body of an arrow. Destructuring patterns, import
+// and export clauses and type literals are not object expressions in those places,
+// so they are never candidates.
+
+// Keywords that stop `K: v` from parsing as an object key when it comes first.
+// Measured against Civet 0.11.x; the keyword audit test re-checks every one.
+const KEYWORD_KEYS = {
+  // `f K: 1`
+  soleArgument: new Set(["then", "when", "do", "of", "from", "await", "yield", "debugger", "as", "satisfies", "by", "implements"])
+  // `f a, K: 1`
+  trailingArgument: new Set(["do", "await", "yield", "debugger"])
+  // `=> K: 1`
+  arrowBody: new Set(["do", "await", "yield", "debugger", "function"])
+  // `p={K: 1}`: braces already delimit the attribute, so nothing is reserved.
+  jsxAttribute: new Set<string>()
+}
+
+type Context = keyof typeof KEYWORD_KEYS
+
+export const preferImplicitObjectArgRule: Rule = {
+  id: "style/prefer-implicit-object-arg"
+  meta: {
+    description: "Drop braces from a single-line object that is a paren-free call's last argument, a JSX attribute value, or an arrow body"
+    fixable: true
+    defaultSeverity: "warn"
+    phase: "idiom"
+  }
+  check: (ctx: RuleContext) ->
+    source := ctx.source
+    tree := ctx.syntax
+    commentRanges := tree.commentRanges()
+    ignoredRanges := [...commentRanges, ...tree.stringRanges()]
+
+    fixes: Fix[] := []
+    var declared = false
+    // Declared on the first site; the reference applies every fix this rule proposes.
+    declareDelta := ->
+      return if declared
+      declared = true
+      ctx.declareEquivalenceReference?("whitespace-style", (input: string) ->
+        return undefined if fixes.length is 0
+        applyEdits(input, fixes).output
+      )
+
+    // Only whitespace, or a trailing comment, may follow `pos` on its line.
+    closesLine := (pos: number): boolean ->
+      lineEnd := source.indexOf("\n", pos)
+      trailing := source.slice(pos, lineEnd < 0 ? source.length : lineEnd)
+      return true if trailing.trim().length is 0
+      commentAt := pos + trailing.length - trailing.trimStart().length
+      commentRanges.some (range) -> range.start is commentAt
+
+    // The text between an object's braces if it can safely lose them, else undefined.
+    unbracedBody := (obj: any, context: Context): string | undefined ->
+      span := tree.range(obj)
+      return undefined unless span? and source[span.start] is "{" and source[span.end - 1] is "}"
+      text := source.slice(span.start, span.end)
+      return undefined if text.includes("\n") or text.includes("\r")
+      return undefined if intersectsRange(commentRanges, span.start, span.end)
+
+      properties := obj.properties
+      return undefined unless Array.isArray(properties) and properties.length > 0
+      for prop of properties
+        // Shorthand entries have no colon; spreads and methods are other node types.
+        return undefined unless prop?.type is "Property"
+        return undefined unless tree.tokens(prop).some (tok) -> tok.value is ":" and not tok.synthetic
+
+      body := text.slice(1, -1).trim()
+      return undefined if body.length is 0
+      // A trailing comma would leave the call expecting another argument.
+      return undefined if body.endsWith(",")
+      // `a |> f` binds differently once the braces are gone.
+      return undefined if body.includes("|>")
+
+      firstKey := /^([A-Za-z_$][\w$]*)\s*:/.exec(body)?[1]
+      return undefined if firstKey? and KEYWORD_KEYS[context].has(firstKey)
+      body
+
+    propose := (start: number, end: number, body: string, message: string) ->
+      return if intersectsRange(ignoredRanges, start, start + 1)
+      fix := { start, end, replacement: body }
+      declareDelta()
+      fixes.push(fix)
+      ctx.report({ ruleId: "style/prefer-implicit-object-arg", message, pos: start, fix })
+
+    // The last argument of a call written without parens.
+    tree.visit "CallExpression", (node) ->
+      children := node?.children
+      return unless Array.isArray(children) and children.length >= 2
+      last := children[children.length - 1]
+      return unless last?.type is "Call"
+
+      callChildren := last?.children
+      return unless Array.isArray(callChildren) and callChildren.length >= 4
+      open := tree.range(callChildren[0])
+      return unless open? and open.end is open.start
+
+      args := (last?.args ?? []).filter (a: any) -> a?.type is "Argument"
+      return if args.length is 0
+      argument := args[args.length - 1]
+      return if argument.spread
+      obj := argument.expression
+      return unless obj?.type is "ObjectExpression"
+
+      span := tree.range(obj)
+      return unless span? and closesLine(span.end)
+      // The argument must be the object and nothing else.
+      return unless tree.text(argument).trim() is source.slice(span.start, span.end)
+
+      body := unbracedBody(obj, args.length is 1 ? "soleArgument" : "trailingArgument")
+      return unless body?
+      propose(span.start, span.end, body, "Drop the braces: the object is the call's last argument")
+
+    // A JSX attribute value: `p={{ a: 1 }}`.
+    tree.visit "JSXElement", (node) ->
+      for attr of tree.jsxAttributes(node)
+        continue if attr.isSpread or not attr.equals? or not attr.bracedRange?
+        obj := attr.expression
+        continue unless obj?.type is "ObjectExpression"
+        span := tree.range(obj)
+        continue unless span?
+        // `{` and `}` of the attribute must be the only things around the object.
+        continue unless source.slice(attr.bracedRange.start + 1, span.start).trim().length is 0
+        continue unless source.slice(span.end, attr.bracedRange.end - 1).trim().length is 0
+        body := unbracedBody(obj, "jsxAttribute")
+        continue unless body?
+        propose(span.start, span.end, body, "Drop the inner braces: the attribute already delimits the object")
+
+    // An arrow body: `=> ({ a: 1 })`.
+    tree.visit "ParenthesizedExpression", (node) ->
+      obj := node?.expression
+      return unless obj?.type is "ObjectExpression"
+      // Leading trivia can precede the `(` token, so find the parens by value.
+      tokens := tree.tokens(node).filter (tok) -> not tok.synthetic
+      openTok := tokens.find (tok) -> tok.value is "("
+      closeTok := tokens.findLast (tok) -> tok.value is ")"
+      return unless openTok? and closeTok?
+      open := openTok.range
+      close := closeTok.range
+      return unless source[open.start] is "(" and source[close.start] is ")"
+      return unless source.slice(0, open.start).trimEnd().endsWith("=>")
+      return unless closesLine(close.end)
+
+      span := tree.range(obj)
+      return unless span?
+      return unless source.slice(open.end, span.start).trim().length is 0
+      return unless source.slice(span.end, close.start).trim().length is 0
+
+      body := unbracedBody(obj, "arrowBody")
+      return unless body?
+      propose(open.start, close.end, body, "Drop the parens and braces: the arrow body is an object")
+}

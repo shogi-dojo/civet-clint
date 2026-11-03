@@ -220,6 +220,7 @@ Comprehensive preset enforcing standard, modern Civet idioms (derived from Erik 
 - `style/prefer-implicit-block-call`: `"error"` (fixable)
 - `style/prefer-implicit-call-args`: `"error"` (fixable)
 - `style/prefer-implicit-arrow-arg`: `"error"` (fixable)
+- `style/prefer-implicit-object-arg`: `"error"` (fixable)
 - `style/prefer-jsx-shorthand`: `"error"` (fixable; uses `class` on the neutral/Solid dial and `className` with `react`)
 - `style/prefer-bare-jsx-values`: `"error"` (fixable)
 - `style/prefer-unclosed-jsx`: `"error"` (fixable)
@@ -378,6 +379,7 @@ Rules declare required compiler options (e.g., `autoLet`, `react`, `coffeeRange`
 | [`style/prefer-implicit-block-call`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-block-call.civet) | Drop the call parens on multi-line `describe`/`it`/`test` blocks and hooks so indentation closes them, removing stacked `)))` closers. | — |
 | [`style/prefer-implicit-call-args`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-call-args.civet) | Drop call parens on trailing calls when the argument list is unambiguous. Single-line, statement-ending calls only; an empty argument list keeps its parens. | — |
 | [`style/prefer-implicit-arrow-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-arrow-arg.civet) | Drop call parens when the sole argument is a zero-parameter arrow (`vi.fn => x`, `lazy => import(…)`), including the implicit-call form `createMemo (=> x)`. Never fires on an object property followed by more properties — the arrow would absorb them — or on a multi-argument call, and it defers to `style/no-single-param-arrow-without-parens` so a fix never trades one finding for another. | — |
+| [`style/prefer-implicit-object-arg`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-implicit-object-arg.civet) | Drop the braces from a single-line object that closes its line and is the last argument of a paren-free call (`f x, { a: 1 }` → `f x, a: 1`), a JSX attribute value (`p={{ a: 1 }}` → `p={a: 1}`), or an arrow body (`=> ({ a: 1 })` → `=> a: 1`). Keeps shorthand entries, spreads, methods and getters, a first key Civet reads as syntax (`when`, `from`, `do`, `await`, …), explicit-paren calls and anything after the object. | — |
 | [`style/prefer-terse-imports`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-terse-imports.civet) | Omit the optional `import` keyword and unquote safe module paths (`{ t } from ../i18n`). Accepts [`unquoteSingleQuotes`](#rule-options). | — |
 | [`style/prefer-jsx-attr-shorthand`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-jsx-attr-shorthand.civet) | Convert `prop={prop}` to `{prop}` and combine adjacent `{foo} {bar}` into `{foo, bar}`. `prop={true}` is reported but not fixed — see below. | — |
 | [`style/prefer-bare-jsx-values`](https://github.com/shogi-dojo/civet-clint/blob/main/src/rules/prefer-bare-jsx-values.civet) | Convert braced values `attr={value}` to bare values `attr=value` for identifiers, member expressions, and non-string literals. | — |
