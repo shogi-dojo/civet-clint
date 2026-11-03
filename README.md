@@ -306,6 +306,7 @@ the config to use another file.
 {
   "exceptions": [
     { "file": "src/pages/Admin.civet", "line": 120, "rule": "style/prefer-switch", "reason": "reads better as an if-chain" },
+    { "file": "src/solid/club/ClubPage.civet", "text": "podium = if rankNum", "rule": "style/prefer-switch", "reason": "assigned chain" },
     { "file": "src/legacy/parser.civet", "rule": "style/prefer-range-loop" }
   ]
 }
@@ -313,11 +314,14 @@ the config to use another file.
 
 - `file` is relative to the exceptions file. `rule` is the full rule id.
 - `line` is the line clint reports. Without it the entry covers the whole file.
+- `text` is a fragment of the reported line. Prefer it to `line`: a line number goes
+  stale when an edit above it shifts the file, while the text moves with the code.
+  When both are given, `text` decides.
 - `reason` is free text for the next reader; clint ignores it.
 
 A suppressed finding is not reported and does not affect the exit code. Clint prints
 the number suppressed on stderr, and warns about an entry that matched nothing, so a
-stale line number is noticed. Under `--write`, a rule with an exception in a file is
+stale line number or text is noticed. Under `--write`, a rule with an exception in a file is
 not autofixed anywhere in that file. Compiler and syntax errors cannot be suppressed.
 
 ### Per-file Configuration Overrides

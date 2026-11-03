@@ -123,11 +123,14 @@ export interface ConfigOverride
   compileOptions?: CompileOptions
 
 // One suppressed finding. `file` is relative to the exceptions file; without a
-// `line` the entry covers every finding of `rule` in that file.
+// `line` or `text` the entry covers every finding of `rule` in that file. `text` is
+// a substring of the finding's source line and survives edits that move the line;
+// when both are given `text` decides and `line` is only a hint for the reader.
 export interface ExceptionEntry
   file: string
   rule: string
   line?: number
+  text?: string
   reason?: string
 
 export interface ClintConfig
