@@ -133,6 +133,10 @@ export const preferImplicitObjectArgRule: Rule = {
 
       span := tree.range(obj)
       return unless span? and closesLine(span.end)
+      // The object must start on the line the arguments begin on. On a continuation
+      // line (`f x,\n  { a: 1 }`) the unbraced form expands into a multi-line object
+      // with a trailing comma, which is more than whitespace.
+      return if source.slice(open.start, span.start).includes("\n")
       // The argument must be the object and nothing else.
       return unless tree.text(argument).trim() is source.slice(span.start, span.end)
 
@@ -167,7 +171,10 @@ export const preferImplicitObjectArgRule: Rule = {
       open := openTok.range
       close := closeTok.range
       return unless source[open.start] is "(" and source[close.start] is ")"
-      return unless source.slice(0, open.start).trimEnd().endsWith("=>")
+      before := source.slice(0, open.start)
+      return unless before.trimEnd().endsWith("=>")
+      // Body on the same line as the arrow, for the reason given at the call site.
+      return if before.slice(before.trimEnd().length).includes("\n")
       return unless closesLine(close.end)
 
       span := tree.range(obj)

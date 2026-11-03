@@ -162,9 +162,12 @@ export const preferImplicitArrowArgRule: Rule = {
         commentAt := groupClose.end + trailing.length - trailing.trimStart().length
         return unless commentRanges.some (range) -> range.start is commentAt
 
-      // The callee must be separated from the paren (`f (=>`), or this was an
-      // explicit call and the branch above handled it.
-      return unless /\s$/.test(source.slice(0, groupOpen.start))
+      // The callee must be separated from the paren by spaces on its own line
+      // (`f (=>`): a paren with no gap was an explicit call, handled above, and one on
+      // the next line would leave a line that starts with `=>`.
+      beforeGroup := source.slice(0, groupOpen.start)
+      gap := beforeGroup.slice(beforeGroup.trimEnd().length)
+      return unless gap.length > 0 and not gap.includes("\n")
       return if wouldBeFlagged(source.slice(0, groupOpen.start))
 
       declareParenDelta()

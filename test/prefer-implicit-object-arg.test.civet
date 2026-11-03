@@ -198,3 +198,12 @@ describe "style/prefer-implicit-object-arg", ->
     it "is idempotent", ->
       once := run("render x, { onDone: vi.fn(=> 1) }\n").fixedSource!
       expect(run(once).fixedSource).toBeUndefined()
+
+describe "style/prefer-implicit-object-arg layout", ->
+  it "keeps an object on a continuation line", ->
+    // Unbraced, Civet expands it into a multi-line literal with a trailing comma.
+    for source of ["f x,\n  { a: 1 }\n", "run (=> go()),\n  { message: 'done' }\n", "{ ok } = await run (=> go()),\n  { message: 'done' }\n"]
+      expect(findings(source)).toHaveLength(0)
+
+  it "keeps an arrow body that starts on the next line", ->
+    expect(findings("g = =>\n  ({ a: 1 })\n")).toHaveLength(0)

@@ -572,7 +572,9 @@ export function normalizeArrowParenStyle(code: string): string
           outerEnd++ while outerEnd < code.length and /\s/.test(code[outerEnd])
           inner := code.slice(wrapper + 1, wrapperEnd).trim()
           if code[outerEnd] is ")" and ARROW_HEAD.test(inner) and not hasTopLevelComma(inner)
-            out += "(" + normalizeArrowParenStyle(inner) + ")"
+            // Keep the layout around the wrapper (`f(\n  (() => x))` keeps its break);
+            // only the pair itself, and any padding inside it, goes.
+            out += code.slice(i, wrapper) + normalizeArrowParenStyle(inner) + code.slice(wrapperEnd + 1, outerEnd) + ")"
             i = outerEnd + 1
             continue
     out += code[i]

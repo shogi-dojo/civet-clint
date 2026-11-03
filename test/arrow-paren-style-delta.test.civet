@@ -110,3 +110,9 @@ describe "arrow-paren-style delta", ->
     expect(res.fixedSource).toBeUndefined()
     expect(res.isEquivalencePreserved).toBe(false)
     expect(res.diagnostics.some((d) -> d.ruleId is "compiler-equivalence-mismatch")).toBe(true)
+
+describe "normalizeArrowParenStyle layout", ->
+  it "keeps the line break Civet emits between the call paren and the arrow", ->
+    // \`await run\n  (=> x)\` compiles to this; only the pair may go.
+    expect(normalizeArrowParenStyle("run(\n    (() => gen.m({ e: 1 })))")).toBe("run(\n    () => gen.m({ e: 1 }))")
+    expect(normalizeArrowParenStyle("f( (() => x) )")).toBe("f( () => x )")

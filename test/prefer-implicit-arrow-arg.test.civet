@@ -175,3 +175,8 @@ describe "style/prefer-implicit-arrow-arg agrees with no-single-param-arrow-with
   it "ignores the peer when it is off", ->
     res := lint("x = useUser (=> id())\n")
     expect(res.fixedSource).toBe("x = useUser => id()\n")
+
+describe "style/prefer-implicit-arrow-arg layout", ->
+  it "keeps the paren on the line after the callee", ->
+    // Dropping it would leave a line that starts with `=>`.
+    expect(findings("ok = await run\n  (=> go())\n")).toHaveLength(0)
