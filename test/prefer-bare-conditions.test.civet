@@ -45,3 +45,8 @@ describe "style/prefer-bare-conditions guards", ->
 
   it "leaves braced 'if (a) {' to prefer-indented-blocks", ->
     unchanged("if (a) {\n  b()\n}\n")
+
+describe "conditions holding a string", ->
+  it "drops the parens around a condition that compares with a string", ->
+    expect(expectConditionEquivalent("if (x is 'a')\n  f()\n")).toBe("if x is 'a'\n  f()\n")
+    expect(expectConditionEquivalent("while (s isnt ')')\n  f()\n")).toBe("while s isnt ')'\n  f()\n")

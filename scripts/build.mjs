@@ -59,7 +59,7 @@ export type RuleOptions = Record<string, any>;
 export type RuleEntry = RuleLevel | [RuleLevel, RuleOptions];
 export type EquivalenceReference = (source: string) => string | undefined;
 export type CompilerPreference = 'project' | 'bundled';
-export type OutputDelta = 'quote-style' | 'semicolon-style' | 'declaration-style' | 'trailing-comma-style' | 'whitespace-style' | 'block-brace-style' | 'type-paren-style' | 'return-paren-style' | 'inequality-style' | 'new-call-style' | 'placeholder-param' | 'range-loop' | 'function-declaration' | 'existential-paren-style';
+export type OutputDelta = 'quote-style' | 'semicolon-style' | 'declaration-style' | 'trailing-comma-style' | 'whitespace-style' | 'block-brace-style' | 'type-paren-style' | 'return-paren-style' | 'inequality-style' | 'new-call-style' | 'placeholder-param' | 'range-loop' | 'function-declaration' | 'existential-paren-style' | 'arrow-paren-style' | 'conditional-return';
 export type CompileDial = Record<string, any>;
 export type CompileOptions = Record<string, any>;
 export interface CivetCompiler { compile(source: string, options?: Record<string, any>): any; }
@@ -154,6 +154,7 @@ export interface RuleContext {
   options: RuleOptions;
   baselineOutput?: string;
   compiler?: CivetCompiler;
+  activeRuleOptions?(ruleId: string): RuleOptions | undefined;
   report(diagnostic: RuleReport): void;
   getLineColumn(pos: number): { line: number; column: number };
   declareEquivalenceReference?(delta: OutputDelta | OutputDelta[], build: EquivalenceReference): void;
@@ -182,6 +183,7 @@ export interface RuleMeta {
   capabilities?: RuleCapability;
   conflictsWith?: string[];
   defaultOptions?: RuleOptions;
+  validateOptions?(options: RuleOptions): string | undefined;
   phase?: RulePhase;
 }
 export interface Rule {
@@ -219,6 +221,7 @@ export interface ExceptionEntry {
   file: string;
   rule: string;
   line?: number;
+  text?: string;
   reason?: string;
 }
 export interface ClintConfig {
@@ -270,7 +273,7 @@ export interface LintOptions {
   config?: ResolvedConfig;
   registry?: RuleRegistry;
   compiler?: CivetCompiler;
-  exceptions?: { rule: string; line?: number; index: number }[];
+  exceptions?: { rule: string; line?: number; text?: string; index: number }[];
   civetOptions?: Record<string, any>;
   compileOptions?: Record<string, any>;
   fix?: boolean;

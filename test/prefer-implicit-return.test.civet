@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource, normalizeSemicolonStyle } from "../src/engine.civet"
+import { normalizeConditionalReturnStyle } from "../src/utils.civet"
 
 RULE := "style/prefer-implicit-return"
 DIAL := { autoLet: true, react: true }
@@ -13,6 +14,15 @@ function expectReturnEquivalent(source: string)
   expect(res.isEquivalencePreserved).toBe(true)
   expect(compileSource(fixed, DIAL)).toBe(compileSource(source, DIAL))
   fixed
+
+// For a fix whose output differs by the ternary-vs-if/else spelling only.
+function expectConditionalEquivalent(source: string)
+  res := fix(source)
+  expect(res.fixedSource).toBeDefined()
+  expect(res.isEquivalencePreserved).toBe(true)
+  canonical := (code: string) -> normalizeConditionalReturnStyle(compileSource(code, DIAL))
+  expect(canonical(res.fixedSource!)).toBe(canonical(source))
+  res.fixedSource!
 
 function unchanged(source: string)
   res := fix(source)
@@ -100,3 +110,86 @@ describe "trailing return semicolons", ->
 
   it "does not attribute a nested object's return to an outer implicit return", ->
     unchanged("function f(xs)\n  xs.map((x) =>\n    return { x }\n  )\n")
+
+describe "class constructors", ->
+  it "keeps the 'return' of a constructor: `new` yields the returned object", ->
+    // Civet adds no implicit return to a constructor, so dropping the keyword makes
+    // `new` hand back the instance instead of `ctx`.
+    source := "vi.stubGlobal 'AudioContext', class\n  constructor()\n    return ctx\n"
+    res := fix(source)
+    expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+    expect(res.fixedSource ?? source).toBe(source)
+
+  it "still fixes the methods around a constructor in the same class", ->
+    // The rejected constructor fix used to take the whole file's batch with it.
+    fixed := expectReturnEquivalent("class Foo\n  constructor()\n    return ctx\n  m()\n    return 1\n")
+    expect(fixed).toBe("class Foo\n  constructor()\n    return ctx\n  m()\n    1\n")
+
+describe "one-line braced method bodies", ->
+  it "drops the braces with the return: `get data() { return x.y }` -> `get data() x.y`", ->
+    // With only the keyword gone, `{ x.y }` re-parses as an object literal, which
+    // the gate rejects -- and with it every other fix in the file.
+    expect(expectReturnEquivalent("f = => ({ get data() { return mocks.events } })\n"))
+      .toBe("f = => ({ get data() mocks.events })\n")
+
+  it "drops the braces of a plain one-line method as well", ->
+    expect(expectReturnEquivalent("o := { m(a) { return a + 1 } }\n"))
+      .toBe("o := { m(a) a + 1 }\n")
+
+  it "removes the semicolon that sat before the closing brace", ->
+    // Compiled output differs only by that semicolon, which the engine's
+    // semicolon-style delta accounts for, so check the gate rather than byte equality.
+    res := fix("f = => ({ get data() { return mocks.c; } })\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("f = => ({ get data() mocks.c })\n")
+
+  it "keeps a callback's own return edit apart from the method's braces", ->
+    expect(expectReturnEquivalent("f = => ({ get data() { return foo(=> { return 1 }) } })\n"))
+      .toMatch(/^f = => \(\{ get data\(\) foo\(/)
+
+  it "leaves a braced method followed by another entry alone", ->
+    // Unbraced, `m() g(1), n: 2` swallows the comma: `m() { return g(1), {n: 2} }`.
+    source := "o := { m() { return g(1) }, n: 2 }\n"
+    res := fix(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource ?? source).not.toContain("m() g(1)")
+
+  it "still fixes a multi-line braced getter through the plain keyword removal", ->
+    expect(expectReturnEquivalent("o := {\n  get data() {\n    return mocks.events\n  }\n}\n"))
+      .toBe("o := {\n  get data() {\n    mocks.events\n  }\n}\n")
+
+describe "return of a conditional expression", ->
+  // A conditional expression after `return` is a ternary; as the last statement it is
+  // an if/else with a `return` in each branch. The `conditional-return` delta proves
+  // the pair, so a guard-clause tail loses its keyword.
+  it "drops the 'return' of a one-line `if … then … else …` tail", ->
+    fixed := expectConditionalEquivalent("f = (w) =>\n  if w.a\n    return 'x'\n  return if s() then 'm' else 'n'\n")
+    expect(fixed).toBe("f = (w) =>\n  if w.a\n    return 'x'\n  if s() then 'm' else 'n'\n")
+
+  it "handles `unless`, compound tests and branches Civet parenthesizes", ->
+    for [source, expected] of [
+      ["f = (c) ->\n  return unless c then a() else b 1\n", "f = (c) ->\n  unless c then a() else b 1\n"]
+      ["f = (x) =>\n  return if x? and y then a or b else c ?? d\n", "f = (x) =>\n  if x? and y then a or b else c ?? d\n"]
+      ["f = (x) =>\n  return if x then (y) => y else -z\n", "f = (x) =>\n  if x then (y) => y else -z\n"]
+      ["f = (c) =>\n  return if c then (if d then e else f) else {x: 1}\n", "f = (c) =>\n  if c then (if d then e else f) else {x: 1}\n"]
+    ]
+      expect(expectConditionalEquivalent(source)).toBe(expected)
+
+  it "drops the braces with it in a one-line method", ->
+    expect(expectConditionalEquivalent("class X\n  get v() { return if @c then 1 else 2 }\n")).toBe("class X\n  get v() if @c then 1 else 2\n")
+
+  it "stays silent on an `else if` chain, which emits an IIFE after `return`", ->
+    source := "f = (c) =>\n  return if c then a else if d then e else b\n"
+    res := fix(source)
+    expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+  it "stays silent on other statement forms after `return`", ->
+    source := "f = (c) =>\n  return switch c\n    when 1 then a\n    else b\n"
+    expect(fix(source).diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+
+describe "functions typed void", ->
+  it "keeps the 'return' where Civet adds no implicit one", ->
+    for source of ["f = (c): void =>\n  g()\n  return a\n", "f = (c): Promise<void> ->\n  return if c then a else b\n"]
+      res := fix(source)
+      expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+      expect(res.diagnostics.filter((d) -> d.ruleId is "compiler-equivalence-mismatch")).toHaveLength(0)

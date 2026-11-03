@@ -205,3 +205,14 @@ describe "style/prefer-unless on `while a is not b`", ->
     res := lintSource("while a is not b\n  step()\n", { rules: { "style/prefer-unless": "error" }, fix: true })
     expect(res.fixedSource).toBe("until a is b\n  step()\n")
     expect(res.isEquivalencePreserved).toBe(true)
+
+describe "conditions holding a string", ->
+  it "rewrites a negated comparison with a string", ->
+    res := fix("if !(x is 'a')\n  f()\nwhile !(s is ')')\n  g()\n")
+    expect(res.fixedSource).toContain("unless (x is 'a')")
+    expect(res.fixedSource).toContain("until (s is ')')")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "still leaves a condition with a comment inside it alone", ->
+    res := fix("if !(x # why\n)\n  f()\n")
+    expect(res.fixedSource ?? "").not.toContain("unless")

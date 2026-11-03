@@ -5,6 +5,121 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-03
+
+### Upgrading
+
+A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
+`clint --write` clears them.
+
+- `style/prefer-implicit-object-arg` (new, `error` in `civet-idiomatic`) drops the
+  braces from single-line objects passed to paren-free calls, JSX attributes and
+  arrow bodies. On a Solid app that had already been through an earlier brace pass
+  it still found 426 fixable sites across 136 files, together with the arrow rule
+  below.
+- `style/prefer-implicit-arrow-arg` now also rewrites `createMemo (=> a())`, and no
+  longer rewrites a callee that `style/no-single-param-arrow-without-parens` would
+  then flag (when that rule is on). List such callees, or families with `"use*"`, in
+  `extraZeroArgCallees` to get the fix.
+- `extraZeroArgCallees` entries are now validated when the config loads: each must be
+  an identifier, optionally with `*` wildcards. Entries that were silently ignored
+  before (`"foo.bar"`, `""`) now fail the load.
+- `style/prefer-switch` now has an autofix, and no longer reports a chain that mixes
+  in another test (`else if count > 3`, `and current.id`): a `switch` cannot hold it.
+  Run `clint --write` and review the new `switch` blocks.
+- `style/prefer-range-loop` writes `_` for a counter the body never reads
+  (`for _ of [0..<n]`), where it used to keep the name.
+- `style/prefer-in-operator`, `style/prefer-unless` and `style/prefer-bare-conditions`
+  now report constructs that hold a string literal (`a.includes 'x'`,
+  `if (x is 'a')`, `if !(x is 'a')`), which they used to skip as if the whole
+  construct sat inside a string. On a 1,500-file Solid app this was 105 new, all
+  fixable, findings.
+- `style/prefer-implicit-return` now also fixes a one-line `return if c then a else b`
+  tail (see Added).
+
+### Added
+
+- **`style/prefer-implicit-object-arg`.** `f x, { a: 1 }` becomes `f x, a: 1`,
+  `p={{ a: 1 }}` becomes `p={a: 1}`, and `=> ({ a: 1 })` becomes `=> a: 1`. Verified
+  by the `whitespace-style` delta. It leaves shorthand entries (`f { a, b: 1 }` would
+  make `a` its own argument), spreads, methods and getters, a first key Civet reads as
+  syntax (`when`, `from`, `do`, `await`, `then`, `of`, `yield`, `debugger`, `as`, `satisfies`, `by`,
+  `implements`, and `function` in an arrow body), explicit-paren calls, objects on a
+  continuation line, and anything after the closing brace. A test re-derives the
+  keyword list from the compiler, so a Civet release that changes it fails the suite.
+- **`arrow-paren-style` output delta.** Licenses exactly the doubled parentheses Civet
+  emits for `f (=> x)` (`f((() => x))` against `f(() => x)`). A top-level comma inside,
+  a second argument, or any other parenthesised expression remains a mismatch.
+- **Patterns in `extraZeroArgCallees`.** `*` matches any run of identifier characters:
+  `"use*"`, `"render*"`, `"create*"`. A pattern needs a literal character, so a bare `*`
+  is rejected rather than silently disabling the rule.
+- **`style/prefer-switch` autofix.** `if d is 3 then 'A' else if d is 2 …` becomes
+  `switch d` with `3 then 'A'` cases, for statement-position chains in indentation
+  form whose every branch compares one identifier to a literal. A chain assigned to a
+  variable, compared against an identifier, braced, or with a comment between its
+  branches is reported without a fix. Verified by the `block-brace-style` and
+  `whitespace-style` deltas, which now also accept `else { x }` against `else x`.
+- **Exceptions anchored by text.** An entry in `clint.exceptions.json` may carry
+  `"text": "…"`, a fragment of the reported line. It keeps matching after an edit
+  above shifts the line, which a `"line"` number does not.
+- **One-line method bodies.** `style/prefer-implicit-return` rewrites
+  `get data() { return x }` to `get data() x` (it used to leave `{ x }`, which
+  re-parses as an object literal).
+- **Guard-clause tails.** `style/prefer-implicit-return` drops the `return` of a
+  one-line `return if c then a else b` (or `unless`), verified by the new
+  `conditional-return` delta: `return (c? a : b)` and `if (c) { return a} else return b`
+  are one program. `else if` chains (an IIFE after `return`) and other statement forms
+  are not reported.
+- **Plugin API.** `meta.validateOptions(options)` lets a rule reject its options at
+  config load, and `context.activeRuleOptions(ruleId)` returns another active rule's
+  resolved options.
+
+### Changed
+
+- `style/prefer-implicit-arrow-arg` checks `style/no-single-param-arrow-without-parens`
+  for the explicit form too (`useUser(=> id())`), which used to be rewritten into a
+  finding.
+
+### Fixed
+
+- `style/prefer-property-shorthand` judged a property by any braced span around it,
+  so a brace-free argument list nested in a braced object (`setSlot seat: r.seat,
+  slot: r.slot`) was reported, its fix was rejected, and the rejection took every
+  other fix in the file down with it. It now looks at the property's own object.
+- `style/prefer-implicit-return` no longer offers to drop a class constructor's
+  `return ctx` (`new` yields what the constructor returns), or a `return` in a
+  function typed `: void` / `Promise<void>` (Civet adds no implicit return there).
+  Both fixes were always rejected, and each rejection poisoned the file's other fixes.
+- `style/prefer-in-operator` wrote `Number item.id is in ids` for
+  `ids.includes(Number item.id)` (it parses as `Number(item.id is in ids)`) and broke a
+  bare JSX attribute value (`checked=a.includes(b)`). Both fixes were rejected. It now
+  writes `Number(item.id) is in ids` and `checked={b is in a}`, and reports an operand
+  looser than membership (`a.includes(b or c)`) without a fix.
+- The `whitespace-style` delta read the backticks of a regex literal
+  (`/```shot\n[^`]*```/g`) as a template literal and inverted its string state for the
+  rest of the file, so `style/prefer-unclosed-jsx` and
+  `style/prefer-property-group-shorthand` fixes were rejected for layout-only
+  differences. Regex literals are now copied verbatim.
+- The `new-call-style` delta unwrapped `f(new X) : y` as if `(new X)` were a grouping,
+  which rejected `new Foo(new Bar())` inside a conditional and every
+  `style/prefer-new-shorthand` fix in the same file.
+- The `whitespace-style` delta read the slash after `return`, `typeof`, `case` and
+  other keywords that take an operand as division, so the quote in `return /"/.test(s)`
+  opened a string for the rest of the line.
+- README: the `extraZeroArgCallees` option was listed under
+  `style/prefer-terse-imports`; the rule count, release status and equivalence-engine
+  description were out of date.
+
+### Performance
+
+- The AST walker behind every `tree.visit` no longer builds a result array per node
+  (an implicit return of its loops), and `tree.range` memoizes the span it computes
+  from a node's subtree. On a 377-file slice of a Solid app with 51 rules, rule work
+  went from 15.2s to 13.2s.
+- `style/prefer-implicit-return` rules out Civet's synthetic returns before scanning
+  their tokens, which for a component walked the whole JSX tree once per nested
+  callback: 1.7s to 1.1s on the same slice.
+
 ## [0.7.0] - 2026-10-09
 
 ### Upgrading

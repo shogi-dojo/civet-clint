@@ -1,0 +1,79 @@
+import { describe, it, expect } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
+import { lintSource } from "../src/engine.civet"
+import { loadConfig } from "../src/config.civet"
+import { zeroArgCalleeMatcher, validateZeroArgCallees } from "../src/rules/no-single-param-arrow-without-parens.civet"
+
+RULE := "style/no-single-param-arrow-without-parens"
+
+flagged := (source: string, extraZeroArgCallees?: string[]) ->
+  lintSource(source, {
+    rules: { [RULE]: "error" }
+    ruleOptions: extraZeroArgCallees ? { [RULE]: { extraZeroArgCallees } } : undefined
+    civetOptions: { autoLet: true }
+  }).diagnostics.filter((d) -> d.ruleId is RULE).length
+
+describe "extraZeroArgCallees patterns", ->
+  describe "matching", ->
+    it "treats * as any run of identifier characters", ->
+      matches := zeroArgCalleeMatcher(["use*", "render*", "*Hook", "with*Retry"])
+      for name of ["useUser", "useQueryClient", "use", "renderPage", "renderWithQuery", "fooHook", "withFastRetry", "withRetry"]
+        expect(matches(name)).toBe(true)
+      for name of ["reuse", "prerender", "hookFoo", "withRetries"]
+        expect(matches(name)).toBe(false)
+
+    it "keeps exact names exact and the built-ins on", ->
+      matches := zeroArgCalleeMatcher(["withRetry"])
+      expect(matches("withRetry")).toBe(true)
+      expect(matches("withRetryAll")).toBe(false)
+      expect(matches("beforeEach")).toBe(true)
+
+    it "matches a literal $ in a name", ->
+      matches := zeroArgCalleeMatcher(["use$*"])
+      expect(matches("use$Store")).toBe(true)
+      expect(matches("useStore")).toBe(false)
+
+    it "ignores a missing or malformed option", ->
+      expect(zeroArgCalleeMatcher(undefined)("useUser")).toBe(false)
+      expect(zeroArgCalleeMatcher("use*")("useUser")).toBe(false)
+
+  describe "in the rule", ->
+    it "flags an unlisted callee", ->
+      expect(flagged("x = useUser => id()\n")).toBe(1)
+
+    it "exempts every callee a pattern covers", ->
+      source := "x = useUser => id()\ny = renderPage => go()\nz = other => go()\n"
+      expect(flagged(source)).toBe(3)
+      expect(flagged(source, ["use*", "render*"])).toBe(1)
+
+  describe "validation at config load", ->
+    load := async (options: unknown) ->
+      tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-callees-"))
+      await fs.writeFile(path.join(tmpDir, "civet-clint.config.json"), JSON.stringify({
+        preset: "default"
+        rules: { [RULE]: ["warn", options] }
+      }))
+      try
+        loadConfig("civet-clint.config.json", tmpDir)
+      finally
+        await fs.rm(tmpDir, { recursive: true, force: true })
+
+    it "accepts names and patterns", ->
+      config := await load({ extraZeroArgCallees: ["use*", "render*", "create*", "withRetry"] })
+      expect(config.ruleOptions[RULE].extraZeroArgCallees).toEqual(["use*", "render*", "create*", "withRetry"])
+
+    it "accepts options that leave the list unset", ->
+      expect(validateZeroArgCallees([])).toBeUndefined()
+
+    it "rejects a pattern that would match every callee", ->
+      for pattern of ["*", "**"]
+        await expect(load({ extraZeroArgCallees: [pattern] })).rejects.toThrow(/matches every name/)
+
+    it "rejects entries that are not identifier patterns", ->
+      for entry of ["", "use foo", "foo.bar", "use-*", "1use", "use(*)"]
+        await expect(load({ extraZeroArgCallees: [entry] })).rejects.toThrow(/must be an identifier/)
+
+    it "rejects a non-string entry", ->
+      await expect(load({ extraZeroArgCallees: [42] })).rejects.toThrow(/must be an identifier/)

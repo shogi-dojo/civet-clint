@@ -1,6 +1,10 @@
 import type { Rule, RuleContext, Fix } from "../types.civet"
 import { intersectsRange } from "../utils.civet"
 
+// Operators that bind looser than `is in`: as the left operand they would take the
+// membership test as their own right operand (`b or c is in a` is `b or (c is in a)`).
+const LOOSE_OPERATORS = new Set(["||", "&&", "??", "?", ":", "==", "===", "!=", "!==", "<", ">", "<=", ">=", "in", "instanceof", "=", "=>"])
+
 export const preferInOperatorRule: Rule = {
   id: "style/prefer-in-operator"
   meta: {
@@ -13,6 +17,7 @@ export const preferInOperatorRule: Rule = {
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
+
     // Build the direct negated-call relation once. Searching every unary
     // expression again for each call is quadratic on real JSX-heavy files.
     negatedCalls := new Map<any, any>()
@@ -49,7 +54,25 @@ export const preferInOperatorRule: Rule = {
       // An ungrouped negation would bind to membership rather than its value.
       return if argument.type is "UnaryExpression"
 
-      argumentText := tree.text(argument).trim()
+      // Spelled as written, a looser operator would swallow the membership test, and
+      // parenthesising it changes the emitted grouping: report, but leave the fix to
+      // a person.
+      loose := tree.children(args[0]).some (part: any) -> part?.token? and LOOSE_OPERATORS.has(part.token)
+
+      // `Number item.id is in ids` reads as `Number(item.id is in ids)`: an implicit
+      // call as the operand needs its own parens, and `Number(item.id)` emits exactly
+      // what `includes(Number item.id)` did.
+      var argumentText = tree.text(argument).trim()
+      if argument.type is "CallExpression"
+        callParts := tree.children(argument).filter (part: any) -> part?.type?
+        argCall := callParts[callParts.length - 1]
+        argCallRange := tree.range(argCall)
+        argRange := tree.range(argument)
+        if argCall?.type is "Call" and argCallRange? and argRange?
+          callText := source.slice(argCallRange.start, argCallRange.end)
+          unless callText.startsWith("(")
+            return if callText.includes("\n")
+            argumentText = source.slice(argRange.start, argCallRange.start) + "(" + callText.trim() + ")"
       return unless receiverText.length > 0 and argumentText.length > 0
       return if receiverText.includes("?.") or argumentText.includes("?.")
 
@@ -65,12 +88,19 @@ export const preferInOperatorRule: Rule = {
         return undefined unless memberRange? and callRange?
         span = { start: memberRange.start, end: callRange.end }
       return unless span?
-      return if intersectsRange(ignoredRanges, span.start, span.end)
+      // Only a call that STARTS inside a comment or string is not code. Testing the
+      // whole span also skipped every call with a string argument (`a.includes 'x'`).
+      return if intersectsRange(ignoredRanges, span.start, span.start + 1)
       return if seen.has(span.start)
       seen.add(span.start)
 
-      replacement := `${argumentText} is ${negated ? "not " : ""}in ${receiverText}`
-      fix: Fix := { start: span.start, end: span.end, replacement }
+      membership := `${argumentText} is ${negated ? "not " : ""}in ${receiverText}`
+      // A bare JSX attribute value (`checked=a.includes(b)`) ends at the first space,
+      // so the spaced form needs the attribute's braces.
+      bareAttribute := source[span.start - 1] is "=" and tree.hasAncestorType(callExpr, "JSXAttribute")
+      replacement := bareAttribute ? `{${membership}}` : membership
+      var fix: Fix | undefined = undefined
+      fix = { start: span.start, end: span.end, replacement } unless loose
       ctx.report({
         ruleId: "style/prefer-in-operator"
         message: `Use '${replacement}' instead of '${source.slice(span.start, span.end)}'`

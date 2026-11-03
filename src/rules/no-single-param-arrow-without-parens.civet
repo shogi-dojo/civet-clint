@@ -34,6 +34,50 @@ const ZERO_ARG_CALLEES = new Set<string>([
   "queueMicrotask"
 ])
 
+// A configured callee is an identifier, or an identifier pattern where `*` stands for
+// any run of identifier characters: `use*` covers every query hook, `render*` every
+// test helper. A pattern needs at least one literal character -- a bare `*` would
+// silence the rule entirely, which is dropping the rule, not configuring it.
+const CALLEE_PATTERN = /^[A-Za-z_$*][A-Za-z0-9_$*]*$/
+
+export function validateZeroArgCallees(patterns: unknown): string | undefined
+  return "extraZeroArgCallees must be an array of strings" unless Array.isArray(patterns)
+  for pattern of patterns
+    unless typeof pattern is "string" and CALLEE_PATTERN.test(pattern)
+      return `extraZeroArgCallees entry ${JSON.stringify(pattern)} must be an identifier, optionally with '*' wildcards (e.g. "use*")`
+    unless pattern.replace(/\*/g, "").length > 0
+      return `extraZeroArgCallees entry ${JSON.stringify(pattern)} matches every name; list the callees you mean`
+  undefined
+
+// Predicate for a callee name against the built-in list plus configured names and
+// patterns. Shared with style/prefer-implicit-arrow-arg, which must not produce an
+// arrow this rule would then flag.
+export function zeroArgCalleeMatcher(configured: unknown): (name: string) => boolean
+  entries := Array.isArray(configured) ? configured.filter((n) -> typeof n is "string") : []
+  exact := new Set<string>(entries.filter((n) -> not n.includes("*")))
+  patterns := entries
+    .filter((n) -> n.includes("*"))
+    .map (n) -> new RegExp("^" + n.replace(/\$/g, () -> "\\$").replace(/\*/g, () -> "[A-Za-z0-9_$]*") + "$")
+  (name: string) ->
+    ZERO_ARG_CALLEES.has(name) or exact.has(name) or patterns.some (re) -> re.test(name)
+
+// The identifier that would sit directly in front of an `=>` if the text ended at
+// `before` -- the name this rule would warn about -- or undefined when the rule
+// would stay quiet regardless of configuration (a member callee like `vi.fn`, a
+// non-identifier, a reserved modifier, a return-type annotation).
+//
+// style/prefer-implicit-arrow-arg asks this before it writes `callee => body`, so
+// that its fix never produces a finding this rule then reports. Keep it in step
+// with the scan in `check` below; a test runs both rules over the same sources.
+export function bareArrowCallee(before: string): string | undefined
+  match := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)[^\S\n]*$/.exec(before)
+  return undefined unless match?
+  ident := match[1]
+  return undefined if RESERVED_MODIFIERS.has(ident)
+  lineStart := before.lastIndexOf("\n") + 1
+  return undefined if /\)\s*:[^)]*$/.test(before.slice(lineStart, before.length - match[0].length + match[0].indexOf(ident)))
+  ident
+
 export const noSingleParamArrowWithoutParensRule: Rule = {
   id: "style/no-single-param-arrow-without-parens"
   meta: {
@@ -43,9 +87,11 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     defaultOptions: {
       // Project-local callees whose callback takes no arguments, added to the
       // built-in exemption list. Declare a name here only after confirming the
-      // callback really takes zero parameters.
+      // callback really takes zero parameters. A `*` matches any run of identifier
+      // characters, so `"use*"` and `"render*"` cover whole families.
       extraZeroArgCallees: [] as string[]
     }
+    validateOptions: (options) -> options.extraZeroArgCallees is undefined ? undefined : validateZeroArgCallees(options.extraZeroArgCallees)
   }
   check: (ctx: RuleContext) ->
     source := ctx.source
@@ -54,10 +100,7 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
 
     // Projects declare their own zero-argument callees via
     // `{ "extraZeroArgCallees": ["withRetry"] }` in the rule options.
-    configured := ctx.options.extraZeroArgCallees
-    extraZeroArgCallees := new Set<string>(
-      Array.isArray(configured) ? configured.filter((n) -> typeof n is "string") : []
-    )
+    isZeroArgCallee := zeroArgCalleeMatcher(ctx.options.extraZeroArgCallees)
 
     re := /(?:^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)[^\S\n]*=>/g
     var match: RegExpExecArray | null = null
@@ -65,8 +108,7 @@ export const noSingleParamArrowWithoutParensRule: Rule = {
     while (match = re.exec(source)) !== null
       ident := match[1]
       continue if RESERVED_MODIFIERS.has(ident)
-      continue if ZERO_ARG_CALLEES.has(ident)
-      continue if extraZeroArgCallees.has(ident)
+      continue if isZeroArgCallee(ident)
 
       identPos := match.index + match[0].indexOf(ident)
       continue if intersectsRange(commentRanges, identPos, identPos + ident.length)

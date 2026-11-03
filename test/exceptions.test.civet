@@ -103,3 +103,39 @@ describe "plain --write and output-changing repairs", ->
     res := await lintFile(file, { config: loadConfig(undefined, dir), fix: true })
     expect(await fs.readFile(file, "utf8")).toBe(source)
     expect(res.diagnostics.some (d) -> d.ruleId is "style/no-braced-arrow-body").toBe(true)
+
+describe "exceptions anchored by line text", ->
+  it "suppresses the finding whose line contains the text", async ->
+    { dir, file } := await project([{ file: "a.civet", text: "y === 2", rule: RULE }])
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics.map (d) -> d.line).toEqual([1])
+    expect(res.suppressedCount).toBe(1)
+    expect(res.usedExceptions).toEqual([0])
+
+  it "keeps matching after an edit above shifts the line", async ->
+    // The reason `line` is fragile: a two-line header pushes every finding down.
+    { dir, file } := await project([{ file: "a.civet", text: "y === 2", rule: RULE }], "// one\n// two\n" + SOURCE)
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics.map (d) -> d.line).toEqual([3])
+    expect(res.suppressedCount).toBe(1)
+
+  it "lets the text decide when a stale line is also given", async ->
+    { dir, file } := await project([{ file: "a.civet", line: 1, text: "y === 2", rule: RULE }])
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics.map (d) -> d.line).toEqual([1])
+
+  it "leaves a finding on a line without the text alone", async ->
+    { dir, file } := await project([{ file: "a.civet", text: "never appears", rule: RULE }])
+    res := await lintFile(file, { config: loadConfig(undefined, dir) })
+    expect(res.diagnostics).toHaveLength(2)
+    expect(res.usedExceptions).toEqual([])
+
+  it "rejects an empty text", async ->
+    { dir } := await project([{ file: "a.civet", text: "  ", rule: RULE }])
+    expect(-> loadExceptions(undefined, dir)).toThrow(/invalid "text"/)
+
+  it "names the text in the unused-exception warning", async ->
+    { dir, file } := await project([{ file: "a.civet", text: "never appears", rule: RULE }])
+    { stderr } := await captureStderr => runCli(["--config", path.join(dir, "clint.config.json"), file])
+    expect(stderr).toContain('unused exception')
+    expect(stderr).toContain('a.civet "never appears"')

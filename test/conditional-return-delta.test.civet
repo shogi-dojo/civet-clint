@@ -1,0 +1,32 @@
+import { describe, it, expect } from "vitest"
+import { normalizeConditionalReturnStyle } from "../src/utils.civet"
+
+describe "normalizeConditionalReturnStyle", ->
+  it "rewrites a returned ternary in Civet's if/else layout", ->
+    expect(normalizeConditionalReturnStyle("return (c? a : b)\n")).toBe("if (c) { return a} else return b\n")
+    expect(normalizeConditionalReturnStyle("return (!c? a() : b(1))")).toBe("if (!c) { return a()} else return b(1)")
+
+  it "removes the parens the ternary adds around a branch, but not an object literal's", ->
+    expect(normalizeConditionalReturnStyle("return (x? (a || b) : (-d))")).toBe("if (x) { return a || b} else return -d")
+    expect(normalizeConditionalReturnStyle("return (x? ({a: 1}) : b)")).toBe("if (x) { return ({a: 1})} else return b")
+    expect(normalizeConditionalReturnStyle("return (x? ((d? e : f)) : g)")).toBe("if (x) { return ((d? e : f))} else return g")
+
+  it "reads `?.` and `??` as their own operators", ->
+    expect(normalizeConditionalReturnStyle("return (a ?? b? c?.d : e)")).toBe("if (a ?? b) { return c?.d} else return e")
+    expect(normalizeConditionalReturnStyle("return (c?.5 : b)")).toBe("if (c) { return .5} else return b")
+
+  it "ignores `?` and `:` inside strings, templates and regexes", ->
+    expect(normalizeConditionalReturnStyle("return (c? 'a?b:c' : /x?:/)")).toBe("if (c) { return 'a?b:c'} else return /x?:/")
+
+  it "leaves every ternary it cannot split without doubt", ->
+    for code of [
+      "return (a = b? c : d)"        // the `?` belongs to the assignment's right side
+      "return (x => y? c : d)"       // and here to the arrow's body
+      "return (c? a : b, d)"         // the comma makes the sequence return `d`
+      "return (c? a : d? e : f)"     // a second ternary
+      "return (c ? a)"
+      "return (a, b)"
+      "xreturn (c? a : b)"
+      "o.return (c? a : b)"
+    ]
+      expect(normalizeConditionalReturnStyle(code)).toBe(code)

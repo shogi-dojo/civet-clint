@@ -164,3 +164,36 @@ describe "style/prefer-unclosed-jsx — options", ->
       civetOptions: DIAL
     })
     expect(res.fixedSource).toBe("x := <div>\n  <span>hi</span>\n  <Foo />\n")
+
+describe "style/prefer-unclosed-jsx — whitespace delta with regex literals", ->
+  it "drops a multi-line self-closing last child and its parent's closer in a file with a backtick regex", ->
+    // `/```shot\n[^`]*```/g` holds an ODD number of backticks. The whitespace
+    // normalizer used to read them as a template literal, inverting its string state
+    // for the rest of the file: indentation before `/>` survived on one side and not
+    // the other, and the gate rejected a fix that only changes whitespace.
+    source := "SHOT := /```shot\\n[^`]*```/g\nx := <Shell>\n  <Body\n    a=1\n    b=2\n  />\n</Shell>\n"
+    res := fix(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("SHOT := /```shot\\n[^`]*```/g\nx := <Shell>\n  <Body\n    a=1\n    b=2\n  >\n")
+
+describe "normalizeWhitespaceStyle regex literals", ->
+  it "does not read the backticks of a regex as a template literal", ->
+    expect(normalizeWhitespaceStyle("let a = /```x[^`]*```/g\nlet b = 1 +\n   2")).toBe("let a=/```x[^`]*```/g let b=1+2")
+
+describe "normalizeWhitespaceStyle JSX slashes", ->
+  it "does not read the slash of a closing tag or `/>` as a regex", ->
+    // `</div>` and `<Foo a={b} />` are JSX, not regex literals: treating them as one
+    // kept whitespace up to the next slash on one side of a comparison only.
+    expect(normalizeWhitespaceStyle("<div>\n  <a href={x}>t</a> </div>")).toBe("<div><a href={x}>t</a></div>")
+    expect(normalizeWhitespaceStyle("<b c={d} /> <i e={f} />")).toBe("<b c={d}/><i e={f}/>")
+
+describe "normalizeWhitespaceStyle regex after a keyword", ->
+  it "reads a slash after `return`, `typeof` or `case` as a regex", ->
+    // Read as division, the quote inside the regex opens a string that swallows the
+    // rest of the line, so `a  +  b` keeps its spaces.
+    expect(normalizeWhitespaceStyle("return /\"/.test(s)\nlet c = a  +  b")).toBe("return/\"/.test(s)let c=a+b")
+    expect(normalizeWhitespaceStyle("case /'/: x = a  +  b")).toBe("case/'/:x=a+b")
+
+  it "still divides after a name or a property called like a keyword", ->
+    expect(normalizeWhitespaceStyle("x = a / 2 + \"q /\"")).toBe("x=a/2+\"q /\"")
+    expect(normalizeWhitespaceStyle("x = o.return / 2 / 3")).toBe("x=o.return/2/3")

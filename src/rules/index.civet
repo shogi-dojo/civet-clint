@@ -54,6 +54,7 @@ import { preferSliceShorthandRule } from "./prefer-slice-shorthand.civet"
 import { preferRangeLoopRule } from "./prefer-range-loop.civet"
 import { preferSwitchRule } from "./prefer-switch.civet"
 import { preferFunctionDeclarationRule } from "./prefer-function-declaration.civet"
+import { preferImplicitObjectArgRule } from "./prefer-implicit-object-arg.civet"
 
 export const allRules: Record<string, Rule> = defaultRuleRegistry.getRules()
 
@@ -111,4 +112,5 @@ export {
   preferRangeLoopRule
   preferSwitchRule
   preferFunctionDeclarationRule
+  preferImplicitObjectArgRule
 }

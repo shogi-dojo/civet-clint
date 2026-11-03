@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { lintSource, compileSource } from "../src/engine.civet"
+import { normalizeNewCallStyle } from "../src/utils.civet"
 
 RULE := "style/prefer-new-shorthand"
 
@@ -31,3 +32,18 @@ describe RULE, ->
     result := fix(source)
     expect(result.fixedSource).toBe("x := if bad then new Foo else value\n")
     expect(result.isEquivalencePreserved).toBe(true)
+
+  it "accepts a `new X` that is the argument of a call inside a conditional", ->
+    // The delta used to read `AiAdvisor(new AI) : null` as a parenthesised `(new AI)`
+    // followed by `:` and unwrap it into `AiAdvisornew AI()`, which rejected this fix
+    // and every other `new X()` fix in the same file.
+    source := "advisor := if timedOut then new AiAdvisor(new AI()) else null\nm := new Map()\n"
+    result := fix(source)
+    expect(result.fixedSource).toBe("advisor := if timedOut then new AiAdvisor(new AI) else null\nm := new Map\n")
+    expect(result.isEquivalencePreserved).toBe(true)
+
+describe "normalizeNewCallStyle", ->
+  it "unwraps a grouped construction before access, not a call's argument list", ->
+    expect(normalizeNewCallStyle("x = (new Foo).bar")).toBe("x = new Foo().bar")
+    expect(normalizeNewCallStyle("x = c? g(new Foo) : y")).toBe("x = c? g(new Foo) : y")
+    expect(normalizeNewCallStyle("x = c? new G(new Foo()) : y")).toBe("x = c? new G(new Foo) : y")

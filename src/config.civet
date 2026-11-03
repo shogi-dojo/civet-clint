@@ -124,6 +124,7 @@ export const PRESETS: Record<string, PresetDefinition> = {
       "style/prefer-implicit-block-call": "error"
       "style/prefer-implicit-call-args": "error"
       "style/prefer-implicit-arrow-arg": "error"
+      "style/prefer-implicit-object-arg": "error"
       "style/no-braced-arrow-body": "error"
       "style/prefer-jsx-shorthand": "error"
       "style/prefer-bare-jsx-values": "error"
@@ -180,7 +181,11 @@ export const EXCEPTIONS_FILE = "clint.exceptions.json"
 //
 //   { "exceptions": [
 //       { "file": "src/a.civet", "line": 12, "rule": "style/prefer-switch", "reason": "..." }
+//       { "file": "src/b.civet", "text": "podium = if rank", "rule": "style/prefer-switch" }
 //   ] }
+//
+// `line` pins a finding to a line number, which breaks the moment an edit above it
+// shifts the file. `text` pins it to a fragment of the line itself and moves with it.
 //
 // Auto-discovered beside the config; `exceptions` in the config names another
 // path. A configured file that is missing is fatal, like `civetConfig`: silently
@@ -209,7 +214,9 @@ export function loadExceptions(explicitPath: string | undefined, baseDir: string
       throw new Error(`${where} needs a "rule" id`)
     if item.line? and not (Number.isInteger(item.line) and item.line > 0)
       throw new Error(`${where} has an invalid "line": expected a positive integer`)
-    entries.push({ file: path.resolve(dir, item.file), item.rule, item.line, item.reason })
+    if item.text? and not (typeof item.text is "string" and item.text.trim().length > 0)
+      throw new Error(`${where} has an invalid "text": expected a non-empty string`)
+    entries.push({ file: path.resolve(dir, item.file), item.rule, item.line, item.text, item.reason })
   { path: resolved, entries }
 
 export function findCivetConfigFile(cwd: string = process.cwd()): string | undefined
@@ -323,6 +330,9 @@ export function normalizeRuleEntry(
         actual := typeof options[key]
         unless actual is expected
           throw new Error(`Invalid value for option "${key}" of rule "${ruleId}": expected ${expected}, received ${actual}`)
+      problem := rule.meta.validateOptions?(options)
+      if problem?
+        throw new Error(`Invalid options for ${context} "${ruleId}": ${problem}`)
 
   { level: level as RuleLevel, options }
 

@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle, normalizeArrowParenStyle, normalizeConditionalReturnStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
@@ -23,7 +23,7 @@ export interface LintOptions
   compiler?: CivetCompiler
   // The exceptions that apply to this file; `index` identifies the entry in
   // `ResolvedConfig.exceptions` so the caller can tell which ones were used.
-  exceptions?: { rule: string, line?: number, index: number }[]
+  exceptions?: { rule: string, line?: number, text?: string, index: number }[]
   fix?: boolean
   rules?: Record<string, RuleLevel>
   ruleOptions?: Record<string, RuleOptions>
@@ -38,6 +38,9 @@ export interface LintOptions
 // this same sequence so single-rule and multi-rule verification agree.
 export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "semicolon-style"
+  // Before block-brace-style: both sides must reach `{ return a}` before a combined
+  // brace delta unwraps it.
+  "conditional-return"
   "quote-style"
   "declaration-style"
   "trailing-comma-style"
@@ -50,6 +53,7 @@ export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "range-loop"
   "function-declaration"
   "existential-paren-style"
+  "arrow-paren-style"
   "whitespace-style"
 ]
 
@@ -400,6 +404,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeFunctionDeclarationStyle(code)
       when "existential-paren-style"
         normalizeExistentialParenStyle(code)
+      when "arrow-paren-style"
+        normalizeArrowParenStyle(code)
+      when "conditional-return"
+        normalizeConditionalReturnStyle(code)
       else
         code
 
@@ -417,6 +425,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     resBefore is resAfter
 
   fileExceptions := options.exceptions or []
+  var splitLines: string[] | undefined = undefined
+  sourceLines := (): string[] -> splitLines ??= source.split("\n")
   exceptedRules := new Set(fileExceptions.map (entry) -> entry.rule)
   usedExceptions := new Set<number>()
   var suppressedCount = 0
@@ -430,6 +440,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
     compiler
     options: {}
     getLineColumn
+    activeRuleOptions: (ruleId) ->
+      level := mergedRules[ruleId]
+      return undefined if level is undefined or level is "off" or skippedIds.has(ruleId)
+      resolveRuleOptions(ruleId, mergedRuleOptions[ruleId], registry)
     declareEquivalenceReference: (delta, build) ->
       if currentRuleId
         equivalenceReferences.set(currentRuleId, build)
@@ -462,7 +476,10 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
           line = 1
           column = 1
 
-      exception := fileExceptions.find (entry) -> entry.rule is d.ruleId and (not entry.line? or entry.line is line)
+      exception := fileExceptions.find (entry) ->
+        return false unless entry.rule is d.ruleId
+        return sourceLines()[line! - 1]?.includes(entry.text) if entry.text?
+        not entry.line? or entry.line is line
       if exception?
         usedExceptions.add(exception.index)
         suppressedCount++
@@ -878,7 +895,7 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   shouldRunPhases := options.phases? or (options.fix and hasOrderedRules)
   absolutePath := path.resolve(filePath)
   exceptions := (fileConfig.exceptions or [])
-    .map((entry, index) -> { entry.rule, entry.line, index, entry.file })
+    .map((entry, index) -> { entry.rule, entry.line, entry.text, index, entry.file })
     .filter (entry) -> entry.file is absolutePath
   // A plain `--write` promises unchanged emit. A `repair` changes it by design,
   // so that phase runs only when the caller asks for it, as `--rewrite` does;

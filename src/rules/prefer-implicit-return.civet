@@ -8,6 +8,21 @@ const FN_NODE_TYPES = [
   "ArrowFunction"
 ]
 
+const CLASS_TYPES = ["ClassExpression", "ClassDeclaration"]
+
+const VOID_RETURN = /^\s*:\s*(?:void|Promise\s*<\s*void\s*>)\s*$/
+
+// Words that start a statement form which Civet compiles differently from the
+// expression form it takes after `return`.
+const STATEMENT_KEYWORD = /^(?:if|unless|switch|try|do|for|while|until|loop)\b/
+// The one statement form that is also a plain ternary: `if c then a else b` on one
+// line, with no second `if` after its `else`.
+const CONDITIONAL_TAIL = /^(?:if|unless)\b[^\n]*\bthen\b[^\n]*\belse\b[^\n]*$/
+const ELSE_CHAIN = /\belse\s+(?:if|unless)\b/
+
+// A statement that starts with the keyword as written, after any leading comments.
+const WRITTEN_RETURN = /(?:\s|#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*return(?![\w$])/y
+
 const LOOP_TYPES = [
   "ForStatement"
   "IterationStatement"
@@ -31,13 +46,36 @@ export const preferImplicitReturnRule: Rule = {
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
     seen := new Set<number>()
     edits: Fix[] := []
-    ctx.declareEquivalenceReference?.("semicolon-style", (input: string) ->
+    ctx.declareEquivalenceReference?.(["semicolon-style", "conditional-return"], (input: string) ->
       return undefined unless edits.length > 0
       var output = input
       for edit of [...edits].sort((a, b) -> b.start - a.start)
         output = output.slice(0, edit.start) + edit.replacement + output.slice(edit.end)
       output
     )
+
+    // `get data() { return x }` on one line. With only the keyword gone `{ x }` re-parses
+    // as an object literal (`{ a.b }` as a shorthand entry), so the braces go with it:
+    // `get data() x` compiles back to the same braced method. Only when the method
+    // closes its line or its object -- after a comma or another entry the unbraced body
+    // would swallow what follows (`m() g(1), n: 2` is `m() { return g(1), {n: 2} }`).
+    oneLineBraces := (fnNode: any, block: any, afterReturn: number): { open: number, close: number, closeFrom: number } | undefined ->
+      return undefined unless fnNode.type is "MethodDefinition"
+      blockSpan := tree.range(block)
+      return undefined unless blockSpan?
+      text := source.slice(blockSpan.start, blockSpan.end)
+      open := blockSpan.start + (text.length - text.trimStart().length)
+      return undefined unless source[open] is "{"
+      close := blockSpan.start + text.trimEnd().length - 1
+      return undefined unless source[close] is "}" and close > afterReturn
+      return undefined if source.slice(open, close).includes("\n")
+      lineEnd := source.indexOf("\n", close)
+      following := source.slice(close + 1, lineEnd is -1 ? source.length : lineEnd).trim()
+      return undefined unless following.length is 0 or /^[})\]]/.test(following)
+      var closeFrom = close
+      while closeFrom > afterReturn and (source[closeFrom - 1] is " " or source[closeFrom - 1] is "\t")
+        closeFrom--
+      { open, close, closeFrom }
 
     // Every function span in the file, so a candidate `return` can be attributed to
     // the INNERMOST function that contains it. Without this, an outer function
@@ -61,6 +99,17 @@ export const preferImplicitReturnRule: Rule = {
         isGen := Array.isArray(fnNode.generator) ? fnNode.generator.length > 0 : Boolean(fnNode.generator)
         return if isGen
 
+      // A class constructor's `return ctx` is load-bearing: `new` yields that object,
+      // and Civet adds no implicit return to a constructor, so removing the keyword
+      // makes `new` hand back the fresh instance instead. The gate rejects the fix --
+      // which also took every other method's fix in the file down with it.
+      return if fnNode.type is "MethodDefinition" and fnNode.name is "constructor" and tree.hasAncestorType(fnNode, CLASS_TYPES)
+
+      // The same holds for a function typed `: void` (or `Promise<void>`): Civet adds no
+      // implicit return there, so without the keyword the value is dropped.
+      returnType := fnNode.returnType ?? fnNode.signature?.returnType
+      return if returnType? and VOID_RETURN.test(tree.text(returnType))
+
       block := fnNode.block
       return unless block? and Array.isArray(block.expressions) and block.expressions.length > 0
       // A braced arrow containing only a value expression may become an object
@@ -82,6 +131,15 @@ export const preferImplicitReturnRule: Rule = {
       exprType := lastStmt.expression.type
       return if exprType is "ObjectLiteral" or exprType is "ObjectExpression" or exprType is "BareObjectLiteral"
 
+      // Civet adds a synthetic ReturnStatement for every implicit return, so most
+      // functions reach this point. Their source does not start with `return`, and
+      // telling so here skips the token scan below -- which for a component's last
+      // statement walks its whole JSX tree, once per nested callback.
+      stmtSpan := tree.range(lastStmt)
+      return unless stmtSpan?
+      WRITTEN_RETURN.lastIndex = stmtSpan.start
+      return unless WRITTEN_RETURN.test(source)
+
       return if tree.hasAncestorType(lastStmt, LOOP_TYPES)
 
       // The structural check above is not sufficient on its own: when a function's
@@ -97,9 +155,8 @@ export const preferImplicitReturnRule: Rule = {
       // rejected it on every run (37 sites on a 441-file codebase). Require the
       // statement to also be textually last: nothing but whitespace and block
       // closers may follow it inside the function.
-      stmtSpan := tree.range(lastStmt)
       fnSpan := tree.range(fnNode)
-      return unless stmtSpan? and fnSpan?
+      return unless fnSpan?
       return unless /^[\s});]*$/.test(source.slice(stmtSpan.end, fnSpan.end))
 
       // The return must belong to THIS function, not to a nested one.
@@ -132,6 +189,17 @@ export const preferImplicitReturnRule: Rule = {
       return if /^[\r\n]/.test(rest)
       return if /^(?:\/\/|#)/.test(rest)
 
+      // `return if c then a else b` is a conditional EXPRESSION that compiles to a
+      // ternary; the same words as the function's last statement compile to an
+      // if/else with a `return` in each branch. The `conditional-return` delta proves
+      // that pair for a one-line `if`/`unless` with a single `else`. Every other
+      // statement form (`else if` chains become an IIFE, a `switch`, a loop) emits
+      // differently, the gate would reject the fix every time, and a rejected fix
+      // takes the rest of the file's batch down with it: a report that can never be
+      // applied is noise.
+      valueText := source.slice(after, stmtSpan.end)
+      return if STATEMENT_KEYWORD.test(valueText) and not (CONDITIONAL_TAIL.test(valueText) and not ELSE_CHAIN.test(valueText))
+
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, after)
       seen.add(pos)
@@ -142,8 +210,20 @@ export const preferImplicitReturnRule: Rule = {
       while source[tail] is " " or source[tail] is "\t"
         tail++
       hasSemicolon := source[tail] is ";"
-      edit: Fix := { start: pos, end: after, replacement: "" }
+      braces := oneLineBraces(fnNode, block, after)
+      edit: Fix := braces ? { start: braces.open, end: after, replacement: "" } : { start: pos, end: after, replacement: "" }
       edits.push(edit)
+      if braces?
+        // The closing edit is a second, separate fix: replacing the whole method body
+        // would overlap the edits of any callback `return` nested inside it.
+        closeEdit: Fix := { start: braces.closeFrom, end: braces.close + 1, replacement: "" }
+        edits.push(closeEdit)
+        ctx.report({
+          ruleId: "style/prefer-implicit-return"
+          message: "Drop the braces of a one-line method body"
+          pos: braces.close
+          fix: closeEdit
+        })
       if hasSemicolon
         // Separate edits commute with an inner callback's return removal.
         // Replacing the whole outer expression would overlap its inner edits.
@@ -158,7 +238,7 @@ export const preferImplicitReturnRule: Rule = {
 
       ctx.report({
         ruleId: "style/prefer-implicit-return"
-        message: "Drop explicit 'return' at end of function body"
+        message: braces ? "Drop 'return' and the braces of a one-line method body" : "Drop explicit 'return' at end of function body"
         pos
         fix: edit
       })

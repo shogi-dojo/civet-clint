@@ -1,0 +1,209 @@
+import { describe, it, expect } from "vitest"
+import { lintSource, lintPhased, compileSource, normalizeWhitespaceStyle } from "../src/engine.civet"
+
+DIAL := { autoLet: true, coffeeComment: true, react: true }
+RULE := "style/prefer-implicit-object-arg"
+
+lint := (input: string) ->
+  lintSource(input, { rules: { [RULE]: "warn" }, civetOptions: DIAL, fix: true })
+
+findings := (input: string) ->
+  lintSource(input, { rules: { [RULE]: "warn" }, civetOptions: DIAL }).diagnostics.filter (d) ->
+    d.ruleId is RULE
+
+// Whitespace is the only thing a de-braced object may change in the emitted JS.
+sameEmit := (a: string, b: string) ->
+  expect(normalizeWhitespaceStyle(compileSource(a, DIAL))).toBe(normalizeWhitespaceStyle(compileSource(b, DIAL)))
+
+describe "style/prefer-implicit-object-arg", ->
+  describe "last argument of a paren-free call", ->
+    it "drops the braces", ->
+      res := lint("f x, { a: 1, b: 2 }\n")
+      expect(res.fixedSource).toBe("f x, a: 1, b: 2\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "handles a call whose only argument is the object", ->
+      res := lint("setHold { to: 1, name: 'n' }\n")
+      expect(res.fixedSource).toBe("setHold to: 1, name: 'n'\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "handles member callees, assignments and awaited calls", ->
+      expect(lint("expect(x).toEqual { a: 1 }\n").fixedSource).toBe("expect(x).toEqual a: 1\n")
+      expect(lint("r = f y, { a: 1 }\n").fixedSource).toBe("r = f y, a: 1\n")
+      expect(lint("await save x, { id: 1 }\n").fixedSource).toBe("await save x, id: 1\n")
+
+    it "emits the same JS up to whitespace", ->
+      input := "f x, { a: 1, b: 'two' }\ng { c: [1, 2] }\n"
+      sameEmit(input, lint(input).fixedSource!)
+
+    it "keeps a trailing comment", ->
+      expect(lint("f x, { a: 1 } # why\n").fixedSource).toBe("f x, a: 1 # why\n")
+
+  describe "JSX attribute", ->
+    it "drops the inner braces", ->
+      res := lint("x := <C params={{ id: 'p' }} other=1 />\n")
+      expect(res.fixedSource).toBe("x := <C params={id: 'p'} other=1 />\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "emits the same JS up to whitespace", ->
+      input := "x := <Box style={{ color: 'red', gap: 2 }} id=1 />\n"
+      sameEmit(input, lint(input).fixedSource!)
+
+    it "leaves shorthand attributes and spreads alone", ->
+      expect(findings("x := <C {a} {...b} />\n")).toHaveLength(0)
+
+  describe "arrow body", ->
+    it "drops the parens and braces", ->
+      res := lint("g = (x) => ({ a: x, b: 1 })\n")
+      expect(res.fixedSource).toBe("g = (x) => a: x, b: 1\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "handles a zero-parameter arrow and a call that takes the arrow", ->
+      expect(lint("g = => ({ a: 1 })\n").fixedSource).toBe("g = => a: 1\n")
+      expect(lint("items.map (x) => ({ id: x.id })\n").fixedSource).toBe("items.map (x) => id: x.id\n")
+
+    it "emits the same JS up to whitespace", ->
+      input := "g = (x) => ({ a: x })\n"
+      sameEmit(input, lint(input).fixedSource!)
+
+  describe "guards", ->
+    it "keeps shorthand entries: without braces `a` would be its own argument", ->
+      for source of ["f { a, b: 1 }\n", "f { b: 1, a }\n", "f x, { a }\n", "g = => ({ a, b: 1 })\n", "x := <C p={{ a, b: 1 }} />\n"]
+        expect(findings(source)).toHaveLength(0)
+
+    it "keeps spread entries, methods and getters", ->
+      for source of [
+        "f { ...x, a: 1 }\n"
+        // compiles, but as a CALL on the object literal
+        "f { a: 1, ...rest }\n"
+        "f x, { ...rest }\n"
+        "g = => ({ ...a, b: 1 })\n"
+        "f { get data() { return 1 }, a: 1 }\n"
+        "f { m() { return 1 } }\n"
+      ]
+        expect(findings(source)).toHaveLength(0)
+
+    it "keeps a first key Civet reads as syntax", ->
+      for source of ["f { when: p }\n", "setHold { from: 0, to: 1 }\n", "q = => g { when: p }\n", "f x, { do: 1 }\n", "g = => ({ await: 1 })\n"]
+        expect(findings(source)).toHaveLength(0)
+
+    it "still rewrites a keyword that is not the first key, and `to:`/`name:` first", ->
+      expect(lint("f { a: 1, when: p }\n").fixedSource).toBe("f a: 1, when: p\n")
+      expect(lint("f { to: 1 }\n").fixedSource).toBe("f to: 1\n")
+      expect(lint("f { name: 1 }\n").fixedSource).toBe("f name: 1\n")
+
+    it "keeps anything that follows the object on its line", ->
+      for source of [
+        "f x, { a: 1 }.b\n"
+        "f x, { a: 1 }, y\n"
+        "y = (f x, { a: 1 })\n"
+        "g = => ({ a: 1 }).b\n"
+        "items.map((x) => ({ a: x }))\n"
+        "z = [f x, { a: 1 }]\n"
+      ]
+        expect(findings(source)).toHaveLength(0)
+
+    it "keeps an object in an explicit-paren call", ->
+      expect(findings("f(x, { a: 1 })\n")).toHaveLength(0)
+      expect(findings("f({ a: 1 })\n")).toHaveLength(0)
+
+    it "keeps a trailing comma, an empty object and a pipe", ->
+      for source of ["f x, { a: 1, }\n", "f x, {}\n", "f { a: x |> g }\n"]
+        expect(findings(source)).toHaveLength(0)
+
+    it "keeps multi-line objects and objects with comments inside", ->
+      expect(findings("f x, {\n  a: 1\n}\n")).toHaveLength(0)
+      expect(findings("f x, { a: 1 /* c */ }\n")).toHaveLength(0)
+
+    it "never treats patterns, clauses and types as candidates", ->
+      for source of [
+        "{ a, b } := c\n"
+        "{ a: 1 } = c\n"
+        "for { a } of xs\n  go()\n"
+        "import { a } from 'b'\n"
+        "export { a }\n"
+        "type T = { a: number }\n"
+        "x: { a: number } := y\n"
+        "m: Record<string, { a: number }> := y\n"
+        "f = ({ a, b }) => a\n"
+        "o := { a: 1 }\n"
+        "x = ({ a: 1 })\n"
+      ]
+        expect(findings(source)).toHaveLength(0)
+
+    it "keeps a string that looks like an object", ->
+      expect(findings("f x, '{ a: 1 }'\n")).toHaveLength(0)
+
+  describe "values", ->
+    it "accepts arbitrary single-line values and lets the gate prove them", ->
+      for body of [
+        "a: x ? 1 : 2, b: 3"
+        "a: { b: 1 }, c: 2"
+        "a: [1, 2], b: 3"
+        "a: 'x, y', b: 1"
+        "a: => 1, b: 2"
+        "a: f(=> 1), b: 2"
+        "a: x and y"
+        "a: new Foo(), b: 1"
+        "[k]: 1, 'str': 2, 3: 4"
+        "a: <div>hi</div>, b: 1"
+      ]
+        source := `f x, { ${body} }\n`
+        res := lint(source)
+        expect(res.isEquivalencePreserved).toBe(true)
+        expect(res.fixedSource).toBe(`f x, ${body}\n`)
+
+  describe "keyword audit", ->
+    // Re-derives the first-key blocklist from the compiler. If a Civet release changes
+    // which keywords parse, either the rule leaves one it could fix (harmless) or this
+    // fails because the gate rejected a fix the rule should have skipped.
+    KEYWORDS := "then when do of from await yield debugger as satisfies by implements function if unless else switch case default for while until loop return throw try catch finally break continue new delete typeof void instanceof in is isnt not and or import export class extends let const var async with interface type enum declare namespace module abstract static get set readonly public private protected true false null undefined this super own to name keyof infer asserts unique override accessor using global package".split(" ")
+    shapes := [
+      (k: string) -> `f { ${k}: 1, z: 2 }\n`
+      (k: string) -> `f a, { ${k}: 1, z: 2 }\n`
+      (k: string) -> `g = => ({ ${k}: 1, z: 2 })\n`
+      (k: string) -> `x := <C p={{ ${k}: 1, z: 2 }} />\n`
+      (k: string) -> `f { z: 2, ${k}: 1 }\n`
+    ]
+
+    it "never proposes a rewrite the compiler rejects or changes", ->
+      for keyword of KEYWORDS
+        for shape of shapes
+          source := shape(keyword)
+          res := lint(source)
+          bad := res.diagnostics.filter (d) -> d.ruleId.startsWith("compiler-equivalence")
+          expect(bad, `${keyword} in ${JSON.stringify(source)}`).toEqual([])
+          expect(res.isEquivalencePreserved, `${keyword} in ${JSON.stringify(source)}`).toBe(true)
+
+  describe "with prefer-implicit-arrow-arg in one run", ->
+    run := (input: string) ->
+      lintPhased(input, {
+        rules: { [RULE]: "warn", "style/prefer-implicit-arrow-arg": "warn" }
+        civetOptions: DIAL
+        fix: true
+      })
+
+    it "reaches a fixed point: the arrow closes the line once the braces are gone", ->
+      res := run("render x, { onDone: vi.fn(=> 1) }\n")
+      expect(res.fixedSource).toBe("render x, onDone: vi.fn => 1\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+      expect(res.diagnostics).toHaveLength(0)
+
+    it "applies both in a file of mixed sites", ->
+      input := "a = f x, { p: vi.fn(=> 1) }\nb = g { q: 2 }\nc = h (=> 3)\n"
+      res := run(input)
+      expect(res.fixedSource).toBe("a = f x, p: vi.fn => 1\nb = g q: 2\nc = h => 3\n")
+      expect(res.isEquivalencePreserved).toBe(true)
+
+    it "is idempotent", ->
+      once := run("render x, { onDone: vi.fn(=> 1) }\n").fixedSource!
+      expect(run(once).fixedSource).toBeUndefined()
+
+describe "style/prefer-implicit-object-arg layout", ->
+  it "keeps an object on a continuation line", ->
+    // Unbraced, Civet expands it into a multi-line literal with a trailing comma.
+    for source of ["f x,\n  { a: 1 }\n", "run (=> go()),\n  { message: 'done' }\n", "{ ok } = await run (=> go()),\n  { message: 'done' }\n"]
+      expect(findings(source)).toHaveLength(0)
+
+  it "keeps an arrow body that starts on the next line", ->
+    expect(findings("g = =>\n  ({ a: 1 })\n")).toHaveLength(0)

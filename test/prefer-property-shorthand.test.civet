@@ -56,3 +56,30 @@ describe "style/prefer-property-shorthand guards", ->
   it "still fixes a braced object on the same binding", ->
     expect(fix("o := { name: a.name }\n").fixedSource).toBe("o := { a.name }\n")
 
+
+describe "style/prefer-property-shorthand: the property's own object decides", ->
+  it "leaves a brace-free argument object nested inside a braced literal alone", ->
+    // `seat: r.seat` here is an implicit-call argument, not an entry of the braced
+    // object that happens to enclose it. Civet has no shorthand entry without braces.
+    // Asserted on the report, not just the output: the gate would have rejected the
+    // fix anyway, which leaves the source untouched but still prints a finding.
+    source := "o := {\n  run: (r) =>\n    setSlot seat: r.seat, slot: r.slot\n}\n"
+    res := fix(source)
+    expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+    expect(res.fixedSource ?? source).toBe(source)
+
+  it "still fixes the braced siblings around a brace-free one in the same file", ->
+    // One brace-free site used to poison the whole file: the rejected batch took
+    // every legitimate fix in the file down with it.
+    source := "o := {\n  gameRules: setup.gameRules\n  run: (r) =>\n    setSlot seat: r.seat, slot: r.slot\n}\n"
+    fixed := expectPropertyEquivalent(source)
+    expect(fixed).toBe("o := {\n  setup.gameRules\n  run: (r) =>\n    setSlot seat: r.seat, slot: r.slot\n}\n")
+
+  it "fixes a braced object that carries a leading spread", ->
+    expect(expectPropertyEquivalent("o := { ...update, message: current.message }\n")).toBe("o := { ...update, current.message }\n")
+
+  it "fixes a braced object that carries a trailing spread", ->
+    expect(expectPropertyEquivalent("o := { sessionId, now: command.now, ...rest }\n")).toBe("o := { sessionId, command.now, ...rest }\n")
+
+  it "fixes a braced entry of a multi-line object wrapped in parentheses", ->
+    expect(expectPropertyEquivalent("o := ({\n  key: 1\n  name: seat.name\n})\n")).toBe("o := ({\n  key: 1\n  seat.name\n})\n")

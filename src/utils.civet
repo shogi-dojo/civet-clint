@@ -27,7 +27,7 @@ export function createLineColumnIndex(source: string)
 export function walkAst(ast: any, visitor: (node: any, parent: any) => void)
   visited := new Set<any>()
 
-  traverse := (node: any, parent: any) ->
+  traverse := (node: any, parent: any): void ->
     return unless node? and typeof node is "object"
     return if visited.has(node)
     visited.add(node)
@@ -340,7 +340,7 @@ export function normalizeBlockBraceStyle(code: string): string
       out += code.slice(i, Math.min(j + 1, code.length))
       i = j + 1
       continue
-    if ch is "{" and /\)\s*$/.test(out)
+    if ch is "{" and /(?:\)|\belse)\s*$/.test(out)
       close := findBlockClose(code, i + 1)
       if close >= 0
         inner := code.slice(i + 1, close)
@@ -409,25 +409,14 @@ export function normalizeWhitespaceStyle(code: string): string
   var i = 0
   while i < code.length
     ch := code[i]
-    if ch is "/" and (code[i + 1] is "/" or code[i + 1] is "*")
-      block := code[i + 1] is "*"
-      end := block ? code.indexOf("*/", i + 2) : code.indexOf("\n", i + 2)
-      stop := end < 0 ? code.length : (block ? end + 2 : end)
-      out += code.slice(i, stop)
-      i = stop
-      continue
-    if ch is "`" or ch is '"' or ch is "'"
-      quote := ch
-      var j = i + 1
-      while j < code.length
-        if code[j] is "\\"
-          j += 2
-          continue
-        break if code[j] is quote
-        break if code[j] is "\n" and quote isnt "`"
-        j++
-      out += code.slice(i, Math.min(j + 1, code.length))
-      i = j + 1
+    // Strings, templates, comments and REGEX literals are copied verbatim. Regexes
+    // matter: `/```shot\n[^`]*```/g` holds seven backticks, which read as a template
+    // literal flip the string state for the rest of the file and keep whitespace on
+    // one side of a comparison that the other side had stripped.
+    literalEnd := jsLiteralEnd(code, i)
+    if literalEnd >= 0
+      out += code.slice(i, literalEnd)
+      i = literalEnd
       continue
     if /\s/.test(ch)
       var k = i
@@ -456,6 +445,232 @@ export function normalizeExistentialParenStyle(code: string): string
     (_whole, before, space, operand, operator) -> `${before}${space}${operand} ${operator} null`
   )
 
+const REGEX_AFTER_KEYWORD = new Set(["return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "instanceof", "yield", "await"])
+
+// Index just past the string, template, comment or regex literal that starts at
+// `i`, or -1 when `i` does not start one. Template substitutions are scanned for
+// their own matching brace so a backtick inside `${…}` does not end the literal.
+function jsLiteralEnd(code: string, i: number): number
+  ch := code[i]
+  if ch is '"' or ch is "'"
+    var j = i + 1
+    while j < code.length
+      if code[j] is "\\"
+        j += 2
+        continue
+      return j + 1 if code[j] is ch or code[j] is "\n"
+      j++
+    return code.length
+  if ch is "`"
+    var j = i + 1
+    while j < code.length
+      if code[j] is "\\"
+        j += 2
+        continue
+      return j + 1 if code[j] is "`"
+      if code[j] is "$" and code[j + 1] is "{"
+        close := jsMatchClose(code, j + 1)
+        return code.length if close < 0
+        j = close + 1
+        continue
+      j++
+    return code.length
+  if ch is "/"
+    if code[i + 1] is "/"
+      end := code.indexOf("\n", i + 2)
+      return end < 0 ? code.length : end
+    if code[i + 1] is "*"
+      end := code.indexOf("*/", i + 2)
+      return end < 0 ? code.length : end + 2
+    // A slash starts a regex only where an operand is expected. Not after `<` or `}`
+    // and not before `>`: in emitted JSX those are `</div>` and `<Foo a={b} />`.
+    return -1 if code[i + 1] is ">"
+    var back = i - 1
+    back-- while back >= 0 and /\s/.test(code[back])
+    unless back < 0 or "(,=:[!&|?{;+-*%>~^".includes(code[back])
+      // After a word, a slash divides -- unless the word is a keyword that takes an
+      // operand: `return /"/.test(s)` holds a regex, and reading its quote as a
+      // string would flip the literal state for the rest of the file.
+      var wordStart = back + 1
+      wordStart-- while wordStart > 0 and /[\w$]/.test(code[wordStart - 1])
+      word := code.slice(wordStart, back + 1)
+      return -1 unless REGEX_AFTER_KEYWORD.has(word) and not /[.\w$]/.test(code[wordStart - 1] ?? "")
+    var j = i + 1
+    var inClass = false
+    while j < code.length and code[j] isnt "\n"
+      if code[j] is "\\"
+        j += 2
+        continue
+      if code[j] is "[" then inClass = true
+      else if code[j] is "]" then inClass = false
+      else if code[j] is "/" and not inClass then return j + 1
+      j++
+  -1
+
+// Index of the bracket that closes the one at `open`, or -1 when unbalanced.
+function jsMatchClose(code: string, open: number): number
+  var depth = 0
+  var i = open
+  while i < code.length
+    end := jsLiteralEnd(code, i)
+    if end >= 0
+      i = end
+      continue
+    ch := code[i]
+    if ch is "(" or ch is "[" or ch is "{"
+      depth++
+    else if ch is ")" or ch is "]" or ch is "}"
+      depth--
+      return i if depth is 0
+    i++
+  -1
+
+// `code` with every literal and every bracketed group blanked to spaces, so a search
+// for an operator sees only the ones at depth 0.
+function topLevelText(code: string): string
+  var out = ""
+  var depth = 0
+  var i = 0
+  while i < code.length
+    end := jsLiteralEnd(code, i)
+    if end >= 0
+      out += " ".repeat(end - i)
+      i = end
+      continue
+    ch := code[i]
+    if ch is "(" or ch is "[" or ch is "{"
+      depth++
+      out += " "
+    else if ch is ")" or ch is "]" or ch is "}"
+      depth--
+      out += " "
+    else
+      out += depth is 0 ? ch : " "
+    i++
+  out
+
+// `f => x` emits `f(() => x)`, but `f (=> x)` -- an implicit call whose argument is a
+// parenthesised arrow -- emits `f((() => x))`. The extra pair is a parenthesised
+// expression wrapped around a complete arrow, so dropping it cannot change what the
+// program does. This delta licenses exactly that and nothing else: the wrapper must
+// open at `((`, hold a single arrow (no top-level comma, or `((() => a, b))` would
+// become two arguments), and be closed directly by the outer paren. Anything it
+// cannot prove is left alone, which makes the engine's comparison fail rather than
+// pass.
+const ARROW_HEAD = /^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/
+
+export function normalizeArrowParenStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    lit := jsLiteralEnd(code, i)
+    if lit >= 0
+      out += code.slice(i, lit)
+      i = lit
+      continue
+    if code[i] is "("
+      var wrapper = i + 1
+      wrapper++ while wrapper < code.length and /\s/.test(code[wrapper])
+      if code[wrapper] is "("
+        wrapperEnd := jsMatchClose(code, wrapper)
+        if wrapperEnd > 0
+          var outerEnd = wrapperEnd + 1
+          outerEnd++ while outerEnd < code.length and /\s/.test(code[outerEnd])
+          inner := code.slice(wrapper + 1, wrapperEnd).trim()
+          if code[outerEnd] is ")" and ARROW_HEAD.test(inner) and not topLevelText(inner).includes(",")
+            // Keep the layout around the wrapper (`f(\n  (() => x))` keeps its break);
+            // only the pair itself, and any padding inside it, goes.
+            out += code.slice(i, wrapper) + normalizeArrowParenStyle(inner) + code.slice(wrapperEnd + 1, outerEnd) + ")"
+            i = outerEnd + 1
+            continue
+    out += code[i]
+    i++
+  out
+
+// `return if c then a else b` emits `return (c? a : b)`; the same words as a
+// function's last statement emit `if (c) { return a} else return b`. One program,
+// two spellings, so the ternary is canonicalized to Civet's if/else layout -- but
+// only a ternary this scan can split without doubt: one top-level `?` and `:` pair,
+// a condition without an assignment or arrow (in `a = b ? c : d` the `?` belongs to
+// the right-hand side), and an alternative without a comma (`c ? a : b, d` returns
+// `d`). Anything else is copied as-is, so a rewrite it cannot prove fails the gate.
+export function normalizeConditionalReturnStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    lit := jsLiteralEnd(code, i)
+    if lit >= 0
+      out += code.slice(i, lit)
+      i = lit
+      continue
+    if code.startsWith("return (", i) and not /[\w$.]/.test(code[i - 1] ?? "")
+      open := i + "return ".length
+      close := jsMatchClose(code, open)
+      parts := close > 0 ? splitTernary(code.slice(open + 1, close)) : undefined
+      if parts?
+        [test, consequent, alternate] := parts.map (part) -> normalizeConditionalReturnStyle(unwrapBranch(part.trim()))
+        out += `if (${test}) { return ${consequent}} else return ${alternate}`
+        i = close + 1
+        continue
+    out += code[i]
+    i++
+  out
+
+// The ternary parenthesizes every branch that is not a bare name, call or literal
+// (`c? (a || b) : (-d)`) unless the branch already is a parenthesized group; after
+// `return` the same values are bare. That added pair is grouping only, so it goes --
+// except around an object literal, which keeps its parens after `return` too.
+function unwrapBranch(text: string): string
+  return text unless fullyParenthesized(text)
+  inner := text.slice(1, -1).trim()
+  return text if inner.startsWith("{") or fullyParenthesized(inner)
+  inner
+
+function fullyParenthesized(text: string): boolean
+  text.startsWith("(") and jsMatchClose(text, 0) is text.length - 1
+
+// `[test, consequent, alternate]` of a ternary with exactly one top-level `?` and
+// `:`, or undefined. `?.` (unless a digit follows) and `??` are not the operator.
+function splitTernary(inner: string): string[] | undefined
+  var depth = 0
+  var question = -1
+  var colon = -1
+  var i = 0
+  while i < inner.length
+    lit := jsLiteralEnd(inner, i)
+    if lit >= 0
+      i = lit
+      continue
+    ch := inner[i]
+    if "([{".includes(ch)
+      depth++
+    else if ")]}".includes(ch)
+      depth--
+    else if depth is 0
+      if ch is "?"
+        next := inner[i + 1] ?? ""
+        if next is "?"
+          i += 2
+          continue
+        unless next is "." and not /\d/.test(inner[i + 2] ?? "")
+          return undefined if question >= 0
+          question = i
+      else if ch is ":"
+        return undefined if question < 0 or colon >= 0
+        colon = i
+      else if ch is ","
+        return undefined
+      else if ch is "=" and question < 0
+        // `==`, `===`, `!=`, `!==`, `<=`, `>=` compare; a lone `=` or `=>` does not.
+        prev := inner[i - 1] ?? ""
+        next := inner[i + 1] ?? ""
+        return undefined if next is ">" or not ("=!<>".includes(prev) or next is "=")
+    i++
+  return undefined unless question > 0 and colon > question and colon < inner.length - 1
+  test := inner.slice(0, question)
+  return undefined if /^\s*$/.test(test) or /(?<![\w$])(?:yield|async)(?![\w$])/.test(test)
+  [test, inner.slice(question + 1, colon), inner.slice(colon + 1)]
+
 // Canonicalize the equivalent JS spellings `a !== b` and `!(a === b)`. This
 // bounded delta is used only by prefer-unless for a whole-condition rewrite.
 export function normalizeInequalityStyle(code: string): string
@@ -464,7 +679,9 @@ export function normalizeInequalityStyle(code: string): string
 // Treat empty constructor call parentheses as syntax sugar while preserving
 // grouping when a member/index access follows the constructed value.
 export function normalizeNewCallStyle(code: string): string
-  out := code.replace(/\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
+  // The `(` must open a grouping, not a call's argument list: in `c ? f(new X) : y`
+  // the `(new X)` is followed by `:` too, and unwrapping it would eat the callee.
+  out := code.replace(/(?<![\w$)\]])\(new\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\)(?=\s*(?:\.|\[|:))/g, "new $1()")
   out.replace(/\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(\)(?!\s*(?:\.|\[))/g, "new $1")
 
 // Canonicalize only a one-parameter arrow whose body is a direct property chain,
@@ -479,11 +696,36 @@ export function normalizePlaceholderParamStyle(code: string): string
 // `;` after the alias is optional because `semicolon-style` runs first when
 // several rules' deltas are combined, and has already removed it.
 export function normalizeRangeLoopStyle(code: string): string
-  code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;?/g, (_whole, _counter, start, operator, bound, name) ->
+  lowered := code.replace(/for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); (?:(?:\+\+|--)\1|\1(?:\+\+|--))\) \{const ([A-Za-z_$][A-Za-z0-9_$]*) = \1;?/g, (_whole, _counter, start, operator, bound, name) ->
     canonicalStart := start.trim().replace(/^\((.+) \+ 1\) \+ -1$/, "$1")
     step := if operator is "<" or operator is "<=" then "++" else "--"
     `for (let ${name} = ${canonicalStart}; ${name} ${operator} ${bound.trim()}; ${name}${step}) {`
   )
+  renameUnusedLoopCounters(lowered)
+
+// `for (let i = 0; i < n; i++) {…}` and `for (let _ = 0; _ < n; _++) {…}` are the same
+// loop when the body never mentions the counter: only a name nobody reads changed.
+// Both spellings are canonicalized to `_`, but only where the body mentions neither
+// the counter nor `_` itself -- a body that reads either keeps its own name, so a
+// rewrite that renamed a counter somebody uses still fails the gate.
+function renameUnusedLoopCounters(code: string): string
+  var out = ""
+  var last = 0
+  re := /for \(let ([A-Za-z_$][A-Za-z0-9_$]*) = ([^;]+); \1 (<=|>=|<|>) ([^;]+); ((?:\+\+|--)?)\1((?:\+\+|--)?)\) \{/g
+  var match: RegExpExecArray | null = null
+  while (match = re.exec(code)) !== null
+    name := match[1]!
+    continue if name is "_"
+    close := findBlockClose(code, match.index + match[0].length)
+    continue if close < 0
+    mentions := (text: string, id: string): boolean ->
+      new RegExp(`(?<![\\w$])${id.replace(/\$/g, "\\$")}(?![\\w$])`).test(text)
+    body := code.slice(match.index + match[0].length, close)
+    continue if mentions(body, name) or mentions(body, "_") or mentions(match[2]! + " " + match[4]!, "_")
+    renamed := match[0].replace(new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g"), () -> "_")
+    out += code.slice(last, match.index) + renamed
+    last = match.index + match[0].length
+  out + code.slice(last)
 
 // Canonicalize `const f = (...) => { ... }` as `function f(...) { ... }` only
 // for the declaration shape that the guarded function-declaration rule proposes.

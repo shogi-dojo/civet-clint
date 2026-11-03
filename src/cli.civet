@@ -510,7 +510,7 @@ Options:
       console.error(`clint: ${suppressed} finding${suppressed is 1 ? "" : "s"} suppressed by ${label}`)
     for each entry, index of config.exceptions
       continue if used.has(index) or not linted.has(entry.file)
-      at := entry.line? ? `:${entry.line}` : ""
+      at := entry.text? ? ` "${entry.text}"` : entry.line? ? `:${entry.line}` : ""
       console.error(`clint: warning unused exception ${path.relative(process.cwd(), entry.file)}${at} [${entry.rule}] in ${label}`)
 
   var totalRewritten = 0

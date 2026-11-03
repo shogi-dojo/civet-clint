@@ -20,16 +20,12 @@ export const preferPropertyShorthandRule: Rule = {
     // `a.b`"). In a brace-free, indentation-delimited object, `topLevel.name` on its
     // own line is a bare expression statement rather than a property, so the fix
     // silently changes the object's shape and the gate rejects it.
-    bracedObjectSpans: { start: number, end: number }[] := []
-    tree.visit ["ObjectExpression", "ObjectLiteral"], (obj) ->
-      span := tree.range(obj)
-      return unless span?
-      bracedObjectSpans.push(span) if source.slice(span.start, span.end).trimStart().startsWith("{")
-
-    insideBracedObject := (pos: number): boolean ->
-      bracedObjectSpans.some (span) -> span.start <= pos and pos < span.end
-
-    tree.visit "Property", (node) ->
+    //
+    // The object that matters is the property's OWN: a brace-free argument list
+    // (`setSlot seat: r.seat, slot: r.slot`) can sit anywhere inside a braced literal,
+    // so "some braced span encloses it" is not the test.
+    check := (node: any) ->
+      return unless node?.type is "Property"
       return unless node.name? and node.name.type is "Identifier"
       keyName := node.name.name
       val := node.value
@@ -47,7 +43,6 @@ export const preferPropertyShorthandRule: Rule = {
 
       pos := nameSpan.start
       end := valSpan.end
-      return unless insideBracedObject(pos)
       return if seen.has(pos)
       return if intersectsRange(ignoredRanges, pos, end)
       seen.add(pos)
@@ -63,4 +58,11 @@ export const preferPropertyShorthandRule: Rule = {
           replacement: valText
         }
       })
+
+    tree.visit ["ObjectExpression", "ObjectLiteral"], (obj) ->
+      span := tree.range(obj)
+      return unless span?
+      return unless source.slice(span.start, span.end).trimStart().startsWith("{")
+      for node of obj.properties ?? []
+        check(node)
 }

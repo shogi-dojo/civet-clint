@@ -97,6 +97,12 @@ export const preferUnlessRule: Rule = {
     source := ctx.source
     tree := ctx.syntax
     ignoredRanges := [...tree.commentRanges(), ...tree.stringRanges()]
+    commentRanges := tree.commentRanges()
+    // The replacement is rebuilt from the condition's own AST text, so a string inside
+    // it (`if !(x is 'a')`) is copied verbatim; only a comment in the span, or a head
+    // that starts inside a string, rules the rewrite out.
+    skipSpan := (start: number, end: number): boolean ->
+      intersectsRange(ignoredRanges, start, start + 1) or intersectsRange(commentRanges, start, end)
     seen := new Set<number>()
     // Index source keywords once. Calling tree.tokens(node) for every nested if
     // repeatedly walks overlapping subtrees and scales quadratically.
@@ -186,7 +192,7 @@ export const preferUnlessRule: Rule = {
       return if headLine.trim().endsWith("{")
 
       return if seen.has(start)
-      return if intersectsRange(ignoredRanges, start, end)
+      return if skipSpan(start, end)
       seen.add(start)
 
       operandText := conditionText!
@@ -256,7 +262,7 @@ export const preferUnlessRule: Rule = {
       headLine := source.slice(start, headLineEnd < 0 ? source.length : headLineEnd)
       return if headLine.trim().endsWith("{")
       return if headLine.slice(end - start).trim().length > 0
-      return if intersectsRange(ignoredRanges, start, end) or seen.has(start)
+      return if skipSpan(start, end) or seen.has(start)
       seen.add(start)
 
       expr := cond.expression
