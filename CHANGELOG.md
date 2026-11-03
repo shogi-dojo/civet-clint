@@ -58,6 +58,11 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
 - **One-line method bodies.** `style/prefer-implicit-return` rewrites
   `get data() { return x }` to `get data() x` (it used to leave `{ x }`, which
   re-parses as an object literal).
+- **Guard-clause tails.** `style/prefer-implicit-return` drops the `return` of a
+  one-line `return if c then a else b` (or `unless`), verified by the new
+  `conditional-return` delta: `return (c? a : b)` and `if (c) { return a} else return b`
+  are one program. `else if` chains (an IIFE after `return`) and other statement forms
+  are not reported.
 - **Plugin API.** `meta.validateOptions(options)` lets a rule reject its options at
   config load, and `context.activeRuleOptions(ruleId)` returns another active rule's
   resolved options.
@@ -75,9 +80,14 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
   slot: r.slot`) was reported, its fix was rejected, and the rejection took every
   other fix in the file down with it. It now looks at the property's own object.
 - `style/prefer-implicit-return` no longer offers to drop a class constructor's
-  `return ctx` (`new` yields what the constructor returns) or the `return` of
-  `return if c then a else b` (a ternary that would compile as an if/else). Both
-  fixes were always rejected, and each rejection poisoned the file's other fixes.
+  `return ctx` (`new` yields what the constructor returns), or a `return` in a
+  function typed `: void` / `Promise<void>` (Civet adds no implicit return there).
+  Both fixes were always rejected, and each rejection poisoned the file's other fixes.
+- `style/prefer-in-operator` wrote `Number item.id is in ids` for
+  `ids.includes(Number item.id)` (it parses as `Number(item.id is in ids)`) and broke a
+  bare JSX attribute value (`checked=a.includes(b)`). Both fixes were rejected. It now
+  writes `Number(item.id) is in ids` and `checked={b is in a}`, and reports an operand
+  looser than membership (`a.includes(b or c)`) without a fix.
 - The `whitespace-style` delta read the backticks of a regex literal
   (`/```shot\n[^`]*```/g`) as a template literal and inverted its string state for the
   rest of the file, so `style/prefer-unclosed-jsx` and
