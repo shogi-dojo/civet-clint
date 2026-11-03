@@ -8,6 +8,8 @@ const FN_NODE_TYPES = [
   "ArrowFunction"
 ]
 
+const CLASS_TYPES = ["ClassExpression", "ClassDeclaration"]
+
 const LOOP_TYPES = [
   "ForStatement"
   "IterationStatement"
@@ -60,6 +62,12 @@ export const preferImplicitReturnRule: Rule = {
       if fnNode.generator
         isGen := Array.isArray(fnNode.generator) ? fnNode.generator.length > 0 : Boolean(fnNode.generator)
         return if isGen
+
+      // A class constructor's `return ctx` is load-bearing: `new` yields that object,
+      // and Civet adds no implicit return to a constructor, so removing the keyword
+      // makes `new` hand back the fresh instance instead. The gate rejects the fix --
+      // which also took every other method's fix in the file down with it.
+      return if fnNode.type is "MethodDefinition" and fnNode.name is "constructor" and tree.hasAncestorType(fnNode, CLASS_TYPES)
 
       block := fnNode.block
       return unless block? and Array.isArray(block.expressions) and block.expressions.length > 0

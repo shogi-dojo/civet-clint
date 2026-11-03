@@ -100,3 +100,17 @@ describe "trailing return semicolons", ->
 
   it "does not attribute a nested object's return to an outer implicit return", ->
     unchanged("function f(xs)\n  xs.map((x) =>\n    return { x }\n  )\n")
+
+describe "class constructors", ->
+  it "keeps the 'return' of a constructor: `new` yields the returned object", ->
+    // Civet adds no implicit return to a constructor, so dropping the keyword makes
+    // `new` hand back the instance instead of `ctx`.
+    source := "vi.stubGlobal 'AudioContext', class\n  constructor()\n    return ctx\n"
+    res := fix(source)
+    expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+    expect(res.fixedSource ?? source).toBe(source)
+
+  it "still fixes the methods around a constructor in the same class", ->
+    // The rejected constructor fix used to take the whole file's batch with it.
+    fixed := expectReturnEquivalent("class Foo\n  constructor()\n    return ctx\n  m()\n    return 1\n")
+    expect(fixed).toBe("class Foo\n  constructor()\n    return ctx\n  m()\n    1\n")
