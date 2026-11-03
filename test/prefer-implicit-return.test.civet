@@ -114,3 +114,51 @@ describe "class constructors", ->
     // The rejected constructor fix used to take the whole file's batch with it.
     fixed := expectReturnEquivalent("class Foo\n  constructor()\n    return ctx\n  m()\n    return 1\n")
     expect(fixed).toBe("class Foo\n  constructor()\n    return ctx\n  m()\n    1\n")
+
+describe "one-line braced method bodies", ->
+  it "drops the braces with the return: `get data() { return x.y }` -> `get data() x.y`", ->
+    // With only the keyword gone, `{ x.y }` re-parses as an object literal, which
+    // the gate rejects -- and with it every other fix in the file.
+    expect(expectReturnEquivalent("f = => ({ get data() { return mocks.events } })\n"))
+      .toBe("f = => ({ get data() mocks.events })\n")
+
+  it "drops the braces of a plain one-line method as well", ->
+    expect(expectReturnEquivalent("o := { m(a) { return a + 1 } }\n"))
+      .toBe("o := { m(a) a + 1 }\n")
+
+  it "removes the semicolon that sat before the closing brace", ->
+    // Compiled output differs only by that semicolon, which the engine's
+    // semicolon-style delta accounts for, so check the gate rather than byte equality.
+    res := fix("f = => ({ get data() { return mocks.c; } })\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource).toBe("f = => ({ get data() mocks.c })\n")
+
+  it "keeps a callback's own return edit apart from the method's braces", ->
+    expect(expectReturnEquivalent("f = => ({ get data() { return foo(=> { return 1 }) } })\n"))
+      .toMatch(/^f = => \(\{ get data\(\) foo\(/)
+
+  it "leaves a braced method followed by another entry alone", ->
+    // Unbraced, `m() g(1), n: 2` swallows the comma: `m() { return g(1), {n: 2} }`.
+    source := "o := { m() { return g(1) }, n: 2 }\n"
+    res := fix(source)
+    expect(res.isEquivalencePreserved).toBe(true)
+    expect(res.fixedSource ?? source).not.toContain("m() g(1)")
+
+  it "still fixes a multi-line braced getter through the plain keyword removal", ->
+    expect(expectReturnEquivalent("o := {\n  get data() {\n    return mocks.events\n  }\n}\n"))
+      .toBe("o := {\n  get data() {\n    mocks.events\n  }\n}\n")
+
+describe "return of a conditional expression", ->
+  it "does not offer to drop `return if … then … else …`", ->
+    // A conditional expression after `return` is a ternary; as the last statement it
+    // is an if/else. Same behaviour, different compiled output: the gate would reject
+    // the fix on every run, so the rule stays silent instead of reporting it.
+    source := "f = (w) =>\n  if w.a\n    return 'x'\n  return if s() then 'm' else 'n'\n"
+    res := fix(source)
+    expect(res.diagnostics.filter((d) -> d.ruleId is RULE)).toHaveLength(0)
+    expect(res.fixedSource ?? source).toBe(source)
+
+  it "does not let such a return poison the file's other fixes", ->
+    fixed := expectReturnEquivalent("f = (w) =>\n  return if s() then 'm' else 'n'\ng = (x) =>\n  y := x + 1\n  return y\n")
+    expect(fixed).toContain("  y := x + 1\n  y\n")
+    expect(fixed).toContain("return if s() then 'm' else 'n'")
