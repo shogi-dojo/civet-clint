@@ -1,0 +1,112 @@
+import { describe, it, expect } from "vitest"
+import { lintSource } from "../src/engine.civet"
+import { normalizeArrowParenStyle } from "../src/utils.civet"
+import { defaultRuleRegistry } from "../src/registry.civet"
+import type { Rule } from "../src/types.civet"
+
+DIAL := { autoLet: true, coffeeComment: true, react: true }
+
+describe "normalizeArrowParenStyle", ->
+  it "unwraps a parenthesised arrow that is the sole argument", ->
+    expect(normalizeArrowParenStyle("f((() => x))")).toBe("f(() => x)")
+    expect(normalizeArrowParenStyle("f(( () => x ))")).toBe("f(() => x)")
+    expect(normalizeArrowParenStyle("f((async () => await x))")).toBe("f(async () => await x)")
+    expect(normalizeArrowParenStyle("f(((a) => a))")).toBe("f((a) => a)")
+    expect(normalizeArrowParenStyle("f((a => a))")).toBe("f(a => a)")
+
+  it "unwraps block bodies and nested occurrences", ->
+    expect(normalizeArrowParenStyle("f((() => { return g((() => 1)); }))"))
+      .toBe("f(() => { return g(() => 1); })")
+
+  it "makes the two compiled spellings agree", ->
+    expect(normalizeArrowParenStyle("createMemo((() => a()))"))
+      .toBe(normalizeArrowParenStyle("createMemo(() => a())"))
+
+  it "keeps parens that are not a redundant pair around one arrow", ->
+    for kept of [
+      "f(() => x)"
+      // a second argument: the wrapper is not closed by the call
+      "f((() => x), 5)"
+      "f(5, (() => x))"
+      // a comma inside would turn one argument into two
+      "f((() => x, y))"
+      // an immediately invoked arrow keeps its grouping
+      "f((() => x)())"
+      // not an arrow
+      "f((a + b))"
+      "f((g(x)))"
+    ]
+      expect(normalizeArrowParenStyle(kept)).toBe(kept)
+
+  it "does not read parens inside strings, templates, comments or regexes", ->
+    for kept of [
+      'f("((() => x))")'
+      "f(`((() => x))`)"
+      "f(/((() => x))/)"
+      "f(1) // ((() => x))\n"
+      "f(/* ((() => x)) */ 1)"
+    ]
+      expect(normalizeArrowParenStyle(kept)).toBe(kept)
+
+  it "survives a template substitution holding a backtick", ->
+    code := "f((() => `a${`)`}b`))"
+    expect(normalizeArrowParenStyle(code)).toBe("f(() => `a${`)`}b`)")
+
+  it "leaves unbalanced input alone", ->
+    expect(normalizeArrowParenStyle("f((() => x)")).toBe("f((() => x)")
+
+// A rule may only claim what the engine independently allows. The delta is bounded
+// by the normalizer above, so declaring it must not let a rule change meaning.
+type Edit = { start: number, end: number, replacement: string }
+
+paren := (id: string, edit: (source: string) => Edit | undefined): Rule ->
+  return {
+    id
+    meta: { description: "test rule", fixable: true, defaultSeverity: "error" }
+    check: (ctx) ->
+      fix := edit(ctx.source)
+      return unless fix?
+      ctx.declareEquivalenceReference?("arrow-paren-style", (input: string) ->
+        input.slice(0, fix.start) + fix.replacement + input.slice(fix.end)
+      )
+      ctx.report({ ruleId: id, message: "test", pos: fix.start, fix })
+  }
+
+describe "arrow-paren-style delta", ->
+  run := (source: string, rule: Rule) ->
+    registry := defaultRuleRegistry.clone()
+    registry.register(rule)
+    lintSource(source, { registry, rules: { [rule.id]: "error" }, fix: true, civetOptions: DIAL })
+
+  it "accepts dropping the parens around a sole-argument arrow", ->
+    source := "x = createMemo (=> a())\n"
+    rule := paren("test/unwrap", (src) ->
+      open := src.indexOf("(=>")
+      close := src.lastIndexOf(")")
+      { start: open, end: close + 1, replacement: src.slice(open + 1, close) }
+    )
+    res := run(source, rule)
+    expect(res.fixedSource).toBe("x = createMemo => a()\n")
+    expect(res.isEquivalencePreserved).toBe(true)
+
+  it "rejects a rewrite that changes the arrow body", ->
+    source := "x = createMemo (=> a())\n"
+    rule := paren("test/change-body", (src) ->
+      open := src.indexOf("(=>")
+      { start: open, end: src.length - 1, replacement: "=> b()" }
+    )
+    res := run(source, rule)
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.isEquivalencePreserved).toBe(false)
+
+  it "stays narrow: a wrapper that is not the sole argument is outside the delta", ->
+    // `g => a(), 5` happens to emit equivalent JS, but nothing proves that in
+    // general, so the delta does not license it and the engine refuses the fix.
+    source := "g (=> a()), 5\n"
+    rule := paren("test/not-sole-arg", (src) ->
+      { start: src.indexOf("(=>"), end: src.indexOf("), 5") + 1, replacement: "=> a()" }
+    )
+    res := run(source, rule)
+    expect(res.fixedSource).toBeUndefined()
+    expect(res.isEquivalencePreserved).toBe(false)
+    expect(res.diagnostics.some((d) -> d.ruleId is "compiler-equivalence-mismatch")).toBe(true)

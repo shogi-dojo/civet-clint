@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { parseSyntax, compileForOutput } from "./compiler.civet"
 import type { CivetCompiler, CompileDial, CompileOptions, Diagnostic, EquivalenceReference, Fix, LintResult, OutputDelta, ResolvedConfig, RuleContext, RuleLevel, RuleOptions, RulePhase, Severity } from "./types.civet"
-import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle } from "./utils.civet"
+import { createLineColumnIndex, applyEdits, detectLineEnding, atomicWriteFile, intersectsRange, normalizeSemicolonStyle, normalizeBlockBraceStyle, normalizeTrailingCommaStyle, normalizeWhitespaceStyle, normalizeInequalityStyle, normalizeNewCallStyle, normalizePlaceholderParamStyle, normalizeRangeLoopStyle, normalizeFunctionDeclarationStyle, normalizeExistentialParenStyle, normalizeArrowParenStyle } from "./utils.civet"
 
 // Re-exported so the public API is unchanged by the move to utils.civet.
 export { normalizeSemicolonStyle }
@@ -50,6 +50,7 @@ export const DELTA_NORMALIZER_ORDER: OutputDelta[] = [
   "range-loop"
   "function-declaration"
   "existential-paren-style"
+  "arrow-paren-style"
   "whitespace-style"
 ]
 
@@ -400,6 +401,8 @@ export function lintSource(source: string, options: LintOptions = {}): LintResul
         normalizeFunctionDeclarationStyle(code)
       when "existential-paren-style"
         normalizeExistentialParenStyle(code)
+      when "arrow-paren-style"
+        normalizeArrowParenStyle(code)
       else
         code
 

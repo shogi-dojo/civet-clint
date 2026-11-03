@@ -456,6 +456,129 @@ export function normalizeExistentialParenStyle(code: string): string
     (_whole, before, space, operand, operator) -> `${before}${space}${operand} ${operator} null`
   )
 
+// Index just past the string, template, comment or regex literal that starts at
+// `i`, or -1 when `i` does not start one. Template substitutions are scanned for
+// their own matching brace so a backtick inside `${…}` does not end the literal.
+function jsLiteralEnd(code: string, i: number): number
+  ch := code[i]
+  if ch is '"' or ch is "'"
+    var j = i + 1
+    while j < code.length
+      if code[j] is "\\"
+        j += 2
+        continue
+      return j + 1 if code[j] is ch or code[j] is "\n"
+      j++
+    return code.length
+  if ch is "`"
+    var j = i + 1
+    while j < code.length
+      if code[j] is "\\"
+        j += 2
+        continue
+      return j + 1 if code[j] is "`"
+      if code[j] is "$" and code[j + 1] is "{"
+        close := jsMatchClose(code, j + 1)
+        return code.length if close < 0
+        j = close + 1
+        continue
+      j++
+    return code.length
+  if ch is "/"
+    if code[i + 1] is "/"
+      end := code.indexOf("\n", i + 2)
+      return end < 0 ? code.length : end
+    if code[i + 1] is "*"
+      end := code.indexOf("*/", i + 2)
+      return end < 0 ? code.length : end + 2
+    // A slash starts a regex only where an operand is expected.
+    var back = i - 1
+    back-- while back >= 0 and /\s/.test(code[back])
+    return -1 unless back < 0 or "(,=:[!&|?{};+-*%<>~^".includes(code[back])
+    var j = i + 1
+    var inClass = false
+    while j < code.length and code[j] isnt "\n"
+      if code[j] is "\\"
+        j += 2
+        continue
+      if code[j] is "[" then inClass = true
+      else if code[j] is "]" then inClass = false
+      else if code[j] is "/" and not inClass then return j + 1
+      j++
+  -1
+
+// Index of the bracket that closes the one at `open`, or -1 when unbalanced.
+function jsMatchClose(code: string, open: number): number
+  var depth = 0
+  var i = open
+  while i < code.length
+    end := jsLiteralEnd(code, i)
+    if end >= 0
+      i = end
+      continue
+    ch := code[i]
+    if ch is "(" or ch is "[" or ch is "{"
+      depth++
+    else if ch is ")" or ch is "]" or ch is "}"
+      depth--
+      return i if depth is 0
+    i++
+  -1
+
+function hasTopLevelComma(code: string): boolean
+  var depth = 0
+  var i = 0
+  while i < code.length
+    end := jsLiteralEnd(code, i)
+    if end >= 0
+      i = end
+      continue
+    ch := code[i]
+    if ch is "(" or ch is "[" or ch is "{"
+      depth++
+    else if ch is ")" or ch is "]" or ch is "}"
+      depth--
+    else if ch is "," and depth is 0
+      return true
+    i++
+  false
+
+// `f => x` emits `f(() => x)`, but `f (=> x)` -- an implicit call whose argument is a
+// parenthesised arrow -- emits `f((() => x))`. The extra pair is a parenthesised
+// expression wrapped around a complete arrow, so dropping it cannot change what the
+// program does. This delta licenses exactly that and nothing else: the wrapper must
+// open at `((`, hold a single arrow (no top-level comma, or `((() => a, b))` would
+// become two arguments), and be closed directly by the outer paren. Anything it
+// cannot prove is left alone, which makes the engine's comparison fail rather than
+// pass.
+const ARROW_HEAD = /^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/
+
+export function normalizeArrowParenStyle(code: string): string
+  var out = ""
+  var i = 0
+  while i < code.length
+    lit := jsLiteralEnd(code, i)
+    if lit >= 0
+      out += code.slice(i, lit)
+      i = lit
+      continue
+    if code[i] is "("
+      var wrapper = i + 1
+      wrapper++ while wrapper < code.length and /\s/.test(code[wrapper])
+      if code[wrapper] is "("
+        wrapperEnd := jsMatchClose(code, wrapper)
+        if wrapperEnd > 0
+          var outerEnd = wrapperEnd + 1
+          outerEnd++ while outerEnd < code.length and /\s/.test(code[outerEnd])
+          inner := code.slice(wrapper + 1, wrapperEnd).trim()
+          if code[outerEnd] is ")" and ARROW_HEAD.test(inner) and not hasTopLevelComma(inner)
+            out += "(" + normalizeArrowParenStyle(inner) + ")"
+            i = outerEnd + 1
+            continue
+    out += code[i]
+    i++
+  out
+
 // Canonicalize the equivalent JS spellings `a !== b` and `!(a === b)`. This
 // bounded delta is used only by prefer-unless for a whole-condition rewrite.
 export function normalizeInequalityStyle(code: string): string
