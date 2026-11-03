@@ -221,6 +221,7 @@ export interface ExceptionEntry {
   file: string;
   rule: string;
   line?: number;
+  text?: string;
   reason?: string;
 }
 export interface ClintConfig {
@@ -272,7 +273,7 @@ export interface LintOptions {
   config?: ResolvedConfig;
   registry?: RuleRegistry;
   compiler?: CivetCompiler;
-  exceptions?: { rule: string; line?: number; index: number }[];
+  exceptions?: { rule: string; line?: number; text?: string; index: number }[];
   civetOptions?: Record<string, any>;
   compileOptions?: Record<string, any>;
   fix?: boolean;

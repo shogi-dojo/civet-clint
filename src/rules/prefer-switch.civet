@@ -1,5 +1,5 @@
 import type { Rule, RuleContext, Fix } from "../types.civet"
-import { applyEdits, intersectsRange } from "../utils.civet"
+import { applyEdits } from "../utils.civet"
 
 const IDENT = "[A-Za-z_$][A-Za-z0-9_$]*"
 // What a `switch` pattern can compare against without ambiguity. A bare identifier

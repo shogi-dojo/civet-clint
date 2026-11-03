@@ -24,6 +24,11 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
 - `extraZeroArgCallees` entries are now validated when the config loads: each must be
   an identifier, optionally with `*` wildcards. Entries that were silently ignored
   before (`"foo.bar"`, `""`) now fail the load.
+- `style/prefer-switch` now has an autofix, and no longer reports a chain that mixes
+  in another test (`else if count > 3`, `and current.id`): a `switch` cannot hold it.
+  Run `clint --write` and review the new `switch` blocks.
+- `style/prefer-range-loop` writes `_` for a counter the body never reads
+  (`for _ of [0..<n]`), where it used to keep the name.
 
 ### Added
 
@@ -41,6 +46,18 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
 - **Patterns in `extraZeroArgCallees`.** `*` matches any run of identifier characters:
   `"use*"`, `"render*"`, `"create*"`. A pattern needs a literal character, so a bare `*`
   is rejected rather than silently disabling the rule.
+- **`style/prefer-switch` autofix.** `if d is 3 then 'A' else if d is 2 …` becomes
+  `switch d` with `3 then 'A'` cases, for statement-position chains in indentation
+  form whose every branch compares one identifier to a literal. A chain assigned to a
+  variable, compared against an identifier, braced, or with a comment between its
+  branches is reported without a fix. Verified by the `block-brace-style` and
+  `whitespace-style` deltas, which now also accept `else { x }` against `else x`.
+- **Exceptions anchored by text.** An entry in `clint.exceptions.json` may carry
+  `"text": "…"`, a fragment of the reported line. It keeps matching after an edit
+  above shifts the line, which a `"line"` number does not.
+- **One-line method bodies.** `style/prefer-implicit-return` rewrites
+  `get data() { return x }` to `get data() x` (it used to leave `{ x }`, which
+  re-parses as an object literal).
 - **Plugin API.** `meta.validateOptions(options)` lets a rule reject its options at
   config load, and `context.activeRuleOptions(ruleId)` returns another active rule's
   resolved options.
@@ -53,6 +70,22 @@ A new rule is on in the `civet-idiomatic` preset, so expect new findings there.
 
 ### Fixed
 
+- `style/prefer-property-shorthand` judged a property by any braced span around it,
+  so a brace-free argument list nested in a braced object (`setSlot seat: r.seat,
+  slot: r.slot`) was reported, its fix was rejected, and the rejection took every
+  other fix in the file down with it. It now looks at the property's own object.
+- `style/prefer-implicit-return` no longer offers to drop a class constructor's
+  `return ctx` (`new` yields what the constructor returns) or the `return` of
+  `return if c then a else b` (a ternary that would compile as an if/else). Both
+  fixes were always rejected, and each rejection poisoned the file's other fixes.
+- The `whitespace-style` delta read the backticks of a regex literal
+  (`/```shot\n[^`]*```/g`) as a template literal and inverted its string state for the
+  rest of the file, so `style/prefer-unclosed-jsx` and
+  `style/prefer-property-group-shorthand` fixes were rejected for layout-only
+  differences. Regex literals are now copied verbatim.
+- The `new-call-style` delta unwrapped `f(new X) : y` as if `(new X)` were a grouping,
+  which rejected `new Foo(new Bar())` inside a conditional and every
+  `style/prefer-new-shorthand` fix in the same file.
 - README: the `extraZeroArgCallees` option was listed under
   `style/prefer-terse-imports`; the rule count, release status and equivalence-engine
   description were out of date.
