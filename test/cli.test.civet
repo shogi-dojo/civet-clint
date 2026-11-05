@@ -36,6 +36,20 @@ describe "CLI Suite", ->
     expect(opts.targets).toEqual(["src", "test/file.civet"])
     expect(opts.errors).toEqual([])
 
+  it "reads the first argument as a command", ->
+    expect(parseCliArgs(["fix", "src"])).toMatchObject({ write: true, targets: ["src"], errors: [] })
+    expect(parseCliArgs(["convert", "src"])).toMatchObject({ rewrite: true, targets: ["src"] })
+    expect(parseCliArgs(["config", "a.civet"])).toMatchObject({ printConfig: true, targets: ["a.civet"] })
+    expect(parseCliArgs(["check", "-j", "1"])).toMatchObject({ check: true, concurrency: 1, targets: [] })
+    // The legacy flags, spelled as commands.
+    expect(parseCliArgs(["write"]).write).toBe(true)
+    expect(parseCliArgs(["rewrite"]).rewrite).toBe(true)
+
+  it "treats a command word after the first argument as a target", ->
+    expect(parseCliArgs(["src", "fix"])).toMatchObject({ targets: ["src", "fix"] })
+    expect(parseCliArgs(["src", "fix"]).write).toBeUndefined()
+    expect(parseCliArgs(["--", "fix"])).toMatchObject({ targets: ["fix"] })
+
   it "rejects unknown options and missing targets", async ->
     expect(await runCli(["--wat"])).toBe(2)
     expect(await runCli(["/definitely/not/a/civet/path"])).toBe(2)
@@ -74,7 +88,7 @@ describe "CLI Suite", ->
     expect(codeCheck).toBe(1)
 
     // Write mode
-    codeWrite := await runCli(["--write", testFile])
+    codeWrite := await runCli(["fix", testFile])
     expect(codeWrite).toBe(0)
 
     updatedContent := await fs.readFile(testFile, "utf8")
@@ -85,6 +99,20 @@ describe "CLI Suite", ->
     expect(codeCheckAfter).toBe(0)
 
     await fs.rm(tmpDir, { recursive: true, force: true })
+
+  it "fixes to a fixed point in one run, even across phases", async ->
+    // Dropping the parens (`idiom`) needs the `;` gone first (`cleanup`), so a
+    // single pass left them for a second `clint fix`.
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-converge-"))
+    try
+      testFile := path.join(tmpDir, "a.civet")
+      configPath := path.join(tmpDir, "clint.config.json")
+      await fs.writeFile(configPath, JSON.stringify({ preset: "civet-idiomatic" }))
+      await fs.writeFile(testFile, "console.log(this.name, xs.length);\n")
+      expect(await runCli(["fix", "-j", "1", "-c", configPath, testFile])).toBe(0)
+      expect(await fs.readFile(testFile, "utf8")).toBe("console.log @name, xs#\n")
+    finally
+      await fs.rm(tmpDir, { recursive: true, force: true })
 
   it "prints the resolved config and skips incompatible rules with --print-config", async ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-printcfg-"))

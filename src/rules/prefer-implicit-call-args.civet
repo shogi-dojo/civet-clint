@@ -12,8 +12,9 @@ import { intersectsRange } from "../utils.civet"
 // Emitted JS is byte-identical, so no OutputDelta is involved.
 //
 // Guards:
-// 1. The call is the entire statement (only indentation or preceding implicit
-//    call names before it on the line; only whitespace/comment after).
+// 1. The call is the entire statement (only indentation, an assignment target, or
+//    preceding implicit call names before it on the line; only whitespace/comment
+//    after).
 // 2. No top-level binary operator, `?`, or `:` appears between the parens.
 // 3. The argument list is non-empty.
 function hasTopLevelBinaryOpOrTernary(inner: string): boolean
@@ -78,7 +79,9 @@ function hasTopLevelBinaryOpOrTernary(inner: string): boolean
     i++
   false
 
-LINE_PREFIX := /^[ \t]*(?:(?!(?:if|for|while|unless|until|return|throw|yield|await|export|import|case|default|let|const|var)\b)[A-Za-z_$][\w$.]*\s+)*$/
+// An assignment target may come first: `user := users.find (u) => u.id is id`.
+// A bare `=` needs spaces, so a JSX attribute (`onChange=f('x')`) never matches.
+LINE_PREFIX := /^[ \t]*(?:[A-Za-z_$][\w$.]*(?:\s*(?::=|\.=)\s*|\s+=\s+))?(?:(?!(?:if|for|while|unless|until|return|throw|yield|await|export|import|case|default|let|const|var)\b)[A-Za-z_$][\w$.]*\s+)*$/
 
 export const preferImplicitCallArgsRule: Rule = {
   id: "style/prefer-implicit-call-args"
@@ -136,6 +139,9 @@ export const preferImplicitCallArgsRule: Rule = {
       // Single-line only. A wrapped argument list already closes on its own line.
       return if source.slice(openSpan.start, closeSpan.end).includes("\n")
 
+      // A JSX attribute value ends at the first space, so its call keeps its parens.
+      return if tree.hasAncestorType(node, "JSXAttribute")
+
       // The call must be the entire statement.
       nodeSpan := tree.range(node)
       return unless nodeSpan?
@@ -147,6 +153,11 @@ export const preferImplicitCallArgsRule: Rule = {
       lineEnd := source.indexOf("\n", closeSpan.start)
       trailing := source.slice(closeSpan.start + 1, lineEnd < 0 ? source.length : lineEnd)
       return unless /^[)\s]*(?:\/\/|#.*)?$/.test(trailing)
+      // A deeper-indented next line continues the statement (`x = f(a)\n  or g()`),
+      // and without its parens the call would take that line as its argument.
+      if lineEnd >= 0
+        nextLine := /\n([ \t]*)\S/.exec(source.slice(lineEnd))
+        return if nextLine? and nextLine[1].length > /^[ \t]*/.exec(source.slice(lineStart))![0].length
 
       // An argument starting with an operator, a paren, or whitespace becomes
       // ambiguous once the call parens are gone (`f(-1)` -> `f -1` is a subtraction).
@@ -154,11 +165,20 @@ export const preferImplicitCallArgsRule: Rule = {
       // value, and here it opens the argument.
       inner := source.slice(openSpan.end, closeSpan.start)
       return if inner.trim().length is 0
+
+      // An arrow as the LAST argument owns the rest of the line either way, so its
+      // parameter parens and its body are no ambiguity: `f((u) => u.id is id)` ->
+      // `f (u) => u.id is id`. Only the arguments before it are checked.
+      args := (last?.args ?? []).filter (a: any) -> a?.type is "Argument"
+      lastArg := args[args.length - 1]
+      arrowSpan := lastArg?.expression?.type is "ArrowFunction" ? tree.range(lastArg.expression) : undefined
+      leading := arrowSpan? ? source.slice(openSpan.end, arrowSpan.start).replace(/,\s*$/, "") : inner
+
       isJsxArgument := /^<[A-Za-z]/.test(inner.trimStart())
-      return if not isJsxArgument and /^[\s(+\-*/%<>=!&|^~?:,]/.test(inner)
+      return if not isJsxArgument and not (arrowSpan? and leading.length is 0) and /^[\s(+\-*/%<>=!&|^~?:,]/.test(inner)
 
       // Guard 2: No top-level binary operator, `?`, or `:` appears between the parens.
-      return if hasTopLevelBinaryOpOrTernary(inner)
+      return if leading.length > 0 and hasTopLevelBinaryOpOrTernary(leading)
 
       ctx.report({
         ruleId: "style/prefer-implicit-call-args"

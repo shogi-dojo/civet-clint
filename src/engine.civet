@@ -835,7 +835,7 @@ export function lintPhased(source: string, options: LintOptions = {}): LintResul
   var everFixed = false
   var equivalencePreserved = true
   used := new Set<number>()
-  rejections: Diagnostic[] := []
+  var rejections: Diagnostic[] = []
 
   // Each phase runs to a fixed point. Nested constructs produce overlapping fixes --
   // de-bracing `describe => { it => { ... } }` yields an outer edit whose span
@@ -843,26 +843,36 @@ export function lintPhased(source: string, options: LintOptions = {}): LintResul
   // overlapping pair. Re-running the phase against the rewritten text exposes the
   // next layer, so nesting is peeled one level per iteration instead of being
   // silently left half-repaired.
+  //
+  // A later phase can unlock an earlier one -- `f(a);` loses its `;` in `cleanup`,
+  // and only then may `idiom` drop the parens -- so the sequence repeats until a
+  // whole round changes nothing.
   MAX_PASSES := 10
-  for phase of phases
-    // An empty phase cannot change the source or findings. Avoid its redundant
-    // parse and baseline emit, especially for house presets with no declarations.
-    continue unless activePhases.has(phase)
-    var pass = 0
-    while pass < MAX_PASSES
-      pass++
-      res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
-      used.add(index) for index of res.usedExceptions or []
-      equivalencePreserved = false unless res.isEquivalencePreserved
-      totalApplied += res.appliedFixesCount
-      unless res.fixedSource? and res.fixedSource isnt current
-        // The phase has settled. A fix the gate rejected on this last pass will be
-        // rejected again next run, so it must reach the report: the final re-lint
-        // below runs without `fix` and would show it as merely "fixable".
-        rejections.push(...res.diagnostics.filter (d) -> d.ruleId.startsWith("compiler-equivalence-"))
-        break
-      current = res.fixedSource
-      everFixed = true
+  MAX_ROUNDS := 3
+  for round of [1..MAX_ROUNDS]
+    roundStart := current
+    // Only the last round's rejections stand; an earlier round's may since be fixed.
+    rejections = []
+    for phase of phases
+      // An empty phase cannot change the source or findings. Avoid its redundant
+      // parse and baseline emit, especially for house presets with no declarations.
+      continue unless activePhases.has(phase)
+      var pass = 0
+      while pass < MAX_PASSES
+        pass++
+        res := lintSource(current, { ...options, phases: undefined, phase, filename: options.filename })
+        used.add(index) for index of res.usedExceptions or []
+        equivalencePreserved = false unless res.isEquivalencePreserved
+        totalApplied += res.appliedFixesCount
+        unless res.fixedSource? and res.fixedSource isnt current
+          // The phase has settled. A fix the gate rejected on this last pass will be
+          // rejected again next run, so it must reach the report: the final re-lint
+          // below runs without `fix` and would show it as merely "fixable".
+          rejections.push(...res.diagnostics.filter (d) -> d.ruleId.startsWith("compiler-equivalence-"))
+          break
+        current = res.fixedSource
+        everFixed = true
+    break if current is roundStart
 
   // Re-run the final state so reported diagnostics match the text the user ends up
   // with, rather than whatever the last phase happened to look at.
@@ -889,10 +899,10 @@ export async function lintFile(filePath: string, options: LintOptions = {}): Pro
   baseConfig := options.config or loadConfig(undefined, path.dirname(filePath), registry)
   fileConfig := resolveConfigForFile(baseConfig, filePath, process.cwd(), registry)
 
-  hasOrderedRules := Object.keys(fileConfig.rules).some (ruleId) ->
-    phase := registry.get(ruleId)?.meta.phase
-    fileConfig.rules[ruleId] isnt "off" and (phase is "repair" or phase is "declaration")
-  shouldRunPhases := options.phases? or (options.fix and hasOrderedRules)
+  // A fix run goes to a fixed point: one pass leaves whatever overlapped another
+  // rule's edit (`f(a);` loses its `;` before its parens), and `clint fix` should
+  // not end by reporting "fixable" problems a second run would fix.
+  shouldRunPhases := options.phases? or options.fix
   absolutePath := path.resolve(filePath)
   exceptions := (fileConfig.exceptions or [])
     .map((entry, index) -> { entry.rule, entry.line, entry.text, index, entry.file })

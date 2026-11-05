@@ -19,7 +19,7 @@ describe "CLI --rewrite Suite", ->
     civetFile := path.join(tmpDir, "example.civet")
     await fs.writeFile(tsFile, "const a: number = 1;\n", "utf8")
 
-    code := await runCli(["--rewrite", tsFile])
+    code := await runCli(["convert", tsFile])
     expect(code).toBe(0)
 
     // Original file must be gone, .civet must exist

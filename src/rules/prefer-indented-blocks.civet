@@ -296,7 +296,13 @@ export const preferIndentedBlocksRule: Rule = {
       headEnd := lineStarts[i] + line.length
       // Preserve a leading `}` from a `} else {` closer — the previous block's
       // own edit removes it, so drop it here.
-      headEdit := { start: headStart, end: headEnd, replacement: newHead }
+      // Edit only from where the new head departs from the old one. A declaration or
+      // arrow head just loses its ` {`; replacing the whole line would overlap a
+      // sibling rule's edit on the same line (`const total =` -> `total :=`), and the
+      // engine would keep that edit and this block's closer without its opener.
+      var keep = 0
+      keep++ while keep < newHead.length and newHead[keep] is trimmed[keep]
+      headEdit := { start: headStart + keep, end: headEnd, replacement: newHead.slice(keep) }
 
       closeTrimmed := lines[closeLine].trim()
       closeRest := closeTrimmed.replace(/^\}\s*/, "")
