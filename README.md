@@ -22,7 +22,7 @@ if (!user.roles.includes("admin")) {
 
 ```civet
 // after `clint fix`
-user := users.find((u) => u.id is id)
+user := users.find (u) => u.id is id
 unless "admin" is in user.roles
   console.log @name, user.name#
 ```

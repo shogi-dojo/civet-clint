@@ -5,7 +5,7 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-11-05
 
 ### Added
 
@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`style/prefer-implicit-call-args` covers two more shapes.** An arrow passed as
+  the last argument (`xs.find((x) => x.ok)` -> `xs.find (x) => x.ok`) and a call
+  assigned to a binding (`user := find(id)` -> `user := find id`). JSX attribute
+  values and statements that continue on the next line keep their parens. Expect new
+  findings; `clint fix` clears them. Across dojo-platform this was part of 2,346
+  fixes in one run, with no fix rejected.
 - **One `clint fix` run now converges.** It repeats every phase until nothing
   changes, so a fix one rule unlocks for another (`f(a);` loses its `;`, then its
   parens) no longer needs a second run. On a 441-file app the first run fixes 6 more

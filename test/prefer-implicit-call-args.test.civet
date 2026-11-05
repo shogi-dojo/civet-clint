@@ -20,6 +20,25 @@ unchanged := (input: string) ->
   expect(res.fixedSource ?? input).toBe(input)
 
 describe "style/prefer-implicit-call-args", ->
+  it "drops the parens around an arrow passed as the last argument", ->
+    expect(lint("xs.forEach((x) => g x)\n").fixedSource).toBe("xs.forEach (x) => g x\n")
+    expect(lint("f(a, (x) => x + 1)\n").fixedSource).toBe("f a, (x) => x + 1\n")
+
+  it "drops the parens on a call assigned to a binding", ->
+    expect(lint("user := users.find((u) => u.id is id)\n").fixedSource).toBe("user := users.find (u) => u.id is id\n")
+    expect(lint("y = f(a)\n").fixedSource).toBe("y = f a\n")
+
+  it "keeps the parens when an arrow is not the last argument, or the operand is ambiguous", ->
+    unchanged("f((x) => x, b)\n")
+    unchanged("x = g(a + b)\n")
+    unchanged("x = f(-1)\n")
+
+  it "keeps the parens in a JSX attribute or before a continuation line", ->
+    unchanged("<input onChange=setField('type') />\n")
+    // The last line ends the statement, so its call is fair game.
+    expect(lint("shown = xs.some((p) => p.ok)\n  or ys.some((p) => p.ok)\n").fixedSource)
+      .toBe("shown = xs.some((p) => p.ok)\n  or ys.some (p) => p.ok\n")
+
   it "drops the parens on a matcher with a string argument", ->
     res := lint("expect(a).toBe('x')\n")
     expect(res.fixedSource).toBe("expect(a).toBe 'x'\n")
