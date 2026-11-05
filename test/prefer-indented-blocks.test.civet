@@ -115,8 +115,21 @@ describe "style/prefer-indented-blocks", ->
   it "keeps a trailing semicolon that prevents an implicit return", ->
     source := "f = () => {\n  x = 1\n  sideEffect();\n}\n"
     result := fix(source)
-    expect(result.fixedSource).toBe("f = () =>\n  x = 1\n  sideEffect();\n")
+    // The default preset's concise-arrow fix lands in the same pass.
+    expect(result.fixedSource).toBe("f = =>\n  x = 1\n  sideEffect();\n")
     expect(compileSource(result.fixedSource!, DIAL)).toBe(compileSource(source, DIAL))
+
+  it "edits only the brace of an arrow head, so a fix earlier on the line still lands", ->
+    // The head edit used to span the whole line. It overlapped the walrus fix, the
+    // engine kept that one and this block's closer, and the file stopped parsing.
+    source := "const total = items.filter((x) => {\n  return x\n});\n"
+    result := lintSource(source, {
+      rules: { [RULE]: "error", "style/prefer-walrus-declarations": "error" }
+      fix: true
+      civetOptions: DIAL
+    })
+    expect(result.diagnostics.filter (d) -> d.ruleId.startsWith("compiler-equivalence")).toEqual([])
+    expect(result.fixedSource).toBe("total := items.filter((x) =>\n  return x\n);\n")
 
   it "de-braces multiple arrows in one equivalence batch", ->
     source := "first = (arg) => {\n  const x = arg\n  return x\n}\nsecond = (arg) => {\n  const y = arg\n  return y\n}\n"
