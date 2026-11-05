@@ -100,6 +100,20 @@ describe "CLI Suite", ->
 
     await fs.rm(tmpDir, { recursive: true, force: true })
 
+  it "fixes to a fixed point in one run, even across phases", async ->
+    // Dropping the parens (`idiom`) needs the `;` gone first (`cleanup`), so a
+    // single pass left them for a second `clint fix`.
+    tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-converge-"))
+    try
+      testFile := path.join(tmpDir, "a.civet")
+      configPath := path.join(tmpDir, "clint.config.json")
+      await fs.writeFile(configPath, JSON.stringify({ preset: "civet-idiomatic" }))
+      await fs.writeFile(testFile, "console.log(this.name, xs.length);\n")
+      expect(await runCli(["fix", "-j", "1", "-c", configPath, testFile])).toBe(0)
+      expect(await fs.readFile(testFile, "utf8")).toBe("console.log @name, xs#\n")
+    finally
+      await fs.rm(tmpDir, { recursive: true, force: true })
+
   it "prints the resolved config and skips incompatible rules with --print-config", async ->
     tmpDir := await fs.mkdtemp(path.join(os.tmpdir(), "civet-clint-printcfg-"))
     await fs.writeFile(path.join(tmpDir, "civet.json"), JSON.stringify({
