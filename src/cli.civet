@@ -104,6 +104,9 @@ function parseConcurrency(raw: string | undefined, flag: string, errors: string[
     return undefined
   parsed
 
+// `write` and `rewrite` spell the legacy `--write` / `--rewrite` flags as commands.
+const COMMANDS = ["check", "fix", "write", "convert", "rewrite", "config"]
+
 export function parseCliArgs(args: string[]): CliOptions
   options: CliOptions := {
     targets: []
@@ -111,7 +114,24 @@ export function parseCliArgs(args: string[]): CliOptions
     errors: []
   }
 
-  for let i = 0; i < args.length; i++
+  // `clint fix src` and `clint --write src` are the same run: the subcommand is the
+  // spelling the docs teach, the flags stay for existing scripts. Only the first
+  // argument can be a command, so a directory named `fix` is still `clint -- fix`.
+  var start = 0
+  command := args[0]
+  if command? and command is in COMMANDS
+    start = 1
+    switch command
+      "fix", "write"
+        options.write = true
+      "convert", "rewrite"
+        options.rewrite = true
+      "config"
+        options.printConfig = true
+      "check"
+        options.check = true
+
+  for let i = start; i < args.length; i++
     arg := args[i]
     if arg is "--"
       options.targets.push(...args.slice(i + 1))
@@ -205,10 +225,10 @@ export function formatTextReport(
   if totalProblems > 0
     lines.push(`✖ ${totalProblems} problem${totalProblems is 1 ? "" : "s"} (${totalErrors} error${totalErrors is 1 ? "" : "s"}, ${totalWarnings} warning${totalWarnings is 1 ? "" : "s"})`)
     if totalFixable > 0 and not isWriteMode
-      lines.push(`  ${totalFixable} fixable with --write`)
+      lines.push(`  ${totalFixable} fixable with \`clint fix\``)
 
   if isRewriteMode and totalRewritten > 0
-    lines.push(`✔ Rewrote ${totalRewritten} file${totalRewritten is 1 ? "" : "s"}`)
+    lines.push(`✔ Converted ${totalRewritten} file${totalRewritten is 1 ? "" : "s"}`)
 
   if isWriteMode and not isRewriteMode and totalFixed > 0
     lines.push(`✔ Fixed ${totalFixed} problem${totalFixed is 1 ? "" : "s"}`)
@@ -352,25 +372,27 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
 
   if options.help
     console.log(`
-clint: Compiler-backed style linter & autofixer for Civet
+clint: compiler-checked style linter and autofixer for Civet
 
 Usage:
-  clint [options] [files/directories...]
+  clint [command] [options] [files/directories...]
+
+Commands:
+  check                Report problems (the default)
+  fix                  Apply the verified fixes in place
+  convert              Rename JS/TS files to .civet, repair what the rename
+                       breaks, then apply fixes
+  config [file]        Print the resolved configuration as JSON
 
 Options:
-  --check              Check files and report errors (default mode)
-  -w, --write, --fix   Automatically fix style issues in place
-  --rewrite            Rename and convert JS/TS files to Civet, then apply autofixes
-  --print-config       Print the resolved preset, compiler options, rules, and
-                       skipped/incompatible rules, then exit
-  --verbose            Print the resolved config and Civet compiler options to
-                       stderr before linting
-  -j, --concurrency <n> Number of worker threads (default: CPU count).
-                       Use 1 to lint sequentially in the main process.
-  -c, --config <path>  Path to civet-clint configuration file
+  -c, --config <path>  Path to the clint config file
   -f, --format <type>  Output format: text (default) | json
+  -j, --concurrency <n> Worker threads (default: CPU count; 1 runs in-process)
+  --verbose            Print the resolved config and compiler to stderr
   -v, --version        Print version and exit
   -h, --help           Show this help message
+
+The flags --check, --write (-w, --fix), --rewrite and --print-config still work.
 `.trim())
     return 0
 
@@ -459,7 +481,7 @@ Options:
     if options.format is "json"
       console.log(JSON.stringify({ files: [], totalErrors: 0, totalWarnings: 0, totalFixed: 0, ...(isRewriteMode ? { totalRewritten: 0 } : {}) }, null, 2))
     else
-      console.log(isRewriteMode ? "No files found to rewrite." : "No .civet files found.")
+      console.log(isRewriteMode ? "No JS/TS files found to convert." : "No .civet files found.")
     return 0
 
   if options.verbose
