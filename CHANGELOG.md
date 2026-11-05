@@ -5,6 +5,36 @@ All notable changes to `civet-clint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Commands.** `clint check`, `clint fix`, `clint convert` and `clint config [file]`
+  replace the flags. `convert` is the old `--rewrite`: it renames JS/TS files to
+  `.civet` and is the only command that runs `repair` rules, so it stays separate
+  from `fix`, which never changes emitted output. `--check`, `--write`/`-w`/`--fix`,
+  `--rewrite` and `--print-config` still work, and so do `clint write` and
+  `clint rewrite`.
+
+### Changed
+
+- **One `clint fix` run now converges.** It repeats every phase until nothing
+  changes, so a fix one rule unlocks for another (`f(a);` loses its `;`, then its
+  parens) no longer needs a second run. On a 441-file app the first run fixes 6 more
+  problems; a full first fix takes about 15% longer, and settled files cost nothing
+  extra.
+- The README is now a short landing page. The detail moved to `docs/`: `cli.md`,
+  `configuration.md`, `presets.md`, `rules.md`, `migrating.md`, `how-it-works.md`,
+  `api.md`.
+
+### Fixed
+
+- `style/prefer-indented-blocks` no longer breaks a file when another fix lands on an
+  arrow's first line. Its edit spanned the whole line, so `const total = xs.filter((x)
+  => {` with `style/prefer-walrus-declarations` kept the walrus edit and this rule's
+  closing brace removal without its opener; the file stopped parsing and every fix in
+  it was rejected, on every run. It now removes just the ` {`.
+
 ## [0.8.0] - 2026-11-03
 
 ### Upgrading
