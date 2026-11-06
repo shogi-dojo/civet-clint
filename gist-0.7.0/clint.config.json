@@ -1,6 +1,0 @@
-{
-  "preset": "civet-idiomatic",
-  "rules": {
-    "style/prefer-implicit-return": "error"
-  }
-}
